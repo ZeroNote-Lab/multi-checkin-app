@@ -326,13 +326,20 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         }
         val msg = "当前位置：%.5f, %.5f\n最近地点：$nearestName（%.0f 米）".format(la, ln, nearestDist)
         val pass = if (c.locNegative) !within else within
-        val title = if (pass) "位置符合要求" else "位置不符合要求"
-        AlertDialog.Builder(ctx).setTitle(title).setMessage(
+        if (!pass) {
+            AlertDialog.Builder(ctx).setTitle("位置不符合要求").setMessage(
+                msg + if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
+                else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
+            ).setPositiveButton("知道了", null).show()
+            return
+        }
+        AlertDialog.Builder(ctx).setTitle("位置符合要求").setMessage(
             msg + if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
             else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
         ).setNegativeButton("取消", null)
-            .setPositiveButton(if (pass) "使用该位置" else "仍然继续") { _, _ -> stepSuccess() }
+            .setPositiveButton("使用该位置") { _, _ -> stepSuccess() }
             .show()
+
     }
 
     private fun distanceMeters(la1: Double, ln1: Double, la2: Double, ln2: Double): Double {
@@ -346,20 +353,21 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private fun doSteps() {
         val c = cfg ?: return
         val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
-        val sensor = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER)
-        if (sensor == null) {
+        val stepCounter = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER)
+        val stepDetector = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_DETECTOR)
+        if (stepCounter == null && stepDetector == null) {
             AlertDialog.Builder(ctx).setTitle("步数打卡")
                 .setMessage("目标步数：${c.stepTarget} 步。\n此设备不支持计步传感器，无法完成步数打卡。")
                 .setPositiveButton("知道了", null).show()
             return
         }
-        // 今日步数基准：TYPE_STEP_COUNTER 返回开机累计值，用「当天首次打开时」的值作为基准，
-        // 跨天自动重置，之后实时显示 v - base 即为今天从基准后走的步数。
+        // 今日步数基准：TYPE_STEP_COUNTER 返回开机累计值，用「当天首次打开」的值作为基准，
+        // 跨天自动重置；若设备 STEP_COUNTER 不上报事件，则回退 STEP_DETECTOR 逐步入账（从本次打开起计）。
         val prefs = ctx.getSharedPreferences("steps_today", Context.MODE_PRIVATE)
         val today = DateUtils.today()
         var base = prefs.getLong("base", -1L)
         val baseDate = prefs.getString("baseDate", "")
-        if (baseDate != today) base = -1L // 跨天：等待首次回调重置基准
+        if (baseDate != today) base = -1L
 
         var listener: android.hardware.SensorEventListener? = null
         val tv = TextView(ctx).apply {
@@ -378,26 +386,55 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             listener?.let { sm.unregisterListener(it) }; dlg.dismiss(); stepSuccess()
         }
         var baseRef = base
+        var counterWalked: Long? = null
+        var detCount = 0
+        var useDetector = false
+        var gotEvent = false
+        val updateUi = {
+            val walked = counterWalked ?: (if (useDetector) detCount.toLong() else null)
+            if (walked == null) {
+                tv.text = "正在读取计步器…"
+            } else if (walked >= c.stepTarget) {
+                tv.text = if (useDetector) "本次打开起已走 $walked 步，达标 ✓\n点击「确认打卡」完成"
+                else "今日 $walked 步，达标 ✓\n点击「确认打卡」完成"
+                posBtn.isEnabled = true
+            } else {
+                tv.text = if (useDetector) "本次打开起已走 $walked / ${c.stepTarget} 步"
+                else "今日 $walked / ${c.stepTarget} 步"
+            }
+        }
         listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(e: android.hardware.SensorEvent) {
-                val v = e.values.firstOrNull()?.toLong() ?: return
-                if (baseRef < 0) {
-                    // 当天首次：以当前累计值作为今日基准（今天从此刻起计步）
-                    baseRef = v
-                    prefs.edit().putLong("base", v).putString("baseDate", today).apply()
+                gotEvent = true
+                when (e.sensor.type) {
+                    android.hardware.Sensor.TYPE_STEP_COUNTER -> {
+                        val v = e.values.firstOrNull()?.toLong() ?: return
+                        if (baseRef < 0) {
+                            baseRef = v
+                            prefs.edit().putLong("base", v).putString("baseDate", today).apply()
+                        }
+                        counterWalked = (v - baseRef).coerceAtLeast(0L)
+                    }
+                    android.hardware.Sensor.TYPE_STEP_DETECTOR -> {
+                        detCount++
+                        if (counterWalked == null) useDetector = true
+                    }
                 }
-                val walked = (v - baseRef).coerceAtLeast(0L)
-                if (walked >= c.stepTarget) {
-                    tv.text = "达标 ✓ 今日 $walked 步，点击「确认打卡」完成"
-                    posBtn.isEnabled = true
-                } else tv.text = "今日 $walked / ${c.stepTarget} 步"
+                updateUi()
             }
             override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
         }
-        sm.registerListener(listener!!, sensor, android.hardware.SensorManager.SENSOR_DELAY_UI)
+        try {
+            if (stepCounter != null) sm.registerListener(listener!!, stepCounter, android.hardware.SensorManager.SENSOR_DELAY_UI)
+            if (stepDetector != null) sm.registerListener(listener!!, stepDetector, android.hardware.SensorManager.SENSOR_DELAY_UI)
+        } catch (_: Exception) {
+            tv.text = "计步传感器启动失败，请重试"
+        }
+        // 10 秒无任何传感器事件：提示用户走动（部分设备需实际走步后才上报首个事件）
+        android.os.Handler(ctx.mainLooper).postDelayed({
+            if (!gotEvent) tv.text = "传感器暂无响应，请走动几步后重试"
+        }, 10000)
     }
-
-    // ---------- 倒计时 ----------
     private fun doTimer() {
         val c = cfg ?: return
         val totalSec = (c.timerMinutes * 60).coerceAtLeast(60)

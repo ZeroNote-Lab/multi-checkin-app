@@ -342,15 +342,23 @@ class CreateItemActivity : AppCompatActivity() {
                 loading.dismiss()
                 val l = best.get()
                 if (l == null) { toast("定位失败，请到空旷处重试"); return@runOnUiThread }
+                val etR = EditText(this).apply {
+                    inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    setText("200"); textSize = 14f; setPadding(24, 18, 24, 18)
+                    background = getDrawable(R.drawable.bg_input); setTextColor(0xFF1F2430.toInt())
+                }
                 android.app.AlertDialog.Builder(this)
                     .setTitle("确认作为标准位置？")
-                    .setMessage("纬度 %.6f\n经度 %.6f\n默认允许半径 200 米".format(l.latitude, l.longitude))
+                    .setMessage("纬度 %.6f\n经度 %.6f\n允许半径（米，50-5000，默认200）".format(l.latitude, l.longitude))
+                    .setView(etR)
                     .setNegativeButton("取消", null)
                     .setPositiveButton("使用该位置") { _, _ ->
-                        cfg.locPoints.add(LocatePoint("位置${cfg.locPoints.size + 1}", l.latitude, l.longitude, 200))
+                        val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
+                        cfg.locPoints.add(LocatePoint("位置${cfg.locPoints.size + 1}", l.latitude, l.longitude, r))
                         tvLocPoints?.text = "已设定 ${cfg.locPoints.size} 个标准点：\n" +
                             cfg.locPoints.joinToString("\n") { "· ${it.name} (%.5f,%.5f) 半径${it.radius}m".format(it.lat, it.lng) }
                     }.show()
+
             }
         }
     }
