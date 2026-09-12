@@ -9,6 +9,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.location.LocationListener
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
@@ -30,6 +31,7 @@ import com.zerolab.checkin.util.AudioRecorder
 import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.ImageUtil
 import java.io.File
+import java.io.FileOutputStream
 import kotlin.concurrent.thread
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -79,6 +81,9 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private val permAudio = fragment.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) doVoice() else toast("需要录音权限才能语音打卡")
     }
+    private val permSensor = fragment.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) doSteps() else toast("需要身体传感器权限才能步数打卡")
+    }
     private val takePhoto = fragment.registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         if (ok) {
             val uri = pendingPhotoUri
@@ -89,14 +94,17 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 var err: String? = null
                 try {
                     if (uri != null) {
-                        ctx.contentResolver.openInputStream(uri).use { it?.copyTo(FileOutputStreamSafe(src)) }
-                        compressed = ImageUtil.compressWebp(src, outDir)
-                        if (compressed == null) err = "压缩失败或图片为空"
+                        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            FileOutputStream(src).use { it.write(bytes) }
+                            compressed = ImageUtil.compressWebp(src, outDir)
+                            if (compressed == null) err = "压缩失败或图片为空"
+                        } else err = "照片数据为空"
                     } else err = "URI 丢失"
                 } catch (e: Exception) {
                     err = e.message
                 }
-                if (err != null) android.util.Log.e("CheckinFlow", "photo save failed: $err")
+                if (err != null) android.util.Log.e("CheckinFlow", "photo save failed: $err") else android.util.Log.i("CheckinFlow", "photo compress ok: ${compressed?.absolutePath}")
                 main.post {
                     if (compressed != null) {
                         photoPath = compressed.absolutePath
@@ -213,7 +221,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             Method.PHOTO.key -> ensure(Manifest.permission.CAMERA, permCamera) { doPhoto() }
             Method.LOCATION.key -> ensure(Manifest.permission.ACCESS_FINE_LOCATION, permLocation) { doLocation() }
             Method.VOICE.key -> ensure(Manifest.permission.RECORD_AUDIO, permAudio) { doVoice() }
-            Method.STEPS.key -> doSteps()
+            Method.STEPS.key -> ensure(Manifest.permission.BODY_SENSORS, permSensor) { doSteps() }
             Method.TIMER.key -> doTimer()
             Method.QRCODE.key -> doQr()
             Method.NFC.key -> doNfc()
@@ -330,13 +338,47 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         return 2 * r * atan2(sqrt(a), sqrt(1 - a))
     }
 
-    // ---------- 步数 ----------
+    // ---------- 步数（读取真实计步传感器，达标后才可确认） ----------
     private fun doSteps() {
         val c = cfg ?: return
-        AlertDialog.Builder(ctx).setTitle("步数打卡")
-            .setMessage("目标步数：${c.stepTarget} 步。\n请携带手机活动，计步达标后点「已达标」完成。\n（模拟器无计步传感器时可直接确认）")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("已达标") { _, _ -> stepSuccess() }.show()
+        val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
+        val sensor = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER)
+        if (sensor == null) {
+            AlertDialog.Builder(ctx).setTitle("步数打卡")
+                .setMessage("目标步数：${c.stepTarget} 步。\n此设备不支持计步传感器，无法完成步数打卡。")
+                .setPositiveButton("知道了", null).show()
+            return
+        }
+        var listener: android.hardware.SensorEventListener? = null
+        val tv = TextView(ctx).apply {
+            textSize = 18f; gravity = Gravity.CENTER; setPadding(0, 36, 0, 36)
+            text = "当前 0 / ${c.stepTarget} 步"
+        }
+        val dlg = AlertDialog.Builder(ctx).setTitle("步数打卡（目标 ${c.stepTarget} 步）").setView(tv)
+            .setCancelable(false)
+            .setNegativeButton("取消") { _, _ -> listener?.let { sm.unregisterListener(it) } }
+            .setPositiveButton("确认打卡", null)
+            .create()
+        dlg.show()
+        val posBtn = dlg.getButton(AlertDialog.BUTTON_POSITIVE)
+        posBtn.isEnabled = false
+        posBtn.setOnClickListener {
+            listener?.let { sm.unregisterListener(it) }; dlg.dismiss(); stepSuccess()
+        }
+        val startSteps = java.util.concurrent.atomic.AtomicLong(-1L)
+        listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                val v = e.values.firstOrNull()?.toLong() ?: return
+                if (startSteps.get() < 0) startSteps.set(v)
+                val walked = (v - startSteps.get()).coerceAtLeast(0L)
+                if (walked >= c.stepTarget) {
+                    tv.text = "达标 ✓ 当前 $walked 步，点击「确认打卡」完成"
+                    posBtn.isEnabled = true
+                } else tv.text = "当前 $walked / ${c.stepTarget} 步"
+            }
+            override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+        }
+        sm.registerListener(listener!!, sensor, android.hardware.SensorManager.SENSOR_DELAY_UI)
     }
 
     // ---------- 倒计时 ----------

@@ -105,7 +105,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="打卡 APP v6.0.0\n纯本地运行 · 数据不上传"
+            android:id="@+id/tv_version" android:text="打卡 APP v6.0.2"
             android:textColor="@color/text_hint"
             android:textSize="12sp" />
     </LinearLayout>

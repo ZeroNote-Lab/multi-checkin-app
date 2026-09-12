@@ -2,8 +2,14 @@ package com.zerolab.checkin.ui.create
 
 import android.Manifest
 import android.app.TimePickerDialog
+import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -11,6 +17,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
 import com.zerolab.checkin.data.entity.CheckinItem
@@ -48,6 +57,7 @@ class CreateItemActivity : AppCompatActivity() {
     private var etSteps: EditText? = null
     private var etTimer: EditText? = null
     private var tvQr: TextView? = null
+    private var ivQr: ImageView? = null
     private var tvNfc: TextView? = null
     private var etVoice: EditText? = null
 
@@ -193,7 +203,18 @@ class CreateItemActivity : AppCompatActivity() {
             }
             Method.QRCODE -> {
                 cfg.qrContent = "uuid:" + java.util.UUID.randomUUID().toString()
-                tvQr = sectionLabel("专属二维码内容（保存后可在详情查看/截图打印）：\n${cfg.qrContent}")
+                ivQr = ImageView(this).apply {
+                    val px = (220 * resources.displayMetrics.density).toInt()
+                    setImageBitmap(makeQrBitmap(cfg.qrContent))
+                    layoutParams = LinearLayout.LayoutParams(px, px).apply { gravity = Gravity.CENTER_HORIZONTAL }
+                    contentDescription = "专属二维码，长按保存到相册"
+                    setOnLongClickListener {
+                        makeQrBitmap(cfg.qrContent)?.let { saveQrToGallery(it, cfg.qrContent) }
+                        true
+                    }
+                }
+                panel.addView(ivQr)
+                tvQr = sectionLabel("长按上方二维码可保存到相册，用于打印张贴。\n专属内容：${cfg.qrContent}")
                 panel.addView(tvQr)
             }
             Method.NFC -> {
@@ -385,7 +406,8 @@ class CreateItemActivity : AppCompatActivity() {
         fillParamUi()
         tvLocPoints?.text = if (cfg.locPoints.isEmpty()) "" else
             "已设定 ${cfg.locPoints.size} 个标准点：\n" + cfg.locPoints.joinToString("\n") { p -> "· ${p.name} (%.5f,%.5f) 半径${p.radius}m".format(p.lat, p.lng) }
-        tvQr?.text = "专属二维码内容：\n${cfg.qrContent}"
+        tvQr?.text = "长按上方二维码可保存到相册，用于打印张贴。\n专属内容：${cfg.qrContent}"
+        ivQr?.setImageBitmap(makeQrBitmap(cfg.qrContent))
         tvNfc?.text = if (cfg.nfcTagId.isBlank()) "尚未绑定标签" else "已绑定标签：${cfg.nfcTagId}"
 
         // 不可修改策略：规则整体锁定（bug8：之前 LOCKED 仍可改，现在强制生效）
@@ -455,6 +477,39 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.offset.nDays = findViewById<EditText>(R.id.et_offset_n).text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 3
         cfg.offset.k = findViewById<EditText>(R.id.et_offset_k).text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 1
         cfg.offset.autoConsume = findViewById<CheckBox>(R.id.cb_offset_auto).isChecked
+    }
+
+    /** 生成二维码位图（ZXing，600x600） */
+    private fun makeQrBitmap(content: String): Bitmap? = try {
+        val size = 600
+        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size,
+            mapOf(EncodeHintType.MARGIN to 1))
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        for (x in 0 until size) for (y in 0 until size)
+            bmp.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
+        bmp
+    } catch (e: Exception) { null }
+
+    /** 长按二维码保存到相册（API 29+ 走 MediaStore 无权限；API 24-28 走 insertImage） */
+    private fun saveQrToGallery(bmp: Bitmap, content: String) {
+        try {
+            val name = "checkin_qr_${System.currentTimeMillis()}.png"
+            if (Build.VERSION.SDK_INT >= 29) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/打卡APP")
+                }
+                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    contentResolver.openOutputStream(uri)?.use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    toast("二维码已保存到相册（Pictures/打卡APP）")
+                } else toast("保存失败")
+            } else {
+                val url = MediaStore.Images.Media.insertImage(contentResolver, bmp, name, content)
+                toast(if (url != null) "二维码已保存到相册" else "保存失败")
+            }
+        } catch (e: Exception) { toast("保存失败：${e.message}") }
     }
 
     private fun save() {

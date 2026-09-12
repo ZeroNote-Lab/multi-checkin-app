@@ -1,7 +1,10 @@
 package com.zerolab.checkin.ui.quick
 
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.media.MediaPlayer
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -21,6 +24,7 @@ import com.zerolab.checkin.ui.create.CreateItemActivity
 import com.zerolab.checkin.ui.detail.ItemDetailActivity
 import com.zerolab.checkin.ui.flow.CheckinFlow
 import com.zerolab.checkin.util.DateUtils
+import java.io.File
 import java.util.Calendar
 
 class QuickCheckinFragment : Fragment() {
@@ -35,6 +39,13 @@ class QuickCheckinFragment : Fragment() {
     private lateinit var calendar: MonthCalendarView
     private lateinit var btnCheckin: Button
     private lateinit var flow: CheckinFlow
+    private var mediaPlayer: MediaPlayer? = null
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        try { mediaPlayer?.release() } catch (_: Exception) {}
+        mediaPlayer = null
+    }
 
     override fun onCreateView(inflater: LayoutInflater, c: ViewGroup?, b: Bundle?): View {
         root = inflater.inflate(R.layout.fragment_quick, c, false)
@@ -200,12 +211,70 @@ class QuickCheckinFragment : Fragment() {
             }
             var line = "$prefix ${fmt.format(java.util.Date(r.checkinTime))}"
             if (!r.textContent.isNullOrBlank()) line += "\n   文字：${r.textContent}"
-            if (!r.photoPath.isNullOrBlank()) line += "\n   📷 照片：${if (java.io.File(r.photoPath).exists()) "已保存（点击可查看）" else "文件已丢失"}"
-            if (!r.voicePath.isNullOrBlank()) line += "\n   🎤 语音：${if (java.io.File(r.voicePath).exists()) "已录制" else "文件已丢失"}"
+            if (!r.photoPath.isNullOrBlank()) line += "\n   📷 照片：${if (File(r.photoPath).exists()) "已保存（点击缩略图查看大图）" else "文件已丢失"}"
+            if (!r.voicePath.isNullOrBlank()) line += "\n   🎤 语音：${if (File(r.voicePath).exists()) "已录制（点击播放）" else "文件已丢失"}"
             if (r.latitude != null && r.longitude != null) line += "\n   📍 位置：(%.5f, %.5f)".format(r.latitude, r.longitude)
             line
         }
         body.text = lines.joinToString("\n")
+        // 媒体预览：缩略图 + 语音播放按钮
+        val mediaBox = root.findViewById<LinearLayout>(R.id.detail_media_box)
+        mediaBox.removeAllViews()
+        recs.forEach { r ->
+            if (r.photoPath?.isNotBlank() == true && File(r.photoPath).exists()) mediaBox.addView(thumbView(File(r.photoPath)))
+            if (r.voicePath?.isNotBlank() == true && File(r.voicePath).exists()) mediaBox.addView(voicePlayButton(r.voicePath!!))
+        }
+    }
+
+    /** 图片缩略图，点击弹大图 */
+    private fun thumbView(f: File): View {
+        val iv = ImageView(requireContext())
+        val bmp = try { BitmapFactory.decodeFile(f.absolutePath) } catch (_: Exception) { null }
+        iv.setImageBitmap(bmp)
+        iv.scaleType = ImageView.ScaleType.CENTER_CROP
+        val px = (92 * resources.displayMetrics.density).toInt()
+        iv.layoutParams = LinearLayout.LayoutParams(px, px).apply { marginEnd = 8; gravity = Gravity.CENTER_VERTICAL }
+        iv.setOnClickListener {
+            if (bmp == null) { Toast.makeText(requireContext(), "图片无法解码", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            val big = ImageView(requireContext()).apply {
+                setImageBitmap(bmp); adjustViewBounds = true
+                maxHeight = (860 * resources.displayMetrics.density).toInt(); maxWidth = (700 * resources.displayMetrics.density).toInt()
+            }
+            AlertDialog.Builder(requireContext()).setTitle("打卡照片").setView(big)
+                .setPositiveButton("关闭", null).show()
+        }
+        return iv
+    }
+
+    /** 语音播放/停止按钮 */
+    private fun voicePlayButton(path: String): View {
+        val btn = Button(requireContext())
+        btn.text = "🎤 播放"; btn.textSize = 12f
+        btn.setPadding(28, 14, 28, 14)
+        btn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { marginEnd = 8; gravity = Gravity.CENTER_VERTICAL }
+        btn.setOnClickListener {
+            val mp = mediaPlayer
+            if (mp != null && mp.isPlaying) {
+                try { mp.stop(); mp.release() } catch (_: Exception) {}
+                mediaPlayer = null; btn.text = "🎤 播放"
+            } else {
+                try {
+                    val np = MediaPlayer()
+                    np.setDataSource(path)
+                    np.prepare()
+                    np.setOnCompletionListener {
+                        try { it.release() } catch (_: Exception) {}
+                        if (mediaPlayer === it) mediaPlayer = null
+                        btn.text = "🎤 播放"
+                    }
+                    np.start()
+                    mediaPlayer = np
+                    btn.text = "⏹ 停止"
+                } catch (e: Exception) { Toast.makeText(requireContext(), "语音播放失败：${e.message}", Toast.LENGTH_SHORT).show() }
+            }
+        }
+        return btn
     }
 
     /** 过去缺卡日且有抵消机会时，提供手动补签 */
