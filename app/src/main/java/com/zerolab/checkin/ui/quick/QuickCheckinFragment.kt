@@ -24,6 +24,7 @@ import com.zerolab.checkin.ui.create.CreateItemActivity
 import com.zerolab.checkin.ui.detail.ItemDetailActivity
 import com.zerolab.checkin.ui.flow.CheckinFlow
 import com.zerolab.checkin.util.DateUtils
+import com.zerolab.checkin.util.formatLatLng
 import java.io.File
 import java.util.Calendar
 
@@ -31,6 +32,7 @@ class QuickCheckinFragment : Fragment() {
 
     private val repo get() = (requireActivity().application as CheckinApp).repository
     private var item: CheckinItem? = null
+    private var overrideItemId: Long? = null
     private var cfg: ItemConfig = ItemConfig()
     private var showYear = 0; private var showMonth = 0
     private lateinit var root: View
@@ -50,6 +52,16 @@ class QuickCheckinFragment : Fragment() {
     /** MainActivity 读到 NFC 标签后转发给打卡流程 */
     fun notifyNfc(tagId: String) {
         if (::flow.isInitialized) flow.nfcDetected(tagId)
+    }
+
+    companion object {
+        fun newInstance(itemId: Long): QuickCheckinFragment =
+            QuickCheckinFragment().apply { arguments = Bundle().apply { putLong("override_id", itemId) } }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        overrideItemId = arguments?.getLong("override_id", -1L)?.takeIf { it > 0 }
     }
 
     override fun onCreateView(inflater: LayoutInflater, c: ViewGroup?, b: Bundle?): View {
@@ -89,7 +101,7 @@ class QuickCheckinFragment : Fragment() {
         if (showYear == 0 || showYear != now.get(Calendar.YEAR) || showMonth != now.get(Calendar.MONTH)) {
             showYear = now.get(Calendar.YEAR); showMonth = now.get(Calendar.MONTH)
         }
-        val q = repo.getQuickItem()
+        val q = overrideItemId?.let { repo.getItem(it) } ?: repo.getQuickItem()
         item = q
         if (q == null) {
             contentView.visibility = View.GONE; emptyView.visibility = View.VISIBLE; return
@@ -220,7 +232,7 @@ class QuickCheckinFragment : Fragment() {
             if (!r.textContent.isNullOrBlank()) line += "\n   文字：${r.textContent}"
             if (!r.photoPath.isNullOrBlank()) line += "\n   📷 照片：${if (File(r.photoPath).exists()) "已保存（点击缩略图查看大图）" else "文件已丢失"}"
             if (!r.voicePath.isNullOrBlank()) line += "\n   🎤 语音：${if (File(r.voicePath).exists()) "已录制（点击播放）" else "文件已丢失"}"
-            if (r.latitude != null && r.longitude != null) line += "\n   📍 位置：(%.5f, %.5f)".format(r.latitude, r.longitude)
+            if (r.latitude != null && r.longitude != null) line += "\n   📍 位置：${formatLatLng(r.latitude!!, r.longitude!!)}"
             line
         }
         body.text = lines.joinToString("\n")

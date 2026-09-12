@@ -112,8 +112,9 @@ class ItemListFragment : Fragment() {
             h.itemView.alpha = if (item.isActive == 0) 0.5f else 1f
 
             h.itemView.setOnClickListener {
-                // 点卡片直达该打卡项的打卡页（设为快捷并切到中间页）
-                (activity as? com.zerolab.checkin.ui.main.MainActivity)?.openCheckin(item.id)
+                // 点卡片进入该打卡项的打卡页（不修改快捷配置；快捷仅通过长按菜单手动切换）
+                startActivity(Intent(requireContext(), com.zerolab.checkin.ui.detail.ItemCheckinActivity::class.java)
+                    .putExtra(com.zerolab.checkin.ui.detail.ItemCheckinActivity.EXTRA_ID, item.id))
             }
             h.itemView.setOnLongClickListener { showMenu(item); true }
         }

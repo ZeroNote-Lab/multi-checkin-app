@@ -33,6 +33,7 @@ import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.ui.scan.ScanActivity
 import com.zerolab.checkin.util.AudioRecorder
 import com.zerolab.checkin.util.DateUtils
+import com.zerolab.checkin.util.formatLatLng
 import com.zerolab.checkin.util.ImageUtil
 import java.io.File
 import java.io.FileOutputStream
@@ -297,18 +298,20 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             } catch (_: Exception) { emptyList() }
             for (p in providers) { try { val l = lm.getLastKnownLocation(p) ?: continue; if (loc.get() == null || l.accuracy < (loc.get()?.accuracy ?: 9999f)) loc.set(l) } catch (_: Exception) {} }
             val latch = java.util.concurrent.CountDownLatch(1)
+            // 始终等待一次新的定位回调（优先实时位置，避免间隔短时误用缓存旧点）
+            val fresh = java.util.concurrent.atomic.AtomicReference<Location?>(null)
             val listener = object : LocationListener {
-                override fun onLocationChanged(l: Location) { loc.set(l); latch.countDown() }
+                override fun onLocationChanged(l: Location) { fresh.set(l); latch.countDown() }
                 override fun onProviderEnabled(p: String) {}
                 override fun onProviderDisabled(p: String) {}
                 @Deprecated("deprecated") override fun onStatusChanged(p: String?, s: Int, b: android.os.Bundle?) {}
             }
             for (p in providers) { try { lm.requestLocationUpdates(p, 0L, 0f, listener, main.looper) } catch (_: Exception) {} }
-            if (loc.get() == null) latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+            latch.await(12, java.util.concurrent.TimeUnit.SECONDS)
             try { lm.removeUpdates(listener) } catch (_: Exception) {}
             main.post {
                 loading.dismiss()
-                val l = loc.get()
+                val l = fresh.get() ?: loc.get()
                 if (l == null) { toast("无法获取定位，请到空旷处重试"); return@post }
                 lat = l.latitude; lng = l.longitude
                 judgeLocation(c, l.latitude, l.longitude)
@@ -324,7 +327,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             if (d < nearestDist) { nearestDist = d; nearestName = p.name }
             if (d <= p.radius) within = true
         }
-        val msg = "当前位置：%.5f, %.5f\n最近地点：$nearestName（%.0f 米）".format(la, ln, nearestDist)
+        val msg = "当前位置：${formatLatLng(la, ln)}\n最近地点：$nearestName（%.0f 米）".format(nearestDist)
         val pass = if (c.locNegative) !within else within
         if (!pass) {
             AlertDialog.Builder(ctx).setTitle("位置不符合要求").setMessage(
@@ -370,9 +373,10 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         if (baseDate != today) base = -1L
 
         var listener: android.hardware.SensorEventListener? = null
+        val sensorNames = listOfNotNull(stepCounter?.let { "计步器" }, stepDetector?.let { "步数检测器" }).joinToString(" + ")
         val tv = TextView(ctx).apply {
             textSize = 18f; gravity = Gravity.CENTER; setPadding(0, 36, 0, 36)
-            text = "正在读取计步器…"
+            text = "已连接：$sensorNames\n正在等待计步数据…\n（静止时无数据，请走动几步）"
         }
         val dlg = AlertDialog.Builder(ctx).setTitle("步数打卡（目标 ${c.stepTarget} 步）").setView(tv)
             .setCancelable(false)
@@ -425,15 +429,17 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
         }
         try {
-            if (stepCounter != null) sm.registerListener(listener!!, stepCounter, android.hardware.SensorManager.SENSOR_DELAY_UI)
-            if (stepDetector != null) sm.registerListener(listener!!, stepDetector, android.hardware.SensorManager.SENSOR_DELAY_UI)
+            if (stepCounter != null) sm.registerListener(listener!!, stepCounter, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, main)
+            if (stepDetector != null) sm.registerListener(listener!!, stepDetector, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, main)
+        } catch (e: SecurityException) {
+            tv.text = "未授予身体传感器权限，无法读取步数"
         } catch (_: Exception) {
             tv.text = "计步传感器启动失败，请重试"
         }
-        // 10 秒无任何传感器事件：提示用户走动（部分设备需实际走步后才上报首个事件）
+        // 5 秒无任何传感器事件：提示用户走动（部分设备需实际走步后才上报首个事件）
         android.os.Handler(ctx.mainLooper).postDelayed({
-            if (!gotEvent) tv.text = "传感器暂无响应，请走动几步后重试"
-        }, 10000)
+            if (!gotEvent) tv.text = "尚无计步数据，请走动几步后再看\n（此设备静止时不统计步数，走动即开始计数）"
+        }, 5000)
     }
     private fun doTimer() {
         val c = cfg ?: return

@@ -13,6 +13,7 @@ import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
 import com.zerolab.checkin.ui.create.CreateItemActivity
 import com.zerolab.checkin.util.DateUtils
+import com.zerolab.checkin.util.formatLatLng
 import kotlin.concurrent.thread
 
 class ItemDetailActivity : AppCompatActivity() {
@@ -45,7 +46,7 @@ class ItemDetailActivity : AppCompatActivity() {
         if (cfg.textMinWords > 0 && Method.TEXT.key in cfg.methods) sb.appendLine("文字最低字数：${cfg.textMinWords}")
         if (Method.LOCATION.key in cfg.methods) {
             sb.appendLine("位置负打卡：${if (cfg.locNegative) "是（离开范围有效）" else "否（范围内有效）"}")
-            cfg.locPoints.forEach { sb.appendLine("  · ${it.name} (%.5f,%.5f) 半径${it.radius}m".format(it.lat, it.lng)) }
+            cfg.locPoints.forEach { sb.appendLine("  · ${it.name} ${formatLatLng(it.lat, it.lng)} 半径${it.radius}m") }
         }
         if (Method.STEPS.key in cfg.methods) sb.appendLine("目标步数：${cfg.stepTarget}")
         if (Method.TIMER.key in cfg.methods) sb.appendLine("倒计时：${cfg.timerMinutes} 分钟")

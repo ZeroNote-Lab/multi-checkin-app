@@ -29,6 +29,7 @@ import com.zerolab.checkin.engine.LocatePoint
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
 import com.zerolab.checkin.util.DateUtils
+import com.zerolab.checkin.util.formatLatLng
 import android.annotation.SuppressLint
 import android.location.Location
 import android.location.LocationManager
@@ -349,14 +350,14 @@ class CreateItemActivity : AppCompatActivity() {
                 }
                 android.app.AlertDialog.Builder(this)
                     .setTitle("确认作为标准位置？")
-                    .setMessage("纬度 %.6f\n经度 %.6f\n允许半径（米，50-5000，默认200）".format(l.latitude, l.longitude))
+                    .setMessage("位置：${formatLatLng(l.latitude, l.longitude)}\n允许半径（米，50-5000，默认200）")
                     .setView(etR)
                     .setNegativeButton("取消", null)
                     .setPositiveButton("使用该位置") { _, _ ->
                         val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
                         cfg.locPoints.add(LocatePoint("位置${cfg.locPoints.size + 1}", l.latitude, l.longitude, r))
                         tvLocPoints?.text = "已设定 ${cfg.locPoints.size} 个标准点：\n" +
-                            cfg.locPoints.joinToString("\n") { "· ${it.name} (%.5f,%.5f) 半径${it.radius}m".format(it.lat, it.lng) }
+                            cfg.locPoints.joinToString("\n") { "· ${it.name} ${formatLatLng(it.lat, it.lng)} 半径${it.radius}m" }
                     }.show()
 
             }
@@ -414,7 +415,7 @@ class CreateItemActivity : AppCompatActivity() {
         }
         fillParamUi()
         tvLocPoints?.text = if (cfg.locPoints.isEmpty()) "" else
-            "已设定 ${cfg.locPoints.size} 个标准点：\n" + cfg.locPoints.joinToString("\n") { p -> "· ${p.name} (%.5f,%.5f) 半径${p.radius}m".format(p.lat, p.lng) }
+            "已设定 ${cfg.locPoints.size} 个标准点：\n" + cfg.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
         tvQr?.text = "长按上方二维码可保存到相册，用于打印张贴。\n专属内容：${cfg.qrContent}"
         ivQr?.setImageBitmap(makeQrBitmap(cfg.qrContent))
         tvNfc?.text = if (cfg.nfcTagId.isBlank()) "尚未绑定标签" else "已绑定标签：${cfg.nfcTagId}"

@@ -79,12 +79,6 @@ class MainActivity : AppCompatActivity() {
         switchTo(R.id.nav_item_list)
     }
 
-    /** 管理页点卡片：设为当前快捷项并直达打卡页 */
-    fun openCheckin(itemId: Long) {
-        (application as CheckinApp).repository.setQuick(itemId)
-        switchTo(R.id.nav_quick)
-    }
-
     // ---------- NFC 前台分发（打卡时读取标签） ----------
     override fun onResume() {
         super.onResume()

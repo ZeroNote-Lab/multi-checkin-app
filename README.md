@@ -2,7 +2,7 @@
 
 一款**纯本地运行**的多类型打卡 Android 应用，强调自制力工具属性。所有数据存储在设备本地，不上传、不同步、不申请网络权限。支持多种打卡方式自由组合、负打卡（状态反转）规则、双时间分界自定义负打卡、连续打卡抵消机制，并可将全部数据导出为 JSON 供 PC 端解析。
 
-> 目标平台：Android 7.0+（API 24） · 语言：Kotlin
+> 当前版本：**v6.0.1**（versionCode 61） · 目标平台：Android 7.0+（API 24） · 语言：Kotlin
 
 ---
 
@@ -247,6 +247,16 @@ gradle assembleDebug
 # Release
 gradle assembleRelease
 ```
+
+> 本项目未内置 Gradle Wrapper，需使用本机 Gradle 8.5 执行；建议开源后补充 `gradlew`。
+
+### ⚠️ 签名说明（开源前必读）
+
+- Release 构建当前引用本地 keystore（`app/build.gradle` 中 `signingConfigs.zerolab`，密钥文件在仓库外，已被 `.gitignore` 排除），**clone 后直接构建 release 会因缺少 keystore 失败**。
+- 开源发布前请：
+  1. 生成自己的签名密钥（`keytool -genkeypair ...`）；
+  2. 将 `app/build.gradle` 中的 `storePassword` / `keyPassword` 改为环境变量读取（如 `System.getenv("KEYSTORE_PASSWORD")`），**不要把密码明文提交到仓库**；
+  3. 或直接删除 `signingConfigs`，改用 Android Studio 默认的 debug 签名进行调试构建。
 
 ### 安装
 

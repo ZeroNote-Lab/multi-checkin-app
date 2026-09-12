@@ -1,0 +1,43 @@
+package com.zerolab.checkin.ui.detail
+
+import android.content.Intent
+import android.os.Bundle
+import android.widget.ImageButton
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import com.zerolab.checkin.CheckinApp
+import com.zerolab.checkin.R
+import com.zerolab.checkin.ui.quick.QuickCheckinFragment
+
+/**
+ * 打卡操作页：从打卡选择页点击卡片进入。
+ * 展示该打卡项的日历与打卡操作（与快捷打卡页同一套界面），但【不会】修改快捷打卡配置。
+ * 右上角 ⋮ 进入编辑/详情页。
+ */
+class ItemCheckinActivity : AppCompatActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_item_checkin)
+        val id = intent.getLongExtra(EXTRA_ID, -1L)
+        val repo = (application as CheckinApp).repository
+        val item = repo.getItem(id)
+        if (item == null) { finish(); return }
+
+        findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.tv_title).text = item.name
+        findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
+            startActivity(Intent(this, ItemDetailActivity::class.java).putExtra(ItemDetailActivity.EXTRA_ID, id))
+        }
+
+        if (savedInstanceState == null) {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.frag_container, QuickCheckinFragment.newInstance(id))
+                .commit()
+        }
+    }
+
+    companion object {
+        const val EXTRA_ID = "item_id"
+    }
+}
