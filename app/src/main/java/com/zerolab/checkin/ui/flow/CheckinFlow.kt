@@ -2,13 +2,16 @@ package com.zerolab.checkin.ui.flow
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
 import android.location.LocationListener
 import android.media.MediaPlayer
+import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -27,6 +30,7 @@ import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.engine.CheckinResult
 import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.Method
+import com.zerolab.checkin.ui.scan.ScanActivity
 import com.zerolab.checkin.util.AudioRecorder
 import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.ImageUtil
@@ -338,7 +342,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         return 2 * r * atan2(sqrt(a), sqrt(1 - a))
     }
 
-    // ---------- 步数（读取真实计步传感器，达标后才可确认） ----------
+    // ---------- 步数（读取真实计步传感器，显示今日步数，达标后才可确认） ----------
     private fun doSteps() {
         val c = cfg ?: return
         val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
@@ -349,10 +353,18 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 .setPositiveButton("知道了", null).show()
             return
         }
+        // 今日步数基准：TYPE_STEP_COUNTER 返回开机累计值，用「当天首次打开时」的值作为基准，
+        // 跨天自动重置，之后实时显示 v - base 即为今天从基准后走的步数。
+        val prefs = ctx.getSharedPreferences("steps_today", Context.MODE_PRIVATE)
+        val today = DateUtils.today()
+        var base = prefs.getLong("base", -1L)
+        val baseDate = prefs.getString("baseDate", "")
+        if (baseDate != today) base = -1L // 跨天：等待首次回调重置基准
+
         var listener: android.hardware.SensorEventListener? = null
         val tv = TextView(ctx).apply {
             textSize = 18f; gravity = Gravity.CENTER; setPadding(0, 36, 0, 36)
-            text = "当前 0 / ${c.stepTarget} 步"
+            text = "正在读取计步器…"
         }
         val dlg = AlertDialog.Builder(ctx).setTitle("步数打卡（目标 ${c.stepTarget} 步）").setView(tv)
             .setCancelable(false)
@@ -365,16 +377,20 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         posBtn.setOnClickListener {
             listener?.let { sm.unregisterListener(it) }; dlg.dismiss(); stepSuccess()
         }
-        val startSteps = java.util.concurrent.atomic.AtomicLong(-1L)
+        var baseRef = base
         listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(e: android.hardware.SensorEvent) {
                 val v = e.values.firstOrNull()?.toLong() ?: return
-                if (startSteps.get() < 0) startSteps.set(v)
-                val walked = (v - startSteps.get()).coerceAtLeast(0L)
+                if (baseRef < 0) {
+                    // 当天首次：以当前累计值作为今日基准（今天从此刻起计步）
+                    baseRef = v
+                    prefs.edit().putLong("base", v).putString("baseDate", today).apply()
+                }
+                val walked = (v - baseRef).coerceAtLeast(0L)
                 if (walked >= c.stepTarget) {
-                    tv.text = "达标 ✓ 当前 $walked 步，点击「确认打卡」完成"
+                    tv.text = "达标 ✓ 今日 $walked 步，点击「确认打卡」完成"
                     posBtn.isEnabled = true
-                } else tv.text = "当前 $walked / ${c.stepTarget} 步"
+                } else tv.text = "今日 $walked / ${c.stepTarget} 步"
             }
             override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
         }
@@ -410,24 +426,68 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         main.post(runnable)
     }
 
-    // ---------- 扫码（稳定模拟匹配） ----------
+    // ---------- 扫码（真实相机扫码，匹配才打卡） ----------
+    private val scanLauncher =
+        fragment.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+            if (res.resultCode == Activity.RESULT_OK) {
+                toast("扫码匹配成功")
+                stepSuccess()
+            } else {
+                toast("已取消扫码，未打卡")
+            }
+        }
+
     private fun doQr() {
         val c = cfg ?: return
-        AlertDialog.Builder(ctx).setTitle("扫码打卡")
-            .setMessage("请将摄像头对准创建时生成的专属二维码。\n\n预设内容：${c.qrContent.take(24)}…\n（点击下方模拟扫描成功）")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("模拟扫描") { _, _ -> toast("扫码匹配成功"); stepSuccess() }.show()
+        if (c.qrContent.isBlank()) { toast("该打卡项未生成专属二维码"); return }
+        val intent = Intent(ctx, ScanActivity::class.java).putExtra(ScanActivity.EXTRA_EXPECT, c.qrContent)
+        scanLauncher.launch(intent)
     }
 
-    // ---------- NFC（稳定模拟匹配） ----------
+    // ---------- NFC（真实读取标签，匹配才打卡） ----------
+    /** 是否正在等待 NFC 标签贴合（由 MainActivity 前台分发回调） */
+    var awaitingNfc = false
+
+    /** MainActivity.onNewIntent 读到标签后回调 */
+    fun nfcDetected(tagId: String) {
+        if (!awaitingNfc) return
+        awaitingNfc = false
+        val c = cfg ?: return
+        if (c.nfcTagId.isBlank()) { toast("该打卡项未绑定 NFC 标签"); return }
+        if (tagId.equals(c.nfcTagId, ignoreCase = true)) {
+            toast("NFC 匹配成功")
+            stepSuccess()
+        } else {
+            toast("NFC 标签不匹配（读到 ${tagId.take(12)}…）")
+        }
+    }
+
     private fun doNfc() {
         val c = cfg ?: return
-        AlertDialog.Builder(ctx).setTitle("NFC 打卡")
-            .setMessage("请将手机贴近已绑定的 NFC 标签。\n绑定标签：${c.nfcTagId.ifBlank { "（未绑定）" }}\n（点击模拟触碰成功）")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("模拟触碰") { _, _ ->
-                if (c.nfcTagId.isBlank()) toast("该打卡项未绑定 NFC 标签"); else { toast("NFC 匹配成功"); stepSuccess() }
-            }.show()
+        if (c.nfcTagId.isBlank()) { toast("该打卡项未绑定 NFC 标签"); return }
+        val nfc = NfcAdapter.getDefaultAdapter(ctx)
+        if (nfc == null) {
+            AlertDialog.Builder(ctx).setTitle("NFC 打卡")
+                .setMessage("此设备不支持 NFC，无法完成 NFC 打卡。\n\n绑定标签：${c.nfcTagId.take(16)}…")
+                .setPositiveButton("知道了", null).show()
+            return
+        }
+        if (!nfc.isEnabled) {
+            AlertDialog.Builder(ctx).setTitle("NFC 打卡")
+                .setMessage("系统 NFC 已关闭，请先在系统设置中开启 NFC 后再打卡。")
+                .setPositiveButton("知道了", null).show()
+            return
+        }
+        awaitingNfc = true
+        val dlg = AlertDialog.Builder(ctx).setTitle("NFC 打卡")
+            .setMessage("请将手机贴近已绑定的 NFC 标签。\n\n绑定标签：${c.nfcTagId.take(16)}…\n\n读取成功后会自动完成打卡")
+            .setNegativeButton("取消") { _, _ -> awaitingNfc = false }
+            .setPositiveButton("已完成", null)
+            .create()
+        dlg.show()
+        dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (awaitingNfc) toast("尚未读取到标签，请保持贴近") else dlg.dismiss()
+        }
     }
 
     // ---------- 语音 ----------

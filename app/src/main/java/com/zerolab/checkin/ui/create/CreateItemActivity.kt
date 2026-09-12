@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -60,6 +61,10 @@ class CreateItemActivity : AppCompatActivity() {
     private var ivQr: ImageView? = null
     private var tvNfc: TextView? = null
     private var etVoice: EditText? = null
+
+    // 真实 NFC 标签读取（enableReaderMode）
+    private var nfcAdapter: NfcAdapter? = null
+    private var nfcReader: NfcAdapter.ReaderCallback? = null
 
     private var dailyLimit = 1
 
@@ -219,13 +224,9 @@ class CreateItemActivity : AppCompatActivity() {
             }
             Method.NFC -> {
                 val btn = Button(this).apply {
-                    text = "📡 贴近 NFC 标签读取（模拟器可模拟绑定）"; setTextColor(0xFFFFFFFF.toInt())
+                    text = "📡 读取 NFC 标签并绑定"; setTextColor(0xFFFFFFFF.toInt())
                     background?.setTint(0xFF39C5BB.toInt())
-                    setOnClickListener {
-                        cfg.nfcTagId = "NFC-" + System.currentTimeMillis().toString(16).uppercase()
-                        tvNfc?.text = "已绑定标签：${cfg.nfcTagId}"
-                        toast("已读取并绑定（真机读取芯片 UID）")
-                    }
+                    setOnClickListener { bindNfcTag() }
                 }
                 panel.addView(btn)
                 tvNfc = sectionLabel("尚未绑定标签"); panel.addView(tvNfc)
@@ -555,6 +556,40 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+
+    // ---------- 真实 NFC 标签读取绑定 ----------
+    private fun bindNfcTag() {
+        val nfc = NfcAdapter.getDefaultAdapter(this)
+        if (nfc == null) {
+            toast("此设备不支持 NFC，无法绑定标签")
+            return
+        }
+        if (!nfc.isEnabled) {
+            toast("系统 NFC 已关闭，请先在系统设置中开启")
+            return
+        }
+        nfcAdapter = nfc
+        tvNfc?.text = "请将 NFC 标签贴近手机背面…"
+        nfcReader = NfcAdapter.ReaderCallback { tag ->
+            runOnUiThread {
+                val id = tag.id.joinToString("") { "%02X".format(it) }
+                cfg.nfcTagId = id
+                tvNfc?.text = "已绑定标签：$id"
+                toast("已读取 NFC 标签并绑定")
+            }
+        }
+        nfc.enableReaderMode(
+            this, nfcReader!!,
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
+                NfcAdapter.FLAG_READER_NFC_F or NfcAdapter.FLAG_READER_NFC_V,
+            null
+        )
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try { nfcAdapter?.disableReaderMode(this) } catch (_: Exception) {}
+    }
 
     companion object { const val EXTRA_ID = "extra_item_id" }
 }

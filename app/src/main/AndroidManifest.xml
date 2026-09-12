@@ -38,6 +38,7 @@
         <activity android:name=".ui.create.CreateItemActivity" android:exported="false" />
         <activity android:name=".ui.detail.ItemDetailActivity" android:exported="false" />
         <activity android:name=".ui.settings.ExportActivity" android:exported="false" />
+        <activity android:name=".ui.scan.ScanActivity" android:exported="false" android:screenOrientation="portrait" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

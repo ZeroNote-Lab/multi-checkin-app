@@ -47,6 +47,11 @@ class QuickCheckinFragment : Fragment() {
         mediaPlayer = null
     }
 
+    /** MainActivity 读到 NFC 标签后转发给打卡流程 */
+    fun notifyNfc(tagId: String) {
+        if (::flow.isInitialized) flow.nfcDetected(tagId)
+    }
+
     override fun onCreateView(inflater: LayoutInflater, c: ViewGroup?, b: Bundle?): View {
         root = inflater.inflate(R.layout.fragment_quick, c, false)
         return root
@@ -191,6 +196,8 @@ class QuickCheckinFragment : Fragment() {
         val title = root.findViewById<TextView>(R.id.tv_detail_title)
         val body = root.findViewById<TextView>(R.id.tv_detail_body)
         title.text = "$date  共 ${recs.size} 条记录"
+        // 先清空媒体区，防止空记录时残留上一日期的缩略图/语音按钮（会把打卡按钮挤出屏幕）
+        root.findViewById<LinearLayout>(R.id.detail_media_box).removeAllViews()
         if (recs.isEmpty()) {
             val neg = CheckinEngine.isNegative(cfg)
             body.text = when {

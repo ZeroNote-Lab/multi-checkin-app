@@ -133,7 +133,13 @@ class ItemListFragment : Fragment() {
             .setItems(options.toTypedArray()) { _, which ->
                 thread {
                     when (which) {
-                        0 -> repo.setQuick(if (isQuick) null else item.id)
+                        0 -> {
+                            repo.setQuick(if (isQuick) null else item.id)
+                            // 写入完成后立即通知快捷页刷新，避免切回时读到旧值（状态栏残留）
+                            activity?.runOnUiThread {
+                                (activity as? com.zerolab.checkin.ui.main.MainActivity)?.refreshQuick()
+                            }
+                        }
                         1 -> repo.setPinned(item.id, item.isPinned != 1)
                         2 -> repo.setActive(item.id, item.isActive == 0)
                         3 -> {
