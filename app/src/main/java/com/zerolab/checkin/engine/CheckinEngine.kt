@@ -1,0 +1,212 @@
+package com.zerolab.checkin.engine
+
+import com.zerolab.checkin.data.entity.CheckinItem
+import com.zerolab.checkin.data.entity.CheckinRecord
+import com.zerolab.checkin.data.entity.AutoState
+import com.zerolab.checkin.data.entity.OffsetCredit
+import com.zerolab.checkin.data.repo.CheckinRepository
+import com.zerolab.checkin.util.DateUtils
+
+/** 日历某天的展示状态 */
+enum class DayState { SUCCESS, FAIL, UNCHECKED, FUTURE, OFFSET }
+
+data class DayInfo(
+    val date: String,
+    val state: DayState,
+    val count: Int,            // 当日记录条数
+    val isAuto: Boolean,
+    val records: List<CheckinRecord>
+)
+
+sealed class CheckinResult {
+    data class Ok(val date: String, val status: String, val recordId: Long) : CheckinResult()
+    data class Blocked(val reason: String) : CheckinResult()   // 次数已满 / 时段不允许
+}
+
+object CheckinEngine {
+
+    // ---------- 配置快捷取值 ----------
+    fun cfg(item: CheckinItem) = ItemConfig.parse(item.configJson)
+
+    /** 该方式集合是否为负打卡语义（普通负打卡 或 双时间自定义负打卡） */
+    fun isNegative(c: ItemConfig) = c.negative || c.customNeg
+
+    // ---------- 单日状态 ----------
+    fun dayInfo(item: CheckinItem, date: String, records: List<CheckinRecord>): DayInfo {
+        val c = cfg(item)
+        val today = DateUtils.today()
+        val neg = isNegative(c)
+        val auto = records.any { it.isAuto == 1 }
+        val offset = records.any { it.status == "OFFSET" }
+        val created = DateUtils.dateOf(item.createdAt)
+        val methods = c.methods.filter { it != Method.AUTO.key }
+        return when {
+            // 创建日之前：不属于本打卡项，按"未到"处理（不参与状态与连续天数）
+            date < created -> DayInfo(date, DayState.FUTURE, 0, false, records)
+            date > today -> DayInfo(date, DayState.FUTURE, records.size, auto, records)
+            offset -> DayInfo(date, DayState.OFFSET, records.size, auto, records)
+            records.isNotEmpty() -> {
+                // 组合方式（多开关）：当天成功 = 所有方式都有成功记录，否则视为进行中（无底色）
+                val comboAll = methods.size > 1 && methods.all { m ->
+                    records.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }
+                }
+                val success = records.any { it.status == "SUCCESS" }
+                val st = when {
+                    !neg && methods.size > 1 -> if (comboAll) DayState.SUCCESS else DayState.UNCHECKED
+                    neg && !c.customNeg -> DayState.FAIL            // 普通负打卡：有操作=破戒失败
+                    c.customNeg -> if (records.any { it.status == "FAIL" }) DayState.FAIL else DayState.SUCCESS
+                    success -> DayState.SUCCESS
+                    else -> DayState.FAIL
+                }
+                DayInfo(date, st, records.size, auto, records)
+            }
+            date == today -> DayInfo(date, DayState.UNCHECKED, 0, false, records) // 今天进行中
+            else -> {
+                // 过去且无记录：正常=缺卡（无底色展示）；负打卡=无操作成功
+                DayInfo(date, if (neg) DayState.SUCCESS else DayState.FAIL, 0, false, records)
+            }
+        }
+    }
+
+    /** 某天是否算"成功"（用于连续天数） */
+    private fun dayIsSuccess(item: CheckinItem, date: String, repo: CheckinRepository): Boolean {
+        if (date < DateUtils.dateOf(item.createdAt)) return false // 创建日之前不计入连续
+        val c = cfg(item)
+        val recs = repo.recordsOfDay(item.id, date)
+        val info = dayInfo(item, date, recs)
+        if (date == DateUtils.today() && recs.isEmpty()) return false // 今天未定论不计入
+        return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
+    }
+
+    /** 连续成功天数 */
+    fun streak(item: CheckinItem, repo: CheckinRepository): Int {
+        var d = DateUtils.today()
+        // 今天未定论则从昨天起算
+        if (!dayIsSuccess(item, d, repo)) d = DateUtils.addDays(d, -1)
+        var n = 0
+        // 上限保护，最多回溯 3660 天
+        repeat(3660) {
+            if (dayIsSuccess(item, d, repo)) { n++; d = DateUtils.addDays(d, -1) } else return n
+        }
+        return n
+    }
+
+    // ---------- 执行打卡 ----------
+    fun perform(
+        item: CheckinItem,
+        repo: CheckinRepository,
+        photoPath: String? = null,
+        text: String? = null,
+        voicePath: String? = null,
+        lat: Double? = null,
+        lng: Double? = null,
+        extra: String? = null,
+        isAuto: Boolean = false
+    ): CheckinResult {
+        val c = cfg(item)
+        val now = System.currentTimeMillis()
+
+        // 归属日期与状态：自定义负打卡按双时间三段归属，其余按自然日
+        val date: String
+        val status: String
+        if (c.customNeg && !isAuto) {
+            val slot = DateUtils.customSlot(now, c.t1, c.t2)
+            date = slot.date; status = slot.status
+            // 成功时段：当天已成功则拦截，避免重复
+            if (status == "SUCCESS" && repo.recordsOfDay(item.id, date).any { it.status == "SUCCESS" }) {
+                return CheckinResult.Blocked("今天已在 ${c.t1}–${c.t2} 时段打卡成功")
+            }
+        } else {
+            date = DateUtils.dateOf(now)
+            status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
+        }
+
+        // 次数限制（正常模式，组合打卡按方式逐条记、不做条数拦截）；-1 不限
+        val interactive = c.methods.filter { it != Method.AUTO.key }
+        val already = repo.countOfDay(item.id, date)
+        if (!isNegative(c) && c.dailyLimit > 0 && already >= c.dailyLimit && !isAuto && interactive.size <= 1) {
+            return CheckinResult.Blocked("今日已完成目标次数")
+        }
+        // 负打卡模式：同一归属日重复操作直接累加记录（破戒次数），不做上限拦截
+        val rec = CheckinRecord(
+            itemId = item.id, checkinDate = date, checkinTime = now, status = status,
+            isAuto = if (isAuto) 1 else 0, photoPath = photoPath, textContent = text,
+            voicePath = voicePath, latitude = lat, longitude = lng, extraJson = extra
+        )
+        val rid = repo.insertRecord(rec)
+
+        // 正常模式成功后处理抵消发放
+        if (status == "SUCCESS") grantOffsetAfterCheckin(item, repo)
+        return CheckinResult.Ok(date, status, rid)
+    }
+
+    // ---------- 抵消机制发放 ----------
+    private fun grantOffsetAfterCheckin(item: CheckinItem, repo: CheckinRepository) {
+        val c = cfg(item)
+        val off = c.offset
+        if (!off.enabled) return
+        val today = DateUtils.today()
+        val streak = streak(item, repo)
+        when (off.mode) {
+            "A" -> {
+                // 每连续 nDays 天得 1，可累积：里程碑数 - 已发放数
+                val milestones = streak / off.nDays
+                val granted = repo.creditsOf(item.id).size
+                repeat((milestones - granted).coerceAtLeast(0)) {
+                    repo.grantCredit(OffsetCredit(itemId = item.id, mode = "A", earnedDate = today))
+                }
+            }
+            "B" -> {
+                // 每达到 nDays 连续，把可用次数补到 k（不叠加）
+                if (streak > 0 && streak % off.nDays == 0) {
+                    val avail = repo.availableCredits(item.id)
+                    repeat((off.k - avail).coerceAtLeast(0)) {
+                        repo.grantCredit(OffsetCredit(itemId = item.id, mode = "B", earnedDate = today))
+                    }
+                }
+            }
+            "C" -> {
+                val cycles = streak / off.nDays
+                val granted = repo.creditsOf(item.id).size
+                repeat((cycles * off.k - granted).coerceAtLeast(0)) {
+                    repo.grantCredit(OffsetCredit(itemId = item.id, mode = "C", earnedDate = today))
+                }
+            }
+        }
+    }
+
+    /** 自动模式：漏签时自动/手动消耗一次抵消补签；返回是否补签 */
+    fun offsetBackfill(item: CheckinItem, repo: CheckinRepository, date: String): Boolean {
+        val c = cfg(item)
+        if (!c.offset.enabled) return false
+        if (repo.availableCredits(item.id) <= 0) return false // 无可用机会，不写孤立记录
+        val rid = repo.insertRecord(
+            CheckinRecord(itemId = item.id, checkinDate = date, checkinTime = System.currentTimeMillis(),
+                status = "OFFSET", isAuto = 0)
+        )
+        return repo.consumeOne(item.id, date, rid)
+    }
+
+    // ---------- 自动打卡（前台触发） ----------
+    /** 返回本次新自动完成的 item 名称列表（用于提示） */
+    fun tryAutoAll(repo: CheckinRepository): List<String> {
+        val done = mutableListOf<String>()
+        repo.getItems().filter { it.isActive == 1 }.forEach { item ->
+            val c = cfg(item)
+            if (Method.AUTO.key !in c.methods) return@forEach
+            val today = DateUtils.today()
+            val st = repo.autoState(item.id)
+            if (st != null && st.lastAutoDate == today) return@forEach
+            val already = repo.recordsOfDay(item.id, today)
+            if (already.any { it.isAuto == 1 }) {
+                repo.saveAutoState(AutoState(item.id, today, System.currentTimeMillis())); return@forEach
+            }
+            val r = perform(item, repo, isAuto = true)
+            if (r is CheckinResult.Ok) {
+                repo.saveAutoState(AutoState(item.id, today, System.currentTimeMillis()))
+                done.add(item.name)
+            }
+        }
+        return done
+    }
+}

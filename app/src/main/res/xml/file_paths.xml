@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="exports" path="exports/" />
+    <files-path name="photos" path="checkin_photos/" />
+    <files-path name="voices" path="checkin_voices/" />
+    <cache-path name="cache_photos" path="photos/" />
+    <cache-path name="photo_tmp" path="." />
+</paths>

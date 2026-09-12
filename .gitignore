@@ -1,0 +1,25 @@
+# Gradle 构建缓存与产物
+.gradle/
+build/
+*/build/
+
+# 本机配置（含 SDK 路径，勿上传）
+local.properties
+
+# IDE 配置
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 日志与截图
+*.log
+captures/
+
+# 签名文件（如存在密钥，绝不外传）
+*.jks
+*.keystore

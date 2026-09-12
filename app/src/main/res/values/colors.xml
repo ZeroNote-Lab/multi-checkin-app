@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 全局底色：非纯白，避免界面一片白 -->
+    <color name="bg_page">#F3F5F9</color>
+    <color name="bg_card">#FFFFFF</color>
+    <color name="divider">#E7EAF1</color>
+
+    <color name="text_primary">#1F2430</color>
+    <color name="text_secondary">#6B7280</color>
+    <color name="text_hint">#9AA1B2</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+
+    <!-- 品牌主色：初音青绿 -->
+    <color name="brand">#39C5BB</color>
+    <color name="brand_dark">#1F9C94</color>
+    <color name="brand_light">#D8F6F3</color>
+
+    <color name="success">#2FBF71</color>
+    <color name="success_bg">#DFF7E9</color>
+    <color name="fail">#EF5350</color>
+    <color name="fail_bg">#FDE4E3</color>
+    <color name="warn">#F59E0B</color>
+    <color name="info_blue">#4C8DFF</color>
+
+    <color name="nav_inactive">#9AA1B2</color>
+</resources>
