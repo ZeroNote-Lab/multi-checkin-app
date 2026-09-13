@@ -30,7 +30,7 @@ class MonthCalendarView @JvmOverloads constructor(
     private val successC = 0xFF2FBF71.toInt()
     private val failC = 0xFFEF5350.toInt()
     private val offsetC = 0xFF4C8DFF.toInt()
-    private val autoC = 0xFFF59E0B.toInt()
+    private val skipC = 0xFFF59E0B.toInt()
     private val futureText = 0xFFC4CAD6.toInt()
     private val normalText = 0xFF3A4152.toInt()
 
@@ -71,9 +71,10 @@ class MonthCalendarView @JvmOverloads constructor(
             val bg = when {
                 !inMonth -> 0
                 info == null -> if (date > DateUtils.today()) 0 else 0
-                info.state == DayState.SUCCESS -> if (info.isAuto) autoC else successC
-                info.state == DayState.FAIL -> if (negativeMode) failC else 0 // 普通缺卡不显示红色
+                info.state == DayState.SUCCESS -> successC      // 手动/自动成功统一绿色
+                info.state == DayState.FAIL -> if (date == DateUtils.today()) 0 else failC // 今天不填充（保留描边），次日缺卡红
                 info.state == DayState.OFFSET -> offsetC
+                info.state == DayState.SKIP -> skipC            // 无需打卡日：橙色
                 else -> 0
             }
             if (bg != 0) {
@@ -94,14 +95,17 @@ class MonthCalendarView @JvmOverloads constructor(
                 bg != 0 -> 0xFFFFFFFF.toInt()
                 else -> normalText
             }
-            val ty = cy - (textPaint.descent() + textPaint.ascent()) / 2 - (if ((info?.count ?: 0) > 1) rowH*0.12f else 0f)
+            val hasBottom = info != null && (info.isAuto || info.count > 1)
+            val ty = cy - (textPaint.descent() + textPaint.ascent()) / 2 - (if (hasBottom) rowH*0.12f else 0f)
             canvas.drawText(day.toString(), cx, ty, textPaint)
             textPaint.isFakeBoldText = false
-            // 多次打卡次数
-            if (info != null && info.count > 1) {
+            // 底部小标记：自动打卡 ⚡ 与多次打卡 ×n（位于日期下方同一位置）
+            if (hasBottom) {
+                val inf = info!!
                 textPaint.textSize = 9f * resources.displayMetrics.scaledDensity
-                textPaint.color = if (bg != 0) 0xFFFFFFFF.toInt() else themeColor
-                canvas.drawText("${info.count}次", cx, cy + rowH*0.26f, textPaint)
+                textPaint.color = if (bg != 0) 0xFFFFFFFF.toInt() else normalText
+                val label = (if (inf.isAuto) "⚡" else "") + (if (inf.count > 1) "${inf.count}次" else "")
+                canvas.drawText(label, cx, cy + rowH * 0.26f, textPaint)
             }
         }
     }

@@ -8,7 +8,7 @@ import com.zerolab.checkin.data.repo.CheckinRepository
 import com.zerolab.checkin.util.DateUtils
 
 /** 日历某天的展示状态 */
-enum class DayState { SUCCESS, FAIL, UNCHECKED, FUTURE, OFFSET }
+enum class DayState { SUCCESS, FAIL, UNCHECKED, FUTURE, OFFSET, SKIP }
 
 data class DayInfo(
     val date: String,
@@ -31,6 +31,31 @@ object CheckinEngine {
     /** 该方式集合是否为负打卡语义（普通负打卡 或 双时间自定义负打卡） */
     fun isNegative(c: ItemConfig) = c.negative || c.customNeg
 
+    // ---------- 打卡日期判定（v6.1.0） ----------
+    /** 某天是否属于该打卡项的需打卡日；false = 无需打卡（SKIP） */
+    fun isScheduledDay(item: CheckinItem, date: String): Boolean {
+        val c = cfg(item)
+        return when (c.scheduleMode) {
+            "WEEKDAYS" -> DateUtils.weekdayOf(date) in c.weekDays
+            "DOUBLE_REST" -> DateUtils.weekdayOf(date) <= 5           // 周一~五需打卡，周六日休息
+            "BIGSMALL" -> {
+                val dow = DateUtils.weekdayOf(date)
+                if (dow >= 6) {                                       // 周六：大周需打卡；周日：总是休息
+                    dow == 6 && isBigWeek(item, date)
+                } else true                                           // 周一~五总是需打卡
+            }
+            else -> true                                              // DAILY 每天
+        }
+    }
+
+    /** 大小周：该日期所在周是否为「大周」（大周=单休，周六需打卡） */
+    private fun isBigWeek(item: CheckinItem, date: String): Boolean {
+        val c = cfg(item)
+        val createWeek = DateUtils.weekIndex(DateUtils.dateOf(item.createdAt))
+        val diff = DateUtils.weekIndex(date) - createWeek
+        return if (c.bigSmallStart == "BIG") diff % 2L == 0L else diff % 2L != 0L
+    }
+
     // ---------- 单日状态 ----------
     fun dayInfo(item: CheckinItem, date: String, records: List<CheckinRecord>): DayInfo {
         val c = cfg(item)
@@ -45,6 +70,7 @@ object CheckinEngine {
             date < created -> DayInfo(date, DayState.FUTURE, 0, false, records)
             date > today -> DayInfo(date, DayState.FUTURE, records.size, auto, records)
             offset -> DayInfo(date, DayState.OFFSET, records.size, auto, records)
+            !isScheduledDay(item, date) -> DayInfo(date, DayState.SKIP, records.size, auto, records) // 无需打卡日
             records.isNotEmpty() -> {
                 // 组合方式（多开关）：当天成功 = 所有方式都有成功记录，否则视为进行中（无底色）
                 val comboAll = methods.size > 1 && methods.all { m ->
@@ -62,7 +88,7 @@ object CheckinEngine {
             }
             date == today -> DayInfo(date, DayState.UNCHECKED, 0, false, records) // 今天进行中
             else -> {
-                // 过去且无记录：正常=缺卡（无底色展示）；负打卡=无操作成功
+                // 过去且无记录：正常=缺卡（红色显示）；负打卡=无操作成功
                 DayInfo(date, if (neg) DayState.SUCCESS else DayState.FAIL, 0, false, records)
             }
         }
@@ -74,6 +100,7 @@ object CheckinEngine {
         val c = cfg(item)
         val recs = repo.recordsOfDay(item.id, date)
         val info = dayInfo(item, date, recs)
+        if (info.state == DayState.SKIP) return true // 无需打卡日视为成功，不中断连续
         if (date == DateUtils.today() && recs.isEmpty()) return false // 今天未定论不计入
         return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
     }
@@ -120,6 +147,9 @@ object CheckinEngine {
             date = DateUtils.dateOf(now)
             status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
         }
+
+        // 无需打卡日：不允许打卡
+        if (!isScheduledDay(item, date)) return CheckinResult.Blocked("今日无需打卡")
 
         // 次数限制（正常模式，组合打卡按方式逐条记、不做条数拦截）；-1 不限
         val interactive = c.methods.filter { it != Method.AUTO.key }
@@ -195,6 +225,7 @@ object CheckinEngine {
             val c = cfg(item)
             if (Method.AUTO.key !in c.methods) return@forEach
             val today = DateUtils.today()
+            if (!isScheduledDay(item, today)) return@forEach // 无需打卡日不自动打卡
             val st = repo.autoState(item.id)
             if (st != null && st.lastAutoDate == today) return@forEach
             val already = repo.recordsOfDay(item.id, today)

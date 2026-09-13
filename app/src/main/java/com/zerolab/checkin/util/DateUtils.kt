@@ -103,6 +103,24 @@ object DateUtils {
 
     fun dayOfMonth(date: String): Int = date.substring(8, 10).toInt()
 
+    /** 星期几：1=周一 … 7=周日 */
+    fun weekdayOf(date: String): Int {
+        val c = Calendar.getInstance()
+        c.time = dayFmt.parse(date)!!
+        val dow = c.get(Calendar.DAY_OF_WEEK) // 1=周日
+        return (dow + 5) % 7 + 1
+    }
+
+    /** 该日期所在周（周一为一周起点）的绝对周序号，自 1970-01-05（周一）起算，跨年稳定 */
+    fun weekIndex(date: String): Long {
+        val c = Calendar.getInstance()
+        c.time = dayFmt.parse(date)!!
+        val offset = (c.get(Calendar.DAY_OF_WEEK) + 5) % 7 // 距本周一的天数（周一=0）
+        c.add(Calendar.DAY_OF_YEAR, -offset)
+        val epoch = Calendar.getInstance().apply { clear(); set(1970, 0, 5) }.timeInMillis
+        return (c.timeInMillis - epoch) / 86400000L / 7
+    }
+
     /** 距某个 yyyy-MM-dd 日期过去的整天数；解析失败返回很大值 */
     fun daysSince(date: String?): Int {
         if (date.isNullOrBlank()) return Int.MAX_VALUE

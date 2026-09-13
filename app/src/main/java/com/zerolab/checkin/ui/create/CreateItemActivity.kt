@@ -69,6 +69,15 @@ class CreateItemActivity : AppCompatActivity() {
 
     private var dailyLimit = 1
 
+    // v6.1.0 打卡日期配置
+    private var scheduleMode = "DAILY"               // DAILY / WEEKDAYS / DOUBLE_REST / BIGSMALL
+    private val weekDays = linkedSetOf<Int>()        // 1=周一 … 7=周日
+    private var bigSmallStart = "BIG"                // BIG / SMALL
+    private lateinit var weekDaysPanel: LinearLayout
+    private lateinit var bigSmallPanel: LinearLayout
+    private lateinit var scheduleHint: TextView
+    private val weekDayChips = LinkedHashMap<Int, TextView>()
+
     private val locPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) fetchLocation() else toast("需要定位权限获取当前位置")
     }
@@ -84,6 +93,7 @@ class CreateItemActivity : AppCompatActivity() {
 
         buildThemeChips()
         buildMethodRows()
+        buildScheduleSection()
         bindRuleControls()
         bindOffset()
         bindPolicy()
@@ -126,10 +136,11 @@ class CreateItemActivity : AppCompatActivity() {
             val selected = t.id == selectedTheme
             val bg = GradientDrawable()
             bg.cornerRadius = 24f
-            bg.setColor(if (selected) t.primary else 0xFFEEF1F6.toInt())
+            // v6.1.0：取消主题色填充，选中态用深底浅字标识
+            bg.setColor(if (selected) 0xFF3A4152.toInt() else 0xFFEEF1F6.toInt())
             bg.setStroke(if (selected) 0 else 2, 0xFFD6DBE6.toInt())
             tv.background = bg
-            tv.setTextColor(if (selected) ThemeManager.onColor(t.primary) else 0xFF4A5160.toInt())
+            tv.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
             tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         }
     }
@@ -154,6 +165,24 @@ class CreateItemActivity : AppCompatActivity() {
             buildMethodParam(m, panel)
             card.addView(head); card.addView(panel)
             sw.setOnCheckedChangeListener { _, on ->
+                if (on && m.key == Method.STEPS.key && m.key !in cfg.methods) {
+                    // v6.1.0：步数功能开发中，新建/新开启时固定关闭并提示
+                    sw.isChecked = false
+                    panel.visibility = View.GONE
+                    cfg.methods.remove(m.key)
+                    toast("该功能还在开发 (ง •_•)ง")
+                    refreshConflicts()
+                    return@setOnCheckedChangeListener
+                }
+                if (on && m.key in Method.conflictsWith(cfg.methods)) {
+                    // 尝试开启互斥方式：拒绝切换并提示
+                    sw.isChecked = false
+                    panel.visibility = View.GONE
+                    cfg.methods.remove(m.key)
+                    toast("温馨提示：该方式与已选方式互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                    refreshConflicts()
+                    return@setOnCheckedChangeListener
+                }
                 panel.visibility = if (on) View.VISIBLE else View.GONE
                 if (on) cfg.methods.add(m.key) else cfg.methods.remove(m.key)
                 refreshConflicts()
@@ -165,6 +194,139 @@ class CreateItemActivity : AppCompatActivity() {
 
     private fun sectionLabel(text: String): TextView = TextView(this).apply {
         this.text = text; textSize = 12f; setTextColor(0xFF6B7280.toInt()); setPadding(0, 16, 0, 6)
+    }
+
+    // ---------- 打卡日期（v6.1.0 新增） ----------
+    private val scheduleModeChips = LinkedHashMap<String, TextView>()
+    private lateinit var bigChip: TextView
+    private lateinit var smallChip: TextView
+    private lateinit var bsHint: TextView
+
+    private fun scheduleChip(text: String, selected: Boolean, onClick: () -> Unit): TextView =
+        TextView(this).apply {
+            this.text = text; textSize = 13f; gravity = Gravity.CENTER
+            setPadding(24, 12, 24, 12)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.marginEnd = 10
+            layoutParams = lp
+            setOnClickListener { onClick() }
+            applyScheduleChipStyle(this, selected)
+        }
+
+    private fun applyScheduleChipStyle(tv: TextView, selected: Boolean) {
+        val bg = GradientDrawable()
+        bg.cornerRadius = 20f
+        bg.setColor(if (selected) 0xFF3A4152.toInt() else 0xFFEEF1F6.toInt())
+        tv.background = bg
+        tv.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
+        tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+    }
+
+    private fun buildScheduleSection() {
+        val container = findViewById<LinearLayout>(R.id.schedule_container)
+        // 模式选择行
+        val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val modes = listOf(
+            "DAILY" to "每天",
+            "WEEKDAYS" to "每周固定几天",
+            "DOUBLE_REST" to "双休",
+            "BIGSMALL" to "大小周"
+        )
+        modes.forEach { (mode, label) ->
+            val tv = scheduleChip(label, mode == scheduleMode) {
+                scheduleMode = mode
+                scheduleModeChips.forEach { (k, v) -> applyScheduleChipStyle(v, k == mode) }
+                renderSchedulePanels()
+            }
+            modeRow.addView(tv)
+            scheduleModeChips[mode] = tv
+        }
+        container.addView(modeRow)
+
+        scheduleHint = TextView(this).apply {
+            textSize = 12f; setTextColor(0xFF6B7280.toInt()); setPadding(0, 10, 0, 0)
+        }
+        container.addView(scheduleHint)
+
+        // 每周固定几天：7 个圆形多选（选中绿色）
+        weekDaysPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 12, 0, 2)
+            visibility = View.GONE
+        }
+        listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { idx, label ->
+            val day = idx + 1
+            val tv = TextView(this).apply {
+                text = label; textSize = 14f; gravity = Gravity.CENTER
+                val lp = LinearLayout.LayoutParams(0, (44 * resources.displayMetrics.density).toInt(), 1f)
+                lp.marginEnd = 8
+                layoutParams = lp
+                setOnClickListener {
+                    if (day in weekDays) weekDays.remove(day) else weekDays.add(day)
+                    renderWeekDayChips()
+                }
+            }
+            weekDaysPanel.addView(tv)
+            weekDayChips[day] = tv
+        }
+        container.addView(weekDaysPanel)
+        renderWeekDayChips()
+
+        // 大小周：选本周是大周还是小周（含解释）
+        bigSmallPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 12, 0, 0)
+            visibility = View.GONE
+        }
+        val bsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        bigChip = scheduleChip("大周（单休）", bigSmallStart == "BIG") {
+            bigSmallStart = "BIG"; renderBigSmallChips()
+        }
+        smallChip = scheduleChip("小周（双休）", bigSmallStart == "SMALL") {
+            bigSmallStart = "SMALL"; renderBigSmallChips()
+        }
+        bsRow.addView(bigChip); bsRow.addView(smallChip)
+        bigSmallPanel.addView(bsRow)
+        bsHint = TextView(this).apply {
+            textSize = 12f; setTextColor(0xFF6B7280.toInt()); setPadding(0, 8, 0, 0)
+        }
+        bigSmallPanel.addView(bsHint)
+        container.addView(bigSmallPanel)
+        renderBigSmallChips()
+
+        renderSchedulePanels()
+    }
+
+    private fun renderSchedulePanels() {
+        scheduleHint.text = when (scheduleMode) {
+            "WEEKDAYS" -> "仅选中的日期需要打卡，其余自动标记为「无需打卡」"
+            "DOUBLE_REST" -> "周一至周五打卡，周六、周日休息（无需打卡）"
+            "BIGSMALL" -> "大周=单休（周六也需打卡，周日休息）；小周=双休（周六、周日都休息），两种周交替"
+            else -> "每天都需要打卡"
+        }
+        weekDaysPanel.visibility = if (scheduleMode == "WEEKDAYS") View.VISIBLE else View.GONE
+        bigSmallPanel.visibility = if (scheduleMode == "BIGSMALL") View.VISIBLE else View.GONE
+    }
+
+    private fun renderWeekDayChips() {
+        weekDayChips.forEach { (day, tv) ->
+            val on = day in weekDays
+            val bg = GradientDrawable()
+            bg.shape = GradientDrawable.OVAL
+            bg.setColor(if (on) 0xFF2FBF71.toInt() else 0xFFEEF1F6.toInt())
+            tv.background = bg
+            tv.setTextColor(if (on) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
+            tv.typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        }
+    }
+
+    private fun renderBigSmallChips() {
+        applyScheduleChipStyle(bigChip, bigSmallStart == "BIG")
+        applyScheduleChipStyle(smallChip, bigSmallStart == "SMALL")
+        bsHint.text = if (bigSmallStart == "BIG")
+            "当前周为大周：周六也需打卡，仅周日休息"
+        else
+            "当前周为小周：周六、周日都休息（下周六需打卡）"
     }
 
     private fun input(default: String, number: Boolean = false): EditText = EditText(this).apply {
@@ -240,12 +402,12 @@ class CreateItemActivity : AppCompatActivity() {
         }
     }
 
-    /** 互斥置灰 */
+    /** 互斥置灰（v6.1.0：保持可点击，点击时在监听器里弹温馨提示） */
     private fun refreshConflicts() {
         val blocked = Method.conflictsWith(cfg.methods)
         rows.forEach { (key, row) ->
             val isBlocked = key in blocked
-            row.switch.isEnabled = !isBlocked
+            row.switch.isEnabled = !locked
             row.switch.alpha = if (isBlocked) 0.4f else 1f
             if (isBlocked && row.switch.isChecked) {
                 row.switch.isChecked = false // 双保险
@@ -348,10 +510,16 @@ class CreateItemActivity : AppCompatActivity() {
                     setText("200"); textSize = 14f; setPadding(24, 18, 24, 18)
                     background = getDrawable(R.drawable.bg_input); setTextColor(0xFF1F2430.toInt())
                 }
+                // v6.1.0：输入框与上方说明文字对齐，不再占满弹窗
+                val box = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(52, 4, 52, 0)
+                }
+                box.addView(etR)
                 android.app.AlertDialog.Builder(this)
                     .setTitle("确认作为标准位置？")
                     .setMessage("位置：${formatLatLng(l.latitude, l.longitude)}\n允许半径（米，50-5000，默认200）")
-                    .setView(etR)
+                    .setView(box)
                     .setNegativeButton("取消", null)
                     .setPositiveButton("使用该位置") { _, _ ->
                         val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
@@ -378,6 +546,11 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.qrContent = loaded.qrContent.ifBlank { "uuid:" + java.util.UUID.randomUUID() }
         cfg.nfcTagId = loaded.nfcTagId; cfg.voiceMaxSeconds = loaded.voiceMaxSeconds
         cfg.offset = loaded.offset
+        // v6.1.0 日期配置回显
+        scheduleMode = loaded.scheduleMode
+        weekDays.clear(); weekDays.addAll(loaded.weekDays)
+        if (weekDays.isEmpty()) weekDays.addAll(1..5) // 兜底：WEEKDAYS 模式默认周一~五
+        bigSmallStart = loaded.bigSmallStart
 
         findViewById<EditText>(R.id.et_name).setText(it.name)
         selectedTheme = it.theme
@@ -431,6 +604,11 @@ class CreateItemActivity : AppCompatActivity() {
         }
         // 自动方式核心规则锁定
         if (Method.AUTO.key in cfg.methods) lockRules("自动打卡类型创建后核心规则不可改")
+        // v6.1.0 日期区块回显
+        scheduleModeChips.forEach { (k, v) -> applyScheduleChipStyle(v, k == scheduleMode) }
+        renderSchedulePanels()
+        renderWeekDayChips()
+        renderBigSmallChips()
         renderThemeChips()
     }
 
@@ -487,6 +665,10 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.offset.nDays = findViewById<EditText>(R.id.et_offset_n).text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 3
         cfg.offset.k = findViewById<EditText>(R.id.et_offset_k).text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 1
         cfg.offset.autoConsume = findViewById<CheckBox>(R.id.cb_offset_auto).isChecked
+        // v6.1.0 日期配置收集
+        cfg.scheduleMode = scheduleMode
+        cfg.weekDays.clear(); cfg.weekDays.addAll(weekDays)
+        cfg.bigSmallStart = bigSmallStart
     }
 
     /** 生成二维码位图（ZXing，600x600） */
@@ -525,6 +707,7 @@ class CreateItemActivity : AppCompatActivity() {
     private fun save() {
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
         if (name.isBlank()) { toast("请填写打卡名称"); return }
+        if (scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
         if (cfg.methods.isEmpty()) { toast("请至少打开一种打卡方式"); return }
         if (!Method.isValid(cfg.methods)) { toast("所选方式存在互斥冲突"); return }
         if (Method.LOCATION.key in cfg.methods && cfg.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return }

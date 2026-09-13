@@ -135,15 +135,20 @@ class QuickCheckinFragment : Fragment() {
         c.set(Calendar.DAY_OF_MONTH, c.getActualMaximum(Calendar.DAY_OF_MONTH))
         val end = DateUtils.dateOf(c.timeInMillis)
         val records = repo.recordsOfMonth(it.id, start, end)
+        val byDay = records.groupBy { r -> r.checkinDate }
         val map = HashMap<String, DayInfo>()
-        records.groupBy { r -> r.checkinDate }.forEach { (d, list) ->
+        // 预填本月每一天：SKIP/FAIL/SUCCESS 等状态对无记录日期同样要渲染（橙色/红色），不能只遍历有记录的天
+        var d = start
+        while (d <= end) {
+            val list = byDay[d] ?: emptyList()
             map[d] = CheckinEngine.dayInfo(it, d, list.sortedBy { x -> x.checkinTime })
+            d = DateUtils.addDays(d, 1)
         }
         calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg)) { date -> showDayDetail(date) }
         // 图例随模式变化
         val legend = if (CheckinEngine.isNegative(cfg))
-            "✅坚持成功 ❌破戒记录 ○今天 ·未到 ↩补签 ⚡自动"
-        else "✅成功 ○今日未打卡 ·未到 ↩补签 ⚡自动"
+            "✅成功 ❌破戒 ○今天 ·未到 ↩补签 ⚡自动 🟠无需打卡"
+        else "✅成功 ○今日未打卡 ·未到 ↩补签 ⚡自动 🟠无需打卡"
         root.findViewById<TextView>(R.id.tv_legend).text = legend
     }
 
@@ -169,6 +174,11 @@ class QuickCheckinFragment : Fragment() {
         btnCheckin.isEnabled = true
         when {
             paused -> { statusView.text = "状态：已暂停"; btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn() }
+            !CheckinEngine.isScheduledDay(it, today) -> {
+                // 无需打卡日：自动完成另一种打卡（橙色标注）
+                statusView.text = "状态：今日无需打卡 ✓"
+                btnCheckin.text = "今日无需打卡"; btnCheckin.isEnabled = false; grayBtn()
+            }
             isAuto -> { statusView.text = "状态：自动打卡（前台自动完成）"; btnCheckin.text = "⚡ 自动打卡，无需操作"; btnCheckin.isEnabled = false; grayBtn() }
             cfg.customNeg -> {
                 val hasFail = todayRecs.any { it.status == "FAIL" }
@@ -207,15 +217,28 @@ class QuickCheckinFragment : Fragment() {
         val recs = repo.recordsOfDay(it.id, date)
         val title = root.findViewById<TextView>(R.id.tv_detail_title)
         val body = root.findViewById<TextView>(R.id.tv_detail_body)
-        title.text = "$date  共 ${recs.size} 条记录"
         // 先清空媒体区，防止空记录时残留上一日期的缩略图/语音按钮（会把打卡按钮挤出屏幕）
         root.findViewById<LinearLayout>(R.id.detail_media_box).removeAllViews()
+        // 无需打卡日：单独展示
+        if (!CheckinEngine.isScheduledDay(it, date)) {
+            title.text = "📅 $date   ·   无需打卡"
+            body.text = "🟠 该日无需打卡，自动视为完成，不中断连续天数"
+            return
+        }
+        // 标题带状态符号（美化备注栏）
+        val neg = CheckinEngine.isNegative(cfg)
+        val statePrefix = when {
+            recs.any { it.status == "OFFSET" } -> "↩"
+            recs.any { it.isAuto == 1 } -> "⚡"
+            recs.any { it.status == "FAIL" } -> "❌"
+            else -> "✅"
+        }
+        title.text = "$statePrefix $date  共 ${recs.size} 条记录"
         if (recs.isEmpty()) {
-            val neg = CheckinEngine.isNegative(cfg)
             body.text = when {
-                date == DateUtils.today() -> if (neg) "今天暂无操作（坚持中）" else "今天尚未打卡"
-                neg -> "已打卡（当天无操作）"
-                else -> "未打卡（缺卡）"
+                date == DateUtils.today() -> if (neg) "⏳ 今天暂无操作（坚持中）" else "⏳ 今天尚未打卡"
+                neg -> "✅ 已打卡（当天无操作）"
+                else -> "❌ 未打卡（缺卡）"
             }
             offerManualBackfill(it, date, neg)
             return

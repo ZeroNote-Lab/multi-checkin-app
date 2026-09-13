@@ -42,6 +42,11 @@ class ItemConfig {
     var voiceMaxSeconds: Int = 10
     var autoForeground: Boolean = true
 
+    // 打卡日期（v6.1.0）：DAILY=每天 / WEEKDAYS=每周固定几天 / DOUBLE_REST=双休 / BIGSMALL=大小周
+    var scheduleMode: String = "DAILY"
+    val weekDays: MutableSet<Int> = linkedSetOf()   // 1=周一 … 7=周日（WEEKDAYS 模式使用）
+    var bigSmallStart: String = "BIG"               // BIG=创建当周为大周 / SMALL=创建当周为小周
+
     var offset: OffsetCfg = OffsetCfg()
 
     fun toJson(): String {
@@ -68,6 +73,9 @@ class ItemConfig {
         o.put("nfcTagId", nfcTagId)
         o.put("voiceMaxSeconds", voiceMaxSeconds)
         o.put("autoForeground", autoForeground)
+        o.put("scheduleMode", scheduleMode)
+        o.put("weekDays", JSONArray(weekDays.toList()))
+        o.put("bigSmallStart", bigSmallStart)
         o.put("offset", JSONObject()
             .put("enabled", offset.enabled)
             .put("mode", offset.mode)
@@ -114,6 +122,12 @@ class ItemConfig {
                 c.nfcTagId = o.optString("nfcTagId", "")
                 c.voiceMaxSeconds = o.optInt("voiceMaxSeconds", 10)
                 c.autoForeground = o.optBoolean("autoForeground", true)
+                c.scheduleMode = o.optString("scheduleMode", "DAILY")
+                o.optJSONArray("weekDays")?.let { wd ->
+                    c.weekDays.clear()
+                    for (i in 0 until wd.length()) c.weekDays.add(wd.getInt(i))
+                }
+                c.bigSmallStart = o.optString("bigSmallStart", "BIG")
                 o.optJSONObject("offset")?.let { off ->
                     c.offset = OffsetCfg(
                         off.optBoolean("enabled", false),

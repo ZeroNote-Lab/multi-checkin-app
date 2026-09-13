@@ -2,7 +2,6 @@ package com.zerolab.checkin.ui.detail
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.zerolab.checkin.CheckinApp
@@ -33,7 +32,7 @@ class ItemDetailActivity : AppCompatActivity() {
         val theme = ThemeManager.of(item.theme)
         findViewById<TextView>(R.id.tv_emoji).text = theme.emoji
         findViewById<TextView>(R.id.tv_name).text = item.name
-        findViewById<View>(R.id.header_card).background?.setTint(theme.soft)
+        // v6.1.0：取消主题装饰色，头部卡片保持中性白
         findViewById<TextView>(R.id.tv_sub).text =
             "主题：${theme.name}    状态：${if (item.isActive == 1) "启用中" else "已暂停"}"
 

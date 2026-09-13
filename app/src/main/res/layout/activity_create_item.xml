@@ -160,6 +160,18 @@
 
             </LinearLayout>
 
+            <!-- 打卡日期（v6.1.0 新增） -->
+            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡日期" />
+            <LinearLayout
+                android:id="@+id/schedule_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp">
+            </LinearLayout>
+
             <!-- 抵消机制 -->
             <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="连续打卡抵消机制" />
             <LinearLayout

@@ -101,7 +101,8 @@ class ItemListFragment : Fragment() {
         override fun onBindViewHolder(h: VH, position: Int) {
             val row = rows[position]; val item = row.item
             val theme = ThemeManager.of(item.theme)
-            h.iconBg.background?.setTint(theme.soft)
+            // v6.1.0：取消主题装饰色，图标底色统一中性浅灰（仅保留打卡按钮/今天描边的主题色）
+            h.iconBg.background?.setTint(0xFFEFF1F6.toInt())
             h.emoji.text = theme.emoji
             h.name.text = if (item.isActive == 0) "${item.name}（已暂停）" else item.name
             h.type.text = methodLabel(item)

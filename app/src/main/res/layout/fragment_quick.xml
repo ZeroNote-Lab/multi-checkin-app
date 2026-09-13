@@ -154,8 +154,8 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="点击日历日期查看详情"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
                         android:textStyle="bold" />
 
                     <TextView
@@ -163,6 +163,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
+                        android:lineSpacingExtra="3dp"
                         android:textColor="@color/text_primary"
                         android:textSize="13sp" />
 
