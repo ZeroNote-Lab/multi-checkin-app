@@ -260,15 +260,7 @@ gradle assembleDebug
 gradle assembleRelease
 ```
 
-> 本项目未内置 Gradle Wrapper，需使用本机 Gradle 8.5 执行；建议开源后补充 `gradlew`。
-
-### ⚠️ 签名说明（开源前必读）
-
-- Release 构建当前引用本地 keystore（`app/build.gradle` 中 `signingConfigs.zerolab`，密钥文件在仓库外，已被 `.gitignore` 排除），**clone 后直接构建 release 会因缺少 keystore 失败**。
-- 开源发布前请：
-  1. 生成自己的签名密钥（`keytool -genkeypair ...`）；
-  2. 将 `app/build.gradle` 中的 `storePassword` / `keyPassword` 改为环境变量读取（如 `System.getenv("KEYSTORE_PASSWORD")`），**不要把密码明文提交到仓库**；
-  3. 或直接删除 `signingConfigs`，改用 Android Studio 默认的 debug 签名进行调试构建。
+> 本项目未内置 Gradle Wrapper，需使用本机 Gradle 8.5 执行；
 
 ### 安装
 
