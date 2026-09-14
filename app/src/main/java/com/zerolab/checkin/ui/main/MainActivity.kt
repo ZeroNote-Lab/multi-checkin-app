@@ -13,6 +13,7 @@ import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
 import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.ui.list.ItemListFragment
+import com.zerolab.checkin.ui.quick.NfcHub
 import com.zerolab.checkin.ui.quick.QuickCheckinFragment
 import com.zerolab.checkin.ui.settings.SettingsFragment
 import kotlin.concurrent.thread
@@ -121,7 +122,10 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION") intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
         if (tag != null) {
             val id = tag.id.joinToString("") { "%02X".format(it) }
+            // 直连快捷页（恢复 v6.1.0 之前的可用行为，不依赖注册时序）+ NfcHub 兜底（覆盖列表进入的打卡页）
+            // awaitingNfc 机制保证只由「正在等待标签」的页面响应，双路径不会重复打卡
             (frags[R.id.nav_quick] as? QuickCheckinFragment)?.notifyNfc(id)
+            NfcHub.dispatch(id)
         }
     }
 }
