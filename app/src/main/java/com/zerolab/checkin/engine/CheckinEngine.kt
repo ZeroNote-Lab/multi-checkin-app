@@ -97,13 +97,12 @@ object CheckinEngine {
     /** 某天是否算"成功"（用于连续天数） */
     private fun dayIsSuccess(item: CheckinItem, date: String, repo: CheckinRepository): Boolean {
         if (date < DateUtils.dateOf(item.createdAt)) return false // 创建日之前不计入连续
-        val c = cfg(item)
         val recs = repo.recordsOfDay(item.id, date)
         val info = dayInfo(item, date, recs)
         if (info.state == DayState.SKIP) return true // 无需打卡日视为成功，不中断连续
         if (date == DateUtils.today() && recs.isEmpty()) return false // 今天未定论不计入
-        // 补签（OFFSET）不算进连续天数：断了就是断了，补签只负责"打卡页不显示缺卡"，不延续连续
-        return info.state == DayState.SUCCESS
+        // 补签（OFFSET）算进连续天数：补签把断的那天补上，连续不中断（v1.1.3）
+        return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
     }
 
     /** 连续成功天数 */
@@ -114,6 +113,20 @@ object CheckinEngine {
         var n = 0
         // 上限保护，最多回溯 3660 天
         repeat(3660) {
+            if (dayIsSuccess(item, d, repo)) { n++; d = DateUtils.addDays(d, -1) } else return n
+        }
+        return n
+    }
+
+    /** 里程碑连续天数：从锚点（最近补签日）或创建日起算，用于抵消发放（补签后重新起算周期，防止补签白拿新机会） */
+    private fun milestoneStreak(item: CheckinItem, repo: CheckinRepository): Int {
+        val c = cfg(item)
+        val start = c.offset.anchorDate.ifBlank { DateUtils.dateOf(item.createdAt) }
+        var d = DateUtils.today()
+        if (!dayIsSuccess(item, d, repo)) d = DateUtils.addDays(d, -1)
+        var n = 0
+        repeat(3660) {
+            if (d < start) return n
             if (dayIsSuccess(item, d, repo)) { n++; d = DateUtils.addDays(d, -1) } else return n
         }
         return n
@@ -179,19 +192,19 @@ object CheckinEngine {
         // 参数保护：nDays/k 必须为正，否则不发放（防导入/异常配置除零崩溃）
         if (off.nDays <= 0 || off.k <= 0) return
         val today = DateUtils.today()
-        val streak = streak(item, repo)
+        val ms = milestoneStreak(item, repo)
         when (off.mode) {
             "A" -> {
-                // 每连续 nDays 天得 1，可累积：里程碑数 - 已发放数
-                val milestones = streak / off.nDays
-                val granted = repo.creditsOf(item.id).size
-                repeat((milestones - granted).coerceAtLeast(0)) {
+                // 每连续 nDays 天得 1，可累积：里程碑数 - 当前可用数（消耗过则按剩余补发）
+                val milestones = ms / off.nDays
+                val effective = repo.availableCredits(item.id)
+                repeat((milestones - effective).coerceAtLeast(0)) {
                     repo.grantCredit(OffsetCredit(itemId = item.id, mode = "A", earnedDate = today))
                 }
             }
             "B" -> {
                 // 每达到 nDays 连续，把可用次数补到 k（不叠加）
-                if (streak > 0 && streak % off.nDays == 0) {
+                if (ms > 0 && ms % off.nDays == 0) {
                     val avail = repo.availableCredits(item.id)
                     repeat((off.k - avail).coerceAtLeast(0)) {
                         repo.grantCredit(OffsetCredit(itemId = item.id, mode = "B", earnedDate = today))
@@ -199,9 +212,10 @@ object CheckinEngine {
                 }
             }
             "C" -> {
-                val cycles = streak / off.nDays
-                val granted = repo.creditsOf(item.id).size
-                repeat((cycles * off.k - granted).coerceAtLeast(0)) {
+                val cycles = ms / off.nDays
+                val need = cycles * off.k
+                val effective = repo.availableCredits(item.id)
+                repeat((need - effective).coerceAtLeast(0)) {
                     repo.grantCredit(OffsetCredit(itemId = item.id, mode = "C", earnedDate = today))
                 }
             }
@@ -213,11 +227,35 @@ object CheckinEngine {
         val c = cfg(item)
         if (!c.offset.enabled) return false
         if (repo.availableCredits(item.id) <= 0) return false // 无可用机会，不写孤立记录
+        val now = System.currentTimeMillis()
         val rid = repo.insertRecord(
-            CheckinRecord(itemId = item.id, checkinDate = date, checkinTime = System.currentTimeMillis(),
+            CheckinRecord(itemId = item.id, checkinDate = date, checkinTime = now,
                 status = "OFFSET", isAuto = 0)
         )
-        return repo.consumeOne(item.id, date, rid)
+        val consumed = repo.consumeOne(item.id, date, rid)
+
+        // v1.1.3：补签当天（今天）若无记录且为需打卡日，自动完成当天打卡（补签=处理昨日遗漏+完成今日）
+        val today = DateUtils.today()
+        if (consumed && today != date && isScheduledDay(item, today)
+            && repo.recordsOfDay(item.id, today).isEmpty()) {
+            repo.insertRecord(CheckinRecord(
+                itemId = item.id, checkinDate = today, checkinTime = now,
+                status = "SUCCESS", isAuto = 0))
+        }
+
+        // v1.1.3：里程碑周期从补签动作日重新起算——补签只消耗机会、不发放新机会，
+        // 后续连续 N 天奖励从补签当天起重新累计（防止补签把连续顶过里程碑边界白拿补卡机会）。
+        if (consumed && c.offset.anchorDate != today) {
+            c.offset.anchorDate = today
+            saveCfg(item, repo, c)
+        }
+        return consumed
+    }
+
+
+    /** 持久化 ItemConfig（anchorDate 等字段变更） */
+    private fun saveCfg(item: CheckinItem, repo: CheckinRepository, c: ItemConfig) {
+        repo.updateItem(item.copy(configJson = c.toJson()))
     }
 
     // ---------- 自动打卡（前台触发） ----------

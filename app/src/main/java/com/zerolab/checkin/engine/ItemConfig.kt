@@ -13,7 +13,8 @@ data class OffsetCfg(
     var mode: String = "A",       // A 累积 / B 阈值 / C 周期
     var nDays: Int = 3,
     var k: Int = 1,
-    var autoConsume: Boolean = false
+    var autoConsume: Boolean = false,
+    var anchorDate: String = ""   // 里程碑周期锚点：最近一次补签动作日（补签后从此重新起算连续 N 天）
 )
 
 /**
@@ -81,7 +82,8 @@ class ItemConfig {
             .put("mode", offset.mode)
             .put("nDays", offset.nDays)
             .put("k", offset.k)
-            .put("autoConsume", offset.autoConsume))
+            .put("autoConsume", offset.autoConsume)
+            .put("anchorDate", offset.anchorDate))
         return o.toString(2)
     }
 
@@ -134,7 +136,8 @@ class ItemConfig {
                         off.optString("mode", "A"),
                         off.optInt("nDays", 3),
                         off.optInt("k", 1),
-                        off.optBoolean("autoConsume", false))
+                        off.optBoolean("autoConsume", false),
+                        off.optString("anchorDate", ""))
                 }
             } catch (_: Exception) { }
             return c
