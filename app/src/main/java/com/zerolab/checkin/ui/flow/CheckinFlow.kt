@@ -147,6 +147,12 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         // 组合（多方式）：弹出方式卡片，逐个完成
         if (interactive.size > 1) {
             comboMethods = interactive
+            // v1.1.4：从数据库读取今日已完成方式，退出重进也能显示 ✅ 并禁止重复打卡
+            val recs = repo.recordsOfDay(item.id, DateUtils.today())
+            interactive.forEach { m ->
+                if (recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }) doneMethods.add(m)
+            }
+            if (doneMethods.size >= interactive.size) { toast("今日已完成全部打卡项"); onDone(); return }
             showComboCard()
             return
         }
@@ -219,6 +225,15 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     }
 
     private fun runMethod(m: String) {
+        // v1.1.4：组合模式下已完成的打卡项不可重复执行（以数据库记录为准）
+        if (comboMethods != null) {
+            val it = item ?: return
+            val recs = repo.recordsOfDay(it.id, DateUtils.today())
+            if (recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }) {
+                toast("今日「${Method.of(m)?.label ?: m}」已完成")
+                return
+            }
+        }
         comboCurrent = m
         photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
         when (m) {
@@ -264,7 +279,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         val hasCamera = try { ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) } catch (_: Exception) { false }
         if (c.photoFromCamera && hasCamera) opts.add("拍照")
         if (c.photoFromAlbum) opts.add("从相册选择")
-        if (opts.isEmpty()) { stepSuccess(); return }
+        if (opts.isEmpty()) { toast("该打卡项未配置图片来源，请在编辑页设置"); return }
         if (opts.size == 1) { if (opts[0] == "拍照") openCamera() else pickImage.launch("image/*"); return }
         AlertDialog.Builder(ctx).setTitle("选择图片来源").setItems(opts.toTypedArray()) { _, i ->
             if (opts[i] == "拍照") openCamera() else pickImage.launch("image/*")

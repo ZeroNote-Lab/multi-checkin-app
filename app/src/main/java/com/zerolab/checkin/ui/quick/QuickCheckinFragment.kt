@@ -205,14 +205,14 @@ class QuickCheckinFragment : Fragment() {
             !neg && interactive.size > 1 -> {
                 val done = interactive.count { m -> todayRecs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true } }
                 if (done >= interactive.size) { statusView.text = "状态：今日已完成 ✓"; btnCheckin.text = "今日已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
-                else { statusView.text = "状态：$done/${interactive.size}"; btnCheckin.text = "继续打卡 ($done/${interactive.size})" }
+                else { statusView.text = "状态：$done/${interactive.size}"; btnCheckin.text = if (done == 0) "打卡" else "继续打卡 ($done/${interactive.size})" }
             }
             cfg.dailyLimit <= 1 -> {
                 if (cnt == 0) { statusView.text = "状态：未打卡"; btnCheckin.text = "打卡" } else { statusView.text = "状态：已打卡 ✓"; btnCheckin.text = "已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
             }
             else -> {
                 if (cnt >= cfg.dailyLimit) { statusView.text = "状态：已完成 $cnt/${cfg.dailyLimit} ✓"; btnCheckin.text = "今日已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
-                else { statusView.text = "状态：$cnt/${cfg.dailyLimit}"; btnCheckin.text = "继续打卡 ($cnt/${cfg.dailyLimit})" }
+                else { statusView.text = "状态：$cnt/${cfg.dailyLimit}"; btnCheckin.text = if (cnt == 0) "打卡" else "继续打卡 ($cnt/${cfg.dailyLimit})" }
             }
         }
     }
