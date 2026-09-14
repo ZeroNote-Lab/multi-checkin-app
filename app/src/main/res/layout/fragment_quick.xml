@@ -12,6 +12,7 @@
 
         <!-- 顶部标题 -->
         <LinearLayout
+            android:id="@+id/header_bar"
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:background="@color/white"
@@ -167,19 +168,12 @@
                         android:textColor="@color/text_primary"
                         android:textSize="13sp" />
 
-                    <HorizontalScrollView
-                        android:id="@+id/detail_media_scroll"
+                    <LinearLayout
+                        android:id="@+id/detail_records_box"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:scrollbars="none">
-
-                        <LinearLayout
-                            android:id="@+id/detail_media_box"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal" />
-                    </HorizontalScrollView>
+                        android:orientation="vertical" />
                 </LinearLayout>
 
                 <Button

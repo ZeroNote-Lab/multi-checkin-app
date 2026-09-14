@@ -8,7 +8,7 @@ import com.zerolab.checkin.data.repo.CheckinRepository
 import com.zerolab.checkin.util.DateUtils
 
 /** 日历某天的展示状态 */
-enum class DayState { SUCCESS, FAIL, UNCHECKED, FUTURE, OFFSET, SKIP }
+enum class DayState { SUCCESS, FAIL, UNCHECKED, FUTURE, OFFSET, SKIP, PARTIAL }
 
 data class DayInfo(
     val date: String,
@@ -78,7 +78,7 @@ object CheckinEngine {
                 }
                 val success = records.any { it.status == "SUCCESS" }
                 val st = when {
-                    !neg && methods.size > 1 -> if (comboAll) DayState.SUCCESS else DayState.UNCHECKED
+                    !neg && methods.size > 1 -> if (comboAll) DayState.SUCCESS else DayState.PARTIAL // v1.1.6：组合未全完成=部分完成（黄色）
                     neg && !c.customNeg -> DayState.FAIL            // 普通负打卡：有操作=破戒失败
                     c.customNeg -> if (records.any { it.status == "FAIL" }) DayState.FAIL else DayState.SUCCESS
                     success -> DayState.SUCCESS
@@ -92,6 +92,14 @@ object CheckinEngine {
                 DayInfo(date, if (neg) DayState.SUCCESS else DayState.FAIL, 0, false, records)
             }
         }
+    }
+
+    /** v1.1.6 固定时间段打卡：当前时刻是否在打卡窗口内（未启用恒为 true） */
+    fun inTimeWindow(c: ItemConfig): Boolean {
+        if (!c.timeWindowEnabled) return true
+        val nowMin = DateUtils.nowMinutes()
+        val a = DateUtils.parseHHmm(c.twStart); val b = DateUtils.parseHHmm(c.twEnd)
+        return a >= 0 && b >= 0 && a < b && nowMin in a until b
     }
 
     /** 某天是否算"成功"（用于连续天数） */
@@ -146,6 +154,14 @@ object CheckinEngine {
     ): CheckinResult {
         val c = cfg(item)
         val now = System.currentTimeMillis()
+
+        // v1.1.6 固定时间段打卡：仅窗口内可打卡成功（与负打卡/自动互斥，UI 层已保证）
+        if (c.timeWindowEnabled && !isAuto && !inTimeWindow(c)) {
+            val a = DateUtils.parseHHmm(c.twStart); val b = DateUtils.parseHHmm(c.twEnd)
+            val reason = if (a >= 0 && DateUtils.nowMinutes() < a) "未到打卡时间（${c.twStart}–${c.twEnd}）"
+                else "已过打卡时间（${c.twStart}–${c.twEnd}）"
+            return CheckinResult.Blocked(reason)
+        }
 
         // 归属日期与状态：自定义负打卡按双时间三段归属，其余按自然日
         val date: String

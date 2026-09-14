@@ -104,13 +104,16 @@ class ItemListFragment : Fragment() {
             // v6.1.0：取消主题装饰色，图标底色统一中性浅灰（仅保留打卡按钮/今天描边的主题色）
             h.iconBg.background?.setTint(0xFFEFF1F6.toInt())
             h.emoji.text = theme.emoji
-            h.name.text = if (item.isActive == 0) "${item.name}（已暂停）" else item.name
+            // v1.1.6：置顶卡片名称前加 📌 标记
+            h.name.text = (if (item.isPinned == 1) "📌 " else "") + (if (item.isActive == 0) "${item.name}（已暂停）" else item.name)
             h.type.text = methodLabel(item)
             h.streak.text = "🔥 ${row.streak}天"
             if (row.credits > 0) { h.credits.visibility = View.VISIBLE; h.credits.text = "🛡️×${row.credits}" }
             else h.credits.visibility = View.GONE
             h.star.visibility = if (quickId == item.id) View.VISIBLE else View.GONE
             h.itemView.alpha = if (item.isActive == 0) 0.5f else 1f
+            // v1.1.6：置顶卡片背景加深（浅暖色），与普通卡片区分
+            h.itemView.background?.mutate()?.setTint(if (item.isPinned == 1) 0xFFF1EBD8.toInt() else 0xFFFFFFFF.toInt())
 
             h.itemView.setOnClickListener {
                 // 点卡片进入该打卡项的打卡页（不修改快捷配置；快捷仅通过长按菜单手动切换）

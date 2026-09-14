@@ -221,7 +221,11 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             comboDialog?.dismiss(); comboDialog = null
             toast("全部完成，打卡成功 ✓")
             onDone()
-        } else showComboCard()
+        } else {
+            showComboCard()
+            // v1.1.6：每完成一个子项立即刷新备注区/日历（此前仅全部完成才刷新，部分完成时页面无反应）
+            onDone()
+        }
     }
 
     private fun runMethod(m: String) {

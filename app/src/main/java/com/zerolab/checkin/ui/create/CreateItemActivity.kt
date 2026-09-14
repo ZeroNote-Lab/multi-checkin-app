@@ -419,14 +419,24 @@ class CreateItemActivity : AppCompatActivity() {
     /** 互斥置灰（v6.1.0：保持可点击，点击时在监听器里弹温馨提示） */
     private fun refreshConflicts() {
         val blocked = Method.conflictsWith(cfg.methods)
+        val twOn = findViewById<CompoundButton>(R.id.cb_time_window).isChecked
         rows.forEach { (key, row) ->
             val isBlocked = key in blocked
-            row.switch.isEnabled = !locked
-            row.switch.alpha = if (isBlocked) 0.4f else 1f
+            val twBlock = twOn && key == Method.AUTO.key
+            row.switch.isEnabled = !locked && !twBlock
+            row.switch.alpha = if (isBlocked || twBlock) 0.4f else 1f
             if (isBlocked && row.switch.isChecked) {
                 row.switch.isChecked = false // 双保险
             }
+            if (twBlock && row.switch.isChecked) {
+                row.switch.isChecked = false // v1.1.6：时间段开启时自动打卡不可选
+            }
         }
+        // v1.1.6 反向互斥：自动已选时固定时间段不可选
+        val autoOn = Method.AUTO.key in cfg.methods
+        findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = !locked && !autoOn
+        if (autoOn) findViewById<CompoundButton>(R.id.cb_time_window).alpha = 0.4f
+        else findViewById<CompoundButton>(R.id.cb_time_window).alpha = 1f
         // v1.1.4：组合打卡（多方式）每日次数固定为 1，不可调整
         val multi = cfg.methods.count { it != Method.AUTO.key } > 1
         if (multi) {
@@ -452,16 +462,37 @@ class CreateItemActivity : AppCompatActivity() {
         btnLimitPlus!!.setOnClickListener {
             dailyLimit = if (dailyLimit == -1) 1 else dailyLimit + 1; renderLimit()
         }
-        val cbNeg = findViewById<CheckBox>(R.id.cb_negative)
-        val cbCustom = findViewById<CheckBox>(R.id.cb_custom_neg)
-        cbNeg.setOnCheckedChangeListener { _, on -> if (on) cbCustom.isChecked = false }
+        val cbNeg = findViewById<CompoundButton>(R.id.cb_negative)
+        val cbCustom = findViewById<CompoundButton>(R.id.cb_custom_neg)
+        val cbTw = findViewById<CompoundButton>(R.id.cb_time_window)
+        // v1.1.6：负打卡 / 双时间自定义负打卡 / 固定时间段打卡 三者互斥（圆形单选）
+        cbNeg.setOnCheckedChangeListener { _, on ->
+            if (on) { cbCustom.isChecked = false; cbTw.isChecked = false }
+        }
         cbCustom.setOnCheckedChangeListener { _, on ->
-            if (on) cbNeg.isChecked = false
+            if (on) { cbNeg.isChecked = false; cbTw.isChecked = false }
             findViewById<View>(R.id.custom_neg_panel).visibility = if (on) View.VISIBLE else View.GONE
             updateCustomHint()
+            refreshConflicts()
+        }
+        cbTw.setOnCheckedChangeListener { _, on ->
+            if (on) { cbNeg.isChecked = false; cbCustom.isChecked = false }
+            findViewById<View>(R.id.tw_panel).visibility = if (on) View.VISIBLE else View.GONE
+            refreshConflicts()
         }
         findViewById<Button>(R.id.btn_t1).setOnClickListener { pickTime(findViewById(R.id.btn_t1), true) }
         findViewById<Button>(R.id.btn_t2).setOnClickListener { pickTime(findViewById(R.id.btn_t2), false) }
+        findViewById<Button>(R.id.btn_tw_start).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_start), true) }
+        findViewById<Button>(R.id.btn_tw_end).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_end), false) }
+    }
+
+    /** v1.1.6 固定时间段起止时间选择 */
+    private fun pickTwTime(btn: Button, isStart: Boolean) {
+        val cur = btn.text.toString().split(":")
+        val h = cur[0].toInt(); val mi = cur[1].toInt()
+        TimePickerDialog(this, { _, hour, minute ->
+            btn.text = "%02d:%02d".format(hour, minute)
+        }, h, mi, true).show()
     }
 
     private fun pickTime(btn: Button, isT1: Boolean) {
@@ -567,6 +598,7 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.methods.clear(); cfg.methods.addAll(loaded.methods)
         cfg.dailyLimit = loaded.dailyLimit; cfg.negative = loaded.negative; cfg.customNeg = loaded.customNeg
         cfg.t1 = loaded.t1; cfg.t2 = loaded.t2; cfg.offsetBackfill = loaded.offsetBackfill
+        cfg.timeWindowEnabled = loaded.timeWindowEnabled; cfg.twStart = loaded.twStart; cfg.twEnd = loaded.twEnd
         cfg.photoFromCamera = loaded.photoFromCamera; cfg.photoFromAlbum = loaded.photoFromAlbum
         cfg.textMinWords = loaded.textMinWords; cfg.textNoRepeat = loaded.textNoRepeat
         cfg.locNegative = loaded.locNegative; cfg.locPoints.clear(); cfg.locPoints.addAll(loaded.locPoints)
@@ -584,12 +616,16 @@ class CreateItemActivity : AppCompatActivity() {
         selectedTheme = it.theme
         dailyLimit = cfg.dailyLimit
         findViewById<TextView>(R.id.tv_limit).text = if (dailyLimit < 0) "不限" else dailyLimit.toString()
-        findViewById<CheckBox>(R.id.cb_negative).isChecked = cfg.negative
-        findViewById<CheckBox>(R.id.cb_custom_neg).isChecked = cfg.customNeg
+        findViewById<CompoundButton>(R.id.cb_negative).isChecked = cfg.negative
+        findViewById<CompoundButton>(R.id.cb_custom_neg).isChecked = cfg.customNeg
         findViewById<View>(R.id.custom_neg_panel).visibility = if (cfg.customNeg) View.VISIBLE else View.GONE
         findViewById<Button>(R.id.btn_t1).text = cfg.t1
         findViewById<Button>(R.id.btn_t2).text = cfg.t2
         updateCustomHint()
+        findViewById<CompoundButton>(R.id.cb_time_window).isChecked = cfg.timeWindowEnabled
+        findViewById<View>(R.id.tw_panel).visibility = if (cfg.timeWindowEnabled) View.VISIBLE else View.GONE
+        findViewById<Button>(R.id.btn_tw_start).text = cfg.twStart
+        findViewById<Button>(R.id.btn_tw_end).text = cfg.twEnd
         findViewById<CheckBox>(R.id.cb_offset).isChecked = cfg.offset.enabled
         findViewById<View>(R.id.offset_panel).visibility = if (cfg.offset.enabled) View.VISIBLE else View.GONE
         findViewById<EditText>(R.id.et_offset_n).setText(cfg.offset.nDays.toString())
@@ -645,8 +681,11 @@ class CreateItemActivity : AppCompatActivity() {
         locked = true
         toast(msg)
         rows.values.forEach { it.switch.isEnabled = false }
-        findViewById<CheckBox>(R.id.cb_negative).isEnabled = false
-        findViewById<CheckBox>(R.id.cb_custom_neg).isEnabled = false
+        findViewById<CompoundButton>(R.id.cb_negative).isEnabled = false
+        findViewById<CompoundButton>(R.id.cb_custom_neg).isEnabled = false
+        findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = false
+        findViewById<Button>(R.id.btn_tw_start).isEnabled = false
+        findViewById<Button>(R.id.btn_tw_end).isEnabled = false
         findViewById<CheckBox>(R.id.cb_offset).isEnabled = false
         findViewById<Button>(R.id.btn_limit_minus).isEnabled = false
         findViewById<Button>(R.id.btn_limit_plus).isEnabled = false
@@ -688,10 +727,13 @@ class CreateItemActivity : AppCompatActivity() {
 
     private fun collectConfigFromUi() {
         cfg.dailyLimit = dailyLimit
-        cfg.negative = findViewById<CheckBox>(R.id.cb_negative).isChecked
-        cfg.customNeg = findViewById<CheckBox>(R.id.cb_custom_neg).isChecked
+        cfg.negative = findViewById<CompoundButton>(R.id.cb_negative).isChecked
+        cfg.customNeg = findViewById<CompoundButton>(R.id.cb_custom_neg).isChecked
         cfg.t1 = findViewById<Button>(R.id.btn_t1).text.toString()
         cfg.t2 = findViewById<Button>(R.id.btn_t2).text.toString()
+        cfg.timeWindowEnabled = findViewById<CompoundButton>(R.id.cb_time_window).isChecked
+        cfg.twStart = findViewById<Button>(R.id.btn_tw_start).text.toString()
+        cfg.twEnd = findViewById<Button>(R.id.btn_tw_end).text.toString()
         cbPhotoCamera?.let { cfg.photoFromCamera = it.isChecked }
         cbPhotoAlbum?.let { cfg.photoFromAlbum = it.isChecked }
         etTextMin?.let { cfg.textMinWords = it.text.toString().toIntOrNull()?.coerceAtLeast(0) ?: 1 }
@@ -763,6 +805,10 @@ class CreateItemActivity : AppCompatActivity() {
         if (cfg.customNeg) {
             val a = DateUtils.parseHHmm(cfg.t1); val b = DateUtils.parseHHmm(cfg.t2)
             if (a < 0 || b < 0 || a >= b) { toast("时间点1需早于时间点2（如 05:00 / 13:00）"); return }
+        }
+        if (cfg.timeWindowEnabled) {
+            val a = DateUtils.parseHHmm(cfg.twStart); val b = DateUtils.parseHHmm(cfg.twEnd)
+            if (a < 0 || b < 0 || a >= b) { toast("时间段开始需早于结束（如 05:00 / 08:30），暂不支持跨天"); return }
         }
 
         val policyInterval = findViewById<RadioButton>(R.id.rb_interval).isChecked

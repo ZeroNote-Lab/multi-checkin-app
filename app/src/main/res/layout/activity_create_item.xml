@@ -113,7 +113,7 @@
 
                 <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginVertical="6dp" android:background="@color/divider" />
 
-                <CheckBox
+                <RadioButton
                     android:id="@+id/cb_negative"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -121,13 +121,50 @@
                     android:textColor="@color/text_primary"
                     android:textSize="13sp" />
 
-                <CheckBox
+                <RadioButton
                     android:id="@+id/cb_custom_neg"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="双时间自定义负打卡（限定可记录时段）"
                     android:textColor="@color/text_primary"
                     android:textSize="13sp" />
+
+                <RadioButton
+                    android:id="@+id/cb_time_window"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="固定时间段打卡（仅窗口内可打卡成功，如 5:00–8:30 早起）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:id="@+id/tw_panel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="12dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="开始  " android:textColor="@color/text_secondary"/>
+                        <Button android:id="@+id/btn_tw_start" android:layout_width="wrap_content" android:layout_height="wrap_content" android:insetTop="0dp" android:insetBottom="0dp" android:text="05:00" android:textColor="@color/brand_dark"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="16dp" android:text="结束  " android:textColor="@color/text_secondary"/>
+                        <Button android:id="@+id/btn_tw_end" android:layout_width="wrap_content" android:layout_height="wrap_content" android:insetTop="0dp" android:insetBottom="0dp" android:text="08:30" android:textColor="@color/brand_dark"/>
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tv_tw_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingHorizontal="12dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:text="仅在所选时间段内可打卡成功；不支持跨天（如 23:00–01:00）；开启后将无法选择自动打卡。" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:id="@+id/custom_neg_panel"
