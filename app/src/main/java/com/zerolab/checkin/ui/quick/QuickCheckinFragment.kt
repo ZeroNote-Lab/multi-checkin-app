@@ -47,6 +47,7 @@ class QuickCheckinFragment : Fragment() {
         super.onDestroyView()
         try { mediaPlayer?.release() } catch (_: Exception) {}
         mediaPlayer = null
+        NfcHub.unregister(this)
     }
 
     /** MainActivity 读到 NFC 标签后转发给打卡流程 */
@@ -91,7 +92,14 @@ class QuickCheckinFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
+        // 当前打卡页成为 NFC 回调唯一接收者（快捷页 / 列表进入的打卡页都走这里）
+        NfcHub.register(this)
         refresh()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        NfcHub.unregister(this)
     }
 
     fun refresh() {

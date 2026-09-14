@@ -495,6 +495,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     fun nfcDetected(tagId: String) {
         if (!awaitingNfc) return
         awaitingNfc = false
+        nfcDialog?.dismiss(); nfcDialog = null
         val c = cfg ?: return
         if (c.nfcTagId.isBlank()) { toast("该打卡项未绑定 NFC 标签"); return }
         if (tagId.equals(c.nfcTagId, ignoreCase = true)) {
@@ -504,6 +505,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             toast("NFC 标签不匹配（读到 ${tagId.take(12)}…）")
         }
     }
+
+    private var nfcDialog: AlertDialog? = null
 
     private fun doNfc() {
         val c = cfg ?: return
@@ -524,9 +527,10 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         awaitingNfc = true
         val dlg = AlertDialog.Builder(ctx).setTitle("NFC 打卡")
             .setMessage("请将手机贴近已绑定的 NFC 标签。\n\n绑定标签：${c.nfcTagId.take(16)}…\n\n读取成功后会自动完成打卡")
-            .setNegativeButton("取消") { _, _ -> awaitingNfc = false }
+            .setNegativeButton("取消") { _, _ -> awaitingNfc = false; nfcDialog = null }
             .setPositiveButton("已完成", null)
             .create()
+        nfcDialog = dlg
         dlg.show()
         dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             if (awaitingNfc) toast("尚未读取到标签，请保持贴近") else dlg.dismiss()

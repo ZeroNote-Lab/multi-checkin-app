@@ -102,7 +102,8 @@ object CheckinEngine {
         val info = dayInfo(item, date, recs)
         if (info.state == DayState.SKIP) return true // 无需打卡日视为成功，不中断连续
         if (date == DateUtils.today() && recs.isEmpty()) return false // 今天未定论不计入
-        return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
+        // 补签（OFFSET）不算进连续天数：断了就是断了，补签只负责"打卡页不显示缺卡"，不延续连续
+        return info.state == DayState.SUCCESS
     }
 
     /** 连续成功天数 */
@@ -175,6 +176,8 @@ object CheckinEngine {
         val c = cfg(item)
         val off = c.offset
         if (!off.enabled) return
+        // 参数保护：nDays/k 必须为正，否则不发放（防导入/异常配置除零崩溃）
+        if (off.nDays <= 0 || off.k <= 0) return
         val today = DateUtils.today()
         val streak = streak(item, repo)
         when (off.mode) {
