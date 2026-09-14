@@ -62,6 +62,11 @@ class CreateItemActivity : AppCompatActivity() {
     private var ivQr: ImageView? = null
     private var tvNfc: TextView? = null
     private var etVoice: EditText? = null
+    // v1.1.4：需在 lockRules 中一并置灰的控件引用
+    private var btnLocFetch: Button? = null
+    private var btnNfcBind: Button? = null
+    private var btnLimitMinus: Button? = null
+    private var btnLimitPlus: Button? = null
 
     // 真实 NFC 标签读取（enableReaderMode）
     private var nfcAdapter: NfcAdapter? = null
@@ -339,8 +344,15 @@ class CreateItemActivity : AppCompatActivity() {
         when (m) {
             Method.NORMAL -> panel.addView(sectionLabel("点击打卡按钮即完成，无需额外材料。"))
             Method.PHOTO -> {
-                cbPhotoCamera = CheckBox(this).apply { text = "允许拍照"; isChecked = true; setTextColor(0xFF1F2430.toInt()) }
-                cbPhotoAlbum = CheckBox(this).apply { text = "允许从相册选择"; isChecked = true; setTextColor(0xFF1F2430.toInt()) }
+                cbPhotoCamera = CheckBox(this).apply {
+                    text = "允许拍照"; isChecked = true; setTextColor(0xFF1F2430.toInt())
+                    // v1.1.4：勾选状态实时同步到配置，保存校验才能读到真实值
+                    setOnCheckedChangeListener { _, on -> cfg.photoFromCamera = on }
+                }
+                cbPhotoAlbum = CheckBox(this).apply {
+                    text = "允许从相册选择"; isChecked = true; setTextColor(0xFF1F2430.toInt())
+                    setOnCheckedChangeListener { _, on -> cfg.photoFromAlbum = on }
+                }
                 panel.addView(cbPhotoCamera); panel.addView(cbPhotoAlbum)
             }
             Method.TEXT -> {
@@ -357,6 +369,7 @@ class CreateItemActivity : AppCompatActivity() {
                     background?.setTint(0xFF39C5BB.toInt())
                     setOnClickListener { requestLocation() }
                 }
+                btnLocFetch = addBtn
                 panel.addView(addBtn)
                 tvLocPoints = TextView(this).apply { textSize = 12f; setTextColor(0xFF6B7280.toInt()); setPadding(0, 10, 0, 0) }
                 panel.addView(tvLocPoints)
@@ -391,6 +404,7 @@ class CreateItemActivity : AppCompatActivity() {
                     background?.setTint(0xFF39C5BB.toInt())
                     setOnClickListener { bindNfcTag() }
                 }
+                btnNfcBind = btn
                 panel.addView(btn)
                 tvNfc = sectionLabel("尚未绑定标签"); panel.addView(tvNfc)
             }
@@ -413,16 +427,29 @@ class CreateItemActivity : AppCompatActivity() {
                 row.switch.isChecked = false // 双保险
             }
         }
+        // v1.1.4：组合打卡（多方式）每日次数固定为 1，不可调整
+        val multi = cfg.methods.count { it != Method.AUTO.key } > 1
+        if (multi) {
+            dailyLimit = 1
+            findViewById<TextView>(R.id.tv_limit).text = "1"
+            btnLimitMinus?.isEnabled = false
+            btnLimitPlus?.isEnabled = false
+        } else if (!locked) {
+            btnLimitMinus?.isEnabled = true
+            btnLimitPlus?.isEnabled = true
+        }
     }
 
     // ---------- 频率与规则 ----------
     private fun bindRuleControls() {
         val tvLimit = findViewById<TextView>(R.id.tv_limit)
         fun renderLimit() { tvLimit.text = if (dailyLimit < 0) "不限" else dailyLimit.toString() }
-        findViewById<Button>(R.id.btn_limit_minus).setOnClickListener {
+        btnLimitMinus = findViewById(R.id.btn_limit_minus)
+        btnLimitPlus = findViewById(R.id.btn_limit_plus)
+        btnLimitMinus!!.setOnClickListener {
             dailyLimit = when { dailyLimit == -1 -> 1; dailyLimit <= 1 -> -1; else -> dailyLimit - 1 }; renderLimit()
         }
-        findViewById<Button>(R.id.btn_limit_plus).setOnClickListener {
+        btnLimitPlus!!.setOnClickListener {
             dailyLimit = if (dailyLimit == -1) 1 else dailyLimit + 1; renderLimit()
         }
         val cbNeg = findViewById<CheckBox>(R.id.cb_negative)
@@ -630,6 +657,21 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<EditText>(R.id.et_offset_n).isEnabled = false
         findViewById<EditText>(R.id.et_offset_k).isEnabled = false
         findViewById<CheckBox>(R.id.cb_offset_auto).isEnabled = false
+        // v1.1.4：补齐全部规则控件锁定（位置/NFC 读取按钮、图片来源、参数输入、排班）
+        cbPhotoCamera?.isEnabled = false
+        cbPhotoAlbum?.isEnabled = false
+        etTextMin?.isEnabled = false
+        cbTextNoRepeat?.isEnabled = false
+        cbLocNeg?.isEnabled = false
+        etSteps?.isEnabled = false
+        etTimer?.isEnabled = false
+        etVoice?.isEnabled = false
+        btnLocFetch?.isEnabled = false
+        btnNfcBind?.isEnabled = false
+        scheduleModeChips.values.forEach { it.isEnabled = false; it.alpha = 0.4f }
+        weekDayChips.values.forEach { it.isEnabled = false; it.alpha = 0.4f }
+        bigChip.isEnabled = false; bigChip.alpha = 0.4f
+        smallChip.isEnabled = false; smallChip.alpha = 0.4f
     }
 
     private fun fillParamUi() {
@@ -710,9 +752,13 @@ class CreateItemActivity : AppCompatActivity() {
         if (scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
         if (cfg.methods.isEmpty()) { toast("请至少打开一种打卡方式"); return }
         if (!Method.isValid(cfg.methods)) { toast("所选方式存在互斥冲突"); return }
+        // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）
+        collectConfigFromUi()
+        // 组合打卡每日次数固定为 1（UI 已置灰，此处兜底）
+        if (cfg.methods.count { it != Method.AUTO.key } > 1) { dailyLimit = 1; cfg.dailyLimit = 1 }
         if (Method.LOCATION.key in cfg.methods && cfg.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return }
         if (Method.PHOTO.key in cfg.methods && !cfg.photoFromCamera && !cfg.photoFromAlbum) { toast("拍照打卡需至少勾选一种图片来源"); return }
-        collectConfigFromUi()
+        if (Method.NFC.key in cfg.methods && cfg.nfcTagId.isBlank()) { toast("NFC打卡需先绑定 NFC 标签"); return }
         if (cfg.customNeg) {
             val a = DateUtils.parseHHmm(cfg.t1); val b = DateUtils.parseHHmm(cfg.t2)
             if (a < 0 || b < 0 || a >= b) { toast("时间点1需早于时间点2（如 05:00 / 13:00）"); return }
