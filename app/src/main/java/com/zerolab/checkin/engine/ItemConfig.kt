@@ -27,6 +27,9 @@ class ItemConfig {
     var customNeg: Boolean = false          // 双时间点自定义负打卡
     var t1: String = "05:00"
     var t2: String = "15:00"
+    var timeWindowEnabled: Boolean = false     // 固定时间段打卡（v1.1.6）：仅窗口内可打卡成功
+    var twStart: String = "05:00"              // 窗口开始（不含跨天）
+    var twEnd: String = "08:30"                // 窗口结束
     var offsetBackfill: Boolean = false     // 负打卡补签
 
     // 各方式参数
@@ -57,6 +60,8 @@ class ItemConfig {
         o.put("negative", negative)
         o.put("customNeg", customNeg)
         o.put("t1", t1); o.put("t2", t2)
+        o.put("timeWindowEnabled", timeWindowEnabled)
+        o.put("twStart", twStart); o.put("twEnd", twEnd)
         o.put("offsetBackfill", offsetBackfill)
         o.put("photoFromCamera", photoFromCamera)
         o.put("photoFromAlbum", photoFromAlbum)
@@ -104,6 +109,8 @@ class ItemConfig {
                 c.negative = o.optBoolean("negative", false)
                 c.customNeg = o.optBoolean("customNeg", false)
                 c.t1 = o.optString("t1", "05:00"); c.t2 = o.optString("t2", "15:00")
+                c.timeWindowEnabled = o.optBoolean("timeWindowEnabled", false)
+                c.twStart = o.optString("twStart", "05:00"); c.twEnd = o.optString("twEnd", "08:30")
                 c.offsetBackfill = o.optBoolean("offsetBackfill", false)
                 c.photoFromCamera = o.optBoolean("photoFromCamera", true)
                 c.photoFromAlbum = o.optBoolean("photoFromAlbum", true)

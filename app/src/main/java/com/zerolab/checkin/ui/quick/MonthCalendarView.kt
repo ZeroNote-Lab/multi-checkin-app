@@ -31,6 +31,7 @@ class MonthCalendarView @JvmOverloads constructor(
     private val failC = 0xFFEF5350.toInt()
     private val offsetC = 0xFF4C8DFF.toInt()
     private val skipC = 0xFFF59E0B.toInt()
+    private val partialC = 0xFFFFC53D.toInt()   // v1.1.6 部分完成（组合未全完成）黄色
     private val futureText = 0xFFC4CAD6.toInt()
     private val normalText = 0xFF3A4152.toInt()
 
@@ -75,6 +76,7 @@ class MonthCalendarView @JvmOverloads constructor(
                 info.state == DayState.FAIL -> if (date == DateUtils.today()) 0 else failC // 今天不填充（保留描边），次日缺卡红
                 info.state == DayState.OFFSET -> offsetC
                 info.state == DayState.SKIP -> skipC            // 无需打卡日：橙色
+                info.state == DayState.PARTIAL -> partialC     // v1.1.6 部分完成：黄色
                 else -> 0
             }
             if (bg != 0) {

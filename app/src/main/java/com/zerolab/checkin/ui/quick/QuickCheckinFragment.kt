@@ -88,6 +88,8 @@ class QuickCheckinFragment : Fragment() {
             }
         }
         btnCheckin.setOnClickListener { flow.start(item!!, cfg) }
+        // v1.1.6：列表进入打卡页（override）时隐藏 Fragment 内部顶栏，只留 Activity 顶栏一行（避免双名称/双设置）
+        if (overrideItemId != null) view.findViewById<View>(R.id.header_bar).visibility = View.GONE
     }
 
     override fun onResume() {
@@ -153,10 +155,10 @@ class QuickCheckinFragment : Fragment() {
             d = DateUtils.addDays(d, 1)
         }
         calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg)) { date -> showDayDetail(date) }
-        // 图例随模式变化
+        // 图例随模式变化（v1.1.6：两行——上=日历圆圈颜色+含义，下=备注栏图示）
         val legend = if (CheckinEngine.isNegative(cfg))
-            "✅成功 ❌破戒 ○今天 ·未到 ↩补签 ⚡自动 🟠无需打卡"
-        else "✅成功 ○今日未打卡 ·未到 ↩补签 ⚡自动 🟠无需打卡"
+            "🟢成功 🔴破戒 🔵补签 🟠无需打卡 ○今日未打卡\n⏳今天尚未打卡 ✅成功 ↩补签 ⚡自动 ❌破戒/缺卡"
+        else "🟢成功 🔴缺卡 🔵补签 🟡部分完成 🟠无需打卡 ○今日未打卡\n⏳今天尚未打卡 ✅成功 ↩补签 ⚡自动 ❌缺卡"
         root.findViewById<TextView>(R.id.tv_legend).text = legend
     }
 
@@ -186,6 +188,15 @@ class QuickCheckinFragment : Fragment() {
                 // 无需打卡日：自动完成另一种打卡（橙色标注）
                 statusView.text = "状态：今日无需打卡 ✓"
                 btnCheckin.text = "今日无需打卡"; btnCheckin.isEnabled = false; grayBtn()
+            }
+            cfg.timeWindowEnabled && !CheckinEngine.inTimeWindow(cfg) -> {
+                // v1.1.6 固定时间段打卡：窗口外禁用并提示（未到/已过）
+                val a = DateUtils.parseHHmm(cfg.twStart); val b = DateUtils.parseHHmm(cfg.twEnd)
+                val nowMin = DateUtils.nowMinutes()
+                statusView.text = if (nowMin < a) "状态：未到打卡时间（${cfg.twStart}–${cfg.twEnd}）"
+                    else "状态：已过打卡时间（${cfg.twStart}–${cfg.twEnd}）"
+                btnCheckin.text = if (nowMin < a) "未到打卡时间" else "已过打卡时间"
+                btnCheckin.isEnabled = false; grayBtn()
             }
             isAuto -> { statusView.text = "状态：自动打卡（前台自动完成）"; btnCheckin.text = "⚡ 自动打卡，无需操作"; btnCheckin.isEnabled = false; grayBtn() }
             cfg.customNeg -> {
@@ -219,14 +230,16 @@ class QuickCheckinFragment : Fragment() {
 
     private fun grayBtn() { btnCheckin.background?.setTint(0xFFB6BCC9.toInt()) }
 
-    /** 点击日期：备注栏显示次数/时间/文字/缩略图/语音 */
+    /** 点击日期：备注栏显示次数/时间/文字/缩略图/语音（v1.1.6：媒体内联到对应记录行，不再统一堆底部） */
     private fun showDayDetail(date: String) {
         val it = item ?: return
         val recs = repo.recordsOfDay(it.id, date)
         val title = root.findViewById<TextView>(R.id.tv_detail_title)
         val body = root.findViewById<TextView>(R.id.tv_detail_body)
-        // 先清空媒体区，防止空记录时残留上一日期的缩略图/语音按钮（会把打卡按钮挤出屏幕）
-        root.findViewById<LinearLayout>(R.id.detail_media_box).removeAllViews()
+        val recordsBox = root.findViewById<LinearLayout>(R.id.detail_records_box)
+        // 先清空记录区，防止切换日期时残留上一日期内容
+        recordsBox.removeAllViews()
+        body.visibility = View.VISIBLE
         // 无需打卡日：单独展示
         if (!CheckinEngine.isScheduledDay(it, date)) {
             title.text = "📅 $date   ·   无需打卡"
@@ -251,28 +264,39 @@ class QuickCheckinFragment : Fragment() {
             offerManualBackfill(it, date, neg)
             return
         }
+        // 有记录：逐条渲染（文本 + 内联媒体）
+        body.visibility = View.GONE
         val fmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-        val lines = recs.map { r ->
+        recs.forEach { r ->
+            val row = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.VERTICAL
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.bottomMargin = (10 * resources.displayMetrics.density).toInt()
+                layoutParams = lp
+            }
             val prefix = when {
                 r.status == "OFFSET" -> "↩ 补签"
                 r.isAuto == 1 -> "⚡ 自动"
                 r.status == "FAIL" -> "❌ 破戒"
                 else -> "✅"
             }
-            var line = "$prefix ${fmt.format(java.util.Date(r.checkinTime))}"
-            if (!r.textContent.isNullOrBlank()) line += "\n   文字：${r.textContent}"
-            if (!r.photoPath.isNullOrBlank()) line += "\n   📷 照片：${if (File(r.photoPath).exists()) "已保存（点击缩略图查看大图）" else "文件已丢失"}"
-            if (!r.voicePath.isNullOrBlank()) line += "\n   🎤 语音：${if (File(r.voicePath).exists()) "已录制（点击播放）" else "文件已丢失"}"
-            if (r.latitude != null && r.longitude != null) line += "\n   📍 位置：${formatLatLng(r.latitude!!, r.longitude!!)}"
-            line
-        }
-        body.text = lines.joinToString("\n")
-        // 媒体预览：缩略图 + 语音播放按钮
-        val mediaBox = root.findViewById<LinearLayout>(R.id.detail_media_box)
-        mediaBox.removeAllViews()
-        recs.forEach { r ->
-            if (r.photoPath?.isNotBlank() == true && File(r.photoPath).exists()) mediaBox.addView(thumbView(File(r.photoPath)))
-            if (r.voicePath?.isNotBlank() == true && File(r.voicePath).exists()) mediaBox.addView(voicePlayButton(r.voicePath!!))
+            val sb = StringBuilder("$prefix ${fmt.format(java.util.Date(r.checkinTime))}")
+            if (!r.textContent.isNullOrBlank()) sb.append("\n   文字：${r.textContent}")
+            if (r.latitude != null && r.longitude != null) sb.append("\n   📍 位置：${formatLatLng(r.latitude!!, r.longitude!!)}")
+            val tv = TextView(requireContext()).apply {
+                text = sb.toString(); textSize = 13f
+                setTextColor(0xFF1F2430.toInt()); setLineSpacing(3f * resources.displayMetrics.scaledDensity, 1f)
+            }
+            row.addView(tv)
+            // 媒体内联：该条照片缩略图 + 语音按钮（位于本条文字下方，与其他记录对齐）
+            val mediaRow = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 6, 0, 0)
+            }
+            if (r.photoPath?.isNotBlank() == true && File(r.photoPath).exists()) mediaRow.addView(thumbView(File(r.photoPath)))
+            if (r.voicePath?.isNotBlank() == true && File(r.voicePath).exists()) mediaRow.addView(voicePlayButton(r.voicePath!!))
+            if (mediaRow.childCount > 0) row.addView(mediaRow)
+            recordsBox.addView(row)
         }
     }
 
