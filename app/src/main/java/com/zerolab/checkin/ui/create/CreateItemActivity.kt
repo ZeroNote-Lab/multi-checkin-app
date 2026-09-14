@@ -517,6 +517,7 @@ class CreateItemActivity : AppCompatActivity() {
             try { val l = lm.getLastKnownLocation(p) ?: continue; if (best.get() == null || l.accuracy < (best.get()?.accuracy ?: 9999f)) best.set(l) } catch (_: Exception) {}
         }
         // 主动监听一次更新（真机/模拟器 geo fix 都会立即回调）
+        // v1.1.5：始终等待实时回调，避免误用缓存旧点（此前缓存有值直接返回旧坐标）
         val latch = java.util.concurrent.CountDownLatch(1)
         val listener = object : LocationListener {
             override fun onLocationChanged(l: Location) { best.set(l); latch.countDown() }
@@ -526,7 +527,7 @@ class CreateItemActivity : AppCompatActivity() {
         }
         for (p in providers) { try { lm.requestLocationUpdates(p, 0L, 0f, listener, mainLooper) } catch (_: Exception) {} }
         thread {
-            if (best.get() == null) latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+            latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
             runOnUiThread {
                 try { lm.removeUpdates(listener) } catch (_: Exception) {}
                 loading.dismiss()
