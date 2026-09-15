@@ -122,9 +122,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 }
             }
         } else {
-            // 相机取消/启动失败：自动降级到相册
-            toast("拍照未完成，已切换到相册")
-            pickImage.launch("image/*")
+            // v1.1.8：相机取消直接返回（不降级相册，保证拍照实时性）
+            toast("拍照未完成")
         }
     }
     private val pickImage = fragment.registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -298,8 +297,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             pendingPhotoUri = uri
             takePhoto.launch(uri)
         } catch (e: Exception) {
-            toast("无法启动相机，已切换到相册")
-            pickImage.launch("image/*")
+            // v1.1.8：相机启动失败直接返回（不降级相册）
+            toast("无法启动相机")
         }
     }
 

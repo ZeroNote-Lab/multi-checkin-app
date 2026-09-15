@@ -48,20 +48,21 @@ object DateUtils {
      *  - [t1, t2)    操作 → 归属今天，记为「打卡成功」(SUCCESS)
      *  - [t2, 24:00) 操作 → 归属今天，记为「未打卡」(FAIL)
      */
-    fun customSlot(nowTs: Long, t1: String, t2: String): CustomSlot {
-        val a = parseHHmm(t1); val b = parseHHmm(t2)
-        val now = nowMinutesOf(nowTs)
-        val cal = Calendar.getInstance()
-        cal.timeInMillis = nowTs
-        return when {
-            a >= 0 && b >= 0 && now in a until b -> CustomSlot(dayFmt.format(cal.time), "SUCCESS")
-            a >= 0 && now < a -> {
-                cal.add(Calendar.DAY_OF_YEAR, -1)
-                CustomSlot(dayFmt.format(cal.time), "FAIL")
-            }
-            else -> CustomSlot(dayFmt.format(cal.time), "FAIL")
-        }
-    }
+    // v1.1.8：双时间自定义负打卡已移除，customSlot 逻辑不再使用（保留注释备查）
+    // fun customSlot(nowTs: Long, t1: String, t2: String): CustomSlot {
+    //     val a = parseHHmm(t1); val b = parseHHmm(t2)
+    //     val now = nowMinutesOf(nowTs)
+    //     val cal = Calendar.getInstance()
+    //     cal.timeInMillis = nowTs
+    //     return when {
+    //         a >= 0 && b >= 0 && now in a until b -> CustomSlot(dayFmt.format(cal.time), "SUCCESS")
+    //         a >= 0 && now < a -> {
+    //             cal.add(Calendar.DAY_OF_YEAR, -1)
+    //             CustomSlot(dayFmt.format(cal.time), "FAIL")
+    //         }
+    //         else -> CustomSlot(dayFmt.format(cal.time), "FAIL")
+    //     }
+    // }
 
     private fun nowMinutesOf(ts: Long): Int {
         val c = Calendar.getInstance()

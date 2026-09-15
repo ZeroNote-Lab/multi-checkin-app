@@ -83,11 +83,18 @@ class MonthCalendarView @JvmOverloads constructor(
                 paint.color = bg
                 paint.style = Paint.Style.FILL
                 canvas.drawRoundRect(RectF(cx - radius, cy - radius, cx + radius, cy + radius), radius*0.3f, radius*0.3f, paint)
-            } else if (inMonth && today) {
+            }
+            // v1.1.8：今天无论是否有操作都画主题色外边框；白线内衬避免与填充色冲突
+            if (inMonth && today) {
+                val d = resources.displayMetrics.density
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2f * resources.displayMetrics.density
+                paint.strokeWidth = 2f * d
                 paint.color = themeColor
                 canvas.drawRoundRect(RectF(cx - radius, cy - radius, cx + radius, cy + radius), radius*0.3f, radius*0.3f, paint)
+                paint.color = 0xFFFFFFFF.toInt()
+                paint.strokeWidth = 1f * d
+                val inset = 2.5f * d
+                canvas.drawRoundRect(RectF(cx - radius + inset, cy - radius + inset, cx + radius - inset, cy + radius - inset), radius*0.3f, radius*0.3f, paint)
                 paint.style = Paint.Style.FILL
             }
             textPaint.textSize = 14f * resources.displayMetrics.scaledDensity

@@ -30,7 +30,7 @@ object CheckinEngine {
     fun cfg(item: CheckinItem) = ItemConfig.parse(item.configJson)
 
     /** 该方式集合是否为负打卡语义（普通负打卡 或 双时间自定义负打卡） */
-    fun isNegative(c: ItemConfig) = c.negative || c.customNeg
+    fun isNegative(c: ItemConfig) = c.negative // v1.1.8：移除双时间自定义负打卡
 
     // ---------- 打卡日期判定（v6.1.0） ----------
     /** 某天是否属于该打卡项的需打卡日；false = 无需打卡（SKIP） */
@@ -80,8 +80,7 @@ object CheckinEngine {
                 val success = records.any { it.status == "SUCCESS" }
                 val st = when {
                     !neg && methods.size > 1 -> if (comboAll) DayState.SUCCESS else DayState.PARTIAL // v1.1.6：组合未全完成=部分完成（黄色）
-                    neg && !c.customNeg -> DayState.FAIL            // 普通负打卡：有操作=破戒失败
-                    c.customNeg -> if (records.any { it.status == "FAIL" }) DayState.FAIL else DayState.SUCCESS
+                    neg -> DayState.FAIL            // 负打卡：有操作=破戒失败
                     success -> DayState.SUCCESS
                     else -> DayState.FAIL
                 }
@@ -168,20 +167,9 @@ object CheckinEngine {
             return CheckinResult.Blocked(reason)
         }
 
-        // 归属日期与状态：自定义负打卡按双时间三段归属，其余按自然日
-        val date: String
-        val status: String
-        if (c.customNeg && !isAuto) {
-            val slot = DateUtils.customSlot(now, c.t1, c.t2)
-            date = slot.date; status = slot.status
-            // 成功时段：当天已成功则拦截，避免重复
-            if (status == "SUCCESS" && repo.recordsOfDay(item.id, date).any { it.status == "SUCCESS" }) {
-                return CheckinResult.Blocked("今天已在 ${c.t1}–${c.t2} 时段打卡成功")
-            }
-        } else {
-            date = DateUtils.dateOf(now)
-            status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
-        }
+        // 归属日期与状态（v1.1.8：移除双时间自定义负打卡，统一按自然日归属）
+        val date = DateUtils.dateOf(now)
+        val status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
 
         // 无需打卡日：不允许打卡
         if (!isScheduledDay(item, date)) return CheckinResult.Blocked("今日无需打卡")

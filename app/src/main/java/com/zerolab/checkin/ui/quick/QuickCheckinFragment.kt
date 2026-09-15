@@ -166,14 +166,14 @@ class QuickCheckinFragment : Fragment() {
             sb.append("●").append(label).append("  ")
             sb.setSpan(ForegroundColorSpan(color), s, s + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
-        sb.append("○今日未打卡  ")
+        sb.append("○今日  ")
         if (CheckinEngine.isNegative(cfg)) {
-            dot(0xFF2FBF71.toInt(), "成功"); dot(0xFFEF5350.toInt(), "破戒"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFF59E0B.toInt(), "无需打卡")
+            dot(0xFF2FBF71.toInt(), "已打卡"); dot(0xFFEF5350.toInt(), "破戒"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFF59E0B.toInt(), "无需打卡")
         } else {
-            dot(0xFF2FBF71.toInt(), "成功"); dot(0xFFEF5350.toInt(), "缺卡"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFFFC53D.toInt(), "部分完成"); dot(0xFFF59E0B.toInt(), "无需打卡")
+            dot(0xFF2FBF71.toInt(), "已打卡"); dot(0xFFEF5350.toInt(), "缺卡"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFFFC53D.toInt(), "部分完成"); dot(0xFFF59E0B.toInt(), "无需打卡")
         }
         sb.append("\n")
-        sb.append(if (CheckinEngine.isNegative(cfg)) "⏳今天尚未打卡  ✅成功  ↩补签  ⚡自动  ❌破戒/缺卡" else "⏳今天尚未打卡  ✅成功  ↩补签  ⚡自动  ❌缺卡")
+        sb.append(if (CheckinEngine.isNegative(cfg)) "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌破戒/缺卡" else "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌缺卡")
         legendTv.text = sb
     }
 
@@ -241,7 +241,7 @@ class QuickCheckinFragment : Fragment() {
             cfg.dailyLimit < 0 -> {
                 // v1.1.7：次数无限——打一次即完成当天（绿/红），按钮可继续打卡累加次数
                 if (cnt == 0) { statusView.text = "状态：未打卡"; btnCheckin.text = "打卡" }
-                else { statusView.text = "状态：已打卡 $cnt 次 ✓"; btnCheckin.text = "再打卡（$cnt）" }
+                else { statusView.text = "状态：已打卡 $cnt 次 ✓"; btnCheckin.text = "继续打卡（$cnt）" }
             }
             else -> {
                 if (cnt >= cfg.dailyLimit) { statusView.text = "状态：已完成 $cnt/${cfg.dailyLimit} ✓"; btnCheckin.text = "今日已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }

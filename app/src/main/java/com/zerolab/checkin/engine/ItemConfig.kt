@@ -24,9 +24,9 @@ class ItemConfig {
     val methods: MutableSet<String> = linkedSetOf("NORMAL")
     var dailyLimit: Int = 1                 // 每日次数，-1 不限
     var negative: Boolean = false           // 负打卡：状态反转（操作=失败，无操作=成功）
-    var customNeg: Boolean = false          // 双时间点自定义负打卡
-    var t1: String = "05:00"
-    var t2: String = "15:00"
+    var customNeg: Boolean = false          // 已废弃 v1.1.8（仅兼容老数据解析，不再参与任何逻辑）
+    var t1: String = "05:00"                // 已废弃 v1.1.8
+    var t2: String = "15:00"                // 已废弃 v1.1.8
     var timeWindowEnabled: Boolean = false     // 固定时间段打卡（v1.1.6）：仅窗口内可打卡成功
     var twStart: String = "05:00"              // 窗口开始（不含跨天）
     var twEnd: String = "08:30"                // 窗口结束
