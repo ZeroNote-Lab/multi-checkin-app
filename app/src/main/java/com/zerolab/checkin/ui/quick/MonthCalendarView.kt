@@ -79,22 +79,30 @@ class MonthCalendarView @JvmOverloads constructor(
                 info.state == DayState.PARTIAL -> partialC     // v1.1.6 部分完成：黄色
                 else -> 0
             }
-            if (bg != 0) {
+            // 非今天：填充画满整个圆角矩形
+            if (bg != 0 && !(inMonth && today)) {
                 paint.color = bg
                 paint.style = Paint.Style.FILL
                 canvas.drawRoundRect(RectF(cx - radius, cy - radius, cx + radius, cy + radius), radius*0.3f, radius*0.3f, paint)
             }
-            // v1.1.8：今天无论是否有操作都画主题色外边框；白线内衬避免与填充色冲突
+            // v1.1.8：今天恒画主题色外边框。有填充时结构为 外框|白线|内部颜色（填充整体内缩，
+            // 白线紧贴外框内侧，三层连续无缝隙）；无填充时仅外框（白线落在白底上天然隐形）。
             if (inMonth && today) {
                 val d = resources.displayMetrics.density
+                if (bg != 0) {
+                    val fr = radius - 2.5f * d
+                    paint.color = bg
+                    paint.style = Paint.Style.FILL
+                    canvas.drawRoundRect(RectF(cx - fr, cy - fr, cx + fr, cy + fr), fr * 0.3f, fr * 0.3f, paint)
+                }
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 2f * d
                 paint.color = themeColor
                 canvas.drawRoundRect(RectF(cx - radius, cy - radius, cx + radius, cy + radius), radius*0.3f, radius*0.3f, paint)
                 paint.color = 0xFFFFFFFF.toInt()
-                paint.strokeWidth = 1f * d
-                val inset = 2.5f * d
-                canvas.drawRoundRect(RectF(cx - radius + inset, cy - radius + inset, cx + radius - inset, cy + radius - inset), radius*0.3f, radius*0.3f, paint)
+                paint.strokeWidth = 1.5f * d
+                val wr = radius - 1.75f * d
+                canvas.drawRoundRect(RectF(cx - wr, cy - wr, cx + wr, cy + wr), wr * 0.3f, wr * 0.3f, paint)
                 paint.style = Paint.Style.FILL
             }
             textPaint.textSize = 14f * resources.displayMetrics.scaledDensity
