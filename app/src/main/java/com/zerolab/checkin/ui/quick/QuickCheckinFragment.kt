@@ -9,6 +9,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import androidx.fragment.app.Fragment
 import androidx.appcompat.app.AlertDialog
 import com.zerolab.checkin.CheckinApp
@@ -155,11 +158,23 @@ class QuickCheckinFragment : Fragment() {
             d = DateUtils.addDays(d, 1)
         }
         calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg)) { date -> showDayDetail(date) }
-        // 图例随模式变化（v1.1.6：两行——上=日历圆圈颜色+含义，下=备注栏图示）
-        val legend = if (CheckinEngine.isNegative(cfg))
-            "🟢成功 🔴破戒 🔵补签 🟠无需打卡 ○今日未打卡\n⏳今天尚未打卡 ✅成功 ↩补签 ⚡自动 ❌破戒/缺卡"
-        else "🟢成功 🔴缺卡 🔵补签 🟡部分完成 🟠无需打卡 ○今日未打卡\n⏳今天尚未打卡 ✅成功 ↩补签 ⚡自动 ❌缺卡"
-        root.findViewById<TextView>(R.id.tv_legend).text = legend
+        // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽）
+        val legendTv = root.findViewById<TextView>(R.id.tv_legend)
+        val sb = SpannableStringBuilder()
+        fun dot(color: Int, label: String) {
+            val s = sb.length
+            sb.append("●").append(label).append("  ")
+            sb.setSpan(ForegroundColorSpan(color), s, s + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        sb.append("○今日未打卡  ")
+        if (CheckinEngine.isNegative(cfg)) {
+            dot(0xFF2FBF71.toInt(), "成功"); dot(0xFFEF5350.toInt(), "破戒"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFF59E0B.toInt(), "无需打卡")
+        } else {
+            dot(0xFF2FBF71.toInt(), "成功"); dot(0xFFEF5350.toInt(), "缺卡"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFFFC53D.toInt(), "部分完成"); dot(0xFFF59E0B.toInt(), "无需打卡")
+        }
+        sb.append("\n")
+        sb.append(if (CheckinEngine.isNegative(cfg)) "⏳今天尚未打卡  ✅成功  ↩补签  ⚡自动  ❌破戒/缺卡" else "⏳今天尚未打卡  ✅成功  ↩补签  ⚡自动  ❌缺卡")
+        legendTv.text = sb
     }
 
     private fun renderToday() {
@@ -193,9 +208,11 @@ class QuickCheckinFragment : Fragment() {
                 // v1.1.6 固定时间段打卡：窗口外禁用并提示（未到/已过）
                 val a = DateUtils.parseHHmm(cfg.twStart); val b = DateUtils.parseHHmm(cfg.twEnd)
                 val nowMin = DateUtils.nowMinutes()
-                statusView.text = if (nowMin < a) "状态：未到打卡时间（${cfg.twStart}–${cfg.twEnd}）"
-                    else "状态：已过打卡时间（${cfg.twStart}–${cfg.twEnd}）"
-                btnCheckin.text = if (nowMin < a) "未到打卡时间" else "已过打卡时间"
+                // v1.1.7：已过窗口结束时间 → 当天直接判定未打卡（红色），未到 → 保持等待
+                val passed = nowMin >= b
+                statusView.text = if (passed) "状态：今日未打卡（已过打卡时间）"
+                    else "状态：未到打卡时间（${cfg.twStart}–${cfg.twEnd}）"
+                btnCheckin.text = if (passed) "已过打卡时间" else "未到打卡时间"
                 btnCheckin.isEnabled = false; grayBtn()
             }
             isAuto -> { statusView.text = "状态：自动打卡（前台自动完成）"; btnCheckin.text = "⚡ 自动打卡，无需操作"; btnCheckin.isEnabled = false; grayBtn() }
@@ -218,8 +235,13 @@ class QuickCheckinFragment : Fragment() {
                 if (done >= interactive.size) { statusView.text = "状态：今日已完成 ✓"; btnCheckin.text = "今日已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
                 else { statusView.text = "状态：$done/${interactive.size}"; btnCheckin.text = if (done == 0) "打卡" else "继续打卡 ($done/${interactive.size})" }
             }
-            cfg.dailyLimit <= 1 -> {
+            cfg.dailyLimit == 1 -> {
                 if (cnt == 0) { statusView.text = "状态：未打卡"; btnCheckin.text = "打卡" } else { statusView.text = "状态：已打卡 ✓"; btnCheckin.text = "已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
+            }
+            cfg.dailyLimit < 0 -> {
+                // v1.1.7：次数无限——打一次即完成当天（绿/红），按钮可继续打卡累加次数
+                if (cnt == 0) { statusView.text = "状态：未打卡"; btnCheckin.text = "打卡" }
+                else { statusView.text = "状态：已打卡 $cnt 次 ✓"; btnCheckin.text = "再打卡（$cnt）" }
             }
             else -> {
                 if (cnt >= cfg.dailyLimit) { statusView.text = "状态：已完成 $cnt/${cfg.dailyLimit} ✓"; btnCheckin.text = "今日已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
@@ -324,6 +346,8 @@ class QuickCheckinFragment : Fragment() {
     private fun voicePlayButton(path: String): View {
         val btn = Button(requireContext())
         btn.text = "🎤 播放"; btn.textSize = 12f
+        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF39C5BB.toInt())
+        btn.setTextColor(android.graphics.Color.WHITE)
         btn.setPadding(28, 14, 28, 14)
         btn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             .apply { marginEnd = 8; gravity = Gravity.CENTER_VERTICAL }

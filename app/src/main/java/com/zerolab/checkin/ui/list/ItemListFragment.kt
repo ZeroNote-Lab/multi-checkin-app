@@ -9,6 +9,7 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
@@ -28,6 +29,7 @@ class ItemListFragment : Fragment() {
     private val repo get() = (requireActivity().application as CheckinApp).repository
     private val items = mutableListOf<CheckinItem>()
     private lateinit var adapter: CardAdapter
+    private lateinit var touchHelper: ItemTouchHelper
 
     override fun onCreateView(inflater: LayoutInflater, c: ViewGroup?, b: Bundle?): View {
         return inflater.inflate(R.layout.fragment_item_list, c, false)
@@ -39,6 +41,28 @@ class ItemListFragment : Fragment() {
         recycler.layoutManager = LinearLayoutManager(requireContext())
         adapter = CardAdapter()
         recycler.adapter = adapter
+        // v1.1.7：长按卡片右侧手柄拖动排序（置顶项不可拖）
+        touchHelper = ItemTouchHelper(object : ItemTouchHelper.Callback() {
+            override fun getMovementFlags(rv: RecyclerView, vh: RecyclerView.ViewHolder): Int =
+                makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
+            override fun onMove(rv: RecyclerView, src: RecyclerView.ViewHolder, dst: RecyclerView.ViewHolder): Boolean {
+                val from = src.bindingAdapterPosition; val to = dst.bindingAdapterPosition
+                if (from < 0 || to < 0 || from == to) return false
+                // 置顶项不参与拖动（源/目标任一为置顶即拒绝）
+                if (items[from].isPinned == 1 || items[to].isPinned == 1) return false
+                val moved = items.removeAt(from); items.add(to, moved)
+                adapter.moveRow(from, to)
+                persistOrder()
+                return true
+            }
+            override fun onSwiped(vh: RecyclerView.ViewHolder, direction: Int) {}
+            override fun isLongPressDragEnabled() = false // 由手柄触发
+            override fun clearView(rv: RecyclerView, vh: RecyclerView.ViewHolder) {
+                super.clearView(rv, vh)
+                persistOrder()
+            }
+        })
+        touchHelper.attachToRecyclerView(recycler)
         view.findViewById<ImageButton>(R.id.btn_add).setOnClickListener {
             startActivity(Intent(requireContext(), CreateItemActivity::class.java))
         }
@@ -47,6 +71,13 @@ class ItemListFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         reload()
+    }
+
+    /** v1.1.7：拖拽后持久化未置顶项排序（置顶项不受影响） */
+    private fun persistOrder() {
+        thread {
+            items.filter { it.isPinned == 0 }.forEachIndexed { idx, it -> repo.setSortOrder(it.id, idx) }
+        }
     }
 
     fun reload() {
@@ -79,6 +110,12 @@ class ItemListFragment : Fragment() {
         fun submit(data: List<Triple<CheckinItem, Int, Int>>, qid: Long?) {
             rows.clear(); rows.addAll(data.map { Row(it.first, it.second, it.third) })
             quickId = qid; notifyDataSetChanged()
+
+        }
+
+        fun moveRow(from: Int, to: Int) {
+            val r = rows.removeAt(from); rows.add(to, r)
+            notifyItemMoved(from, to)
         }
 
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
@@ -88,7 +125,7 @@ class ItemListFragment : Fragment() {
             val type: TextView = v.findViewById(R.id.tv_type)
             val streak: TextView = v.findViewById(R.id.tv_streak)
             val credits: TextView = v.findViewById(R.id.tv_credits)
-            val star: ImageView = v.findViewById(R.id.iv_star)
+            val drag: TextView = v.findViewById(R.id.tv_drag)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -105,12 +142,19 @@ class ItemListFragment : Fragment() {
             h.iconBg.background?.setTint(0xFFEFF1F6.toInt())
             h.emoji.text = theme.emoji
             // v1.1.6：置顶卡片名称前加 📌 标记
-            h.name.text = (if (item.isPinned == 1) "📌 " else "") + (if (item.isActive == 0) "${item.name}（已暂停）" else item.name)
+            // v1.1.7：星标（快捷打卡）与置顶 📌 同为名称行内前缀
+            val badges = StringBuilder()
+            if (quickId == item.id) badges.append("⭐ ")
+            if (item.isPinned == 1) badges.append("📌 ")
+            h.name.text = badges.toString() + (if (item.isActive == 0) "${item.name}（已暂停）" else item.name)
             h.type.text = methodLabel(item)
             h.streak.text = "🔥 ${row.streak}天"
             if (row.credits > 0) { h.credits.visibility = View.VISIBLE; h.credits.text = "🛡️×${row.credits}" }
             else h.credits.visibility = View.GONE
-            h.star.visibility = if (quickId == item.id) View.VISIBLE else View.GONE
+            // v1.1.7：拖动手柄——置顶项隐藏（不可拖动），暂停项弱化
+            h.drag.visibility = if (item.isPinned == 1) View.INVISIBLE else View.VISIBLE
+            h.drag.alpha = if (item.isActive == 0) 0.3f else 1f
+            h.drag.setOnLongClickListener { touchHelper.startDrag(h); true }
             h.itemView.alpha = if (item.isActive == 0) 0.5f else 1f
             // v1.1.6：置顶卡片背景加深（浅暖色），与普通卡片区分
             h.itemView.background?.mutate()?.setTint(if (item.isPinned == 1) 0xFFF1EBD8.toInt() else 0xFFFFFFFF.toInt())
