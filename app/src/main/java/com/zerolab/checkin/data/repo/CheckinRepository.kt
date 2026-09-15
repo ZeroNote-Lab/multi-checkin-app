@@ -36,10 +36,18 @@ class CheckinRepository(private val db: AppDatabase) {
 
     fun setPinned(id: Long, pinned: Boolean) {
         val it = itemDao.getById(id) ?: return
-        itemDao.update(
-            it.copy(isPinned = if (pinned) 1 else 0, pinnedAt = if (pinned) System.currentTimeMillis() else null)
-        )
+        if (pinned) {
+            itemDao.update(
+                it.copy(isPinned = 1, pinnedAt = System.currentTimeMillis())
+            )
+        } else {
+            // v1.1.7：取消置顶 → 插入未置顶区最上方（sortOrder 最小），其余未置顶依次后移
+            val unpinned = itemDao.getAllSorted().filter { x -> x.id != id && x.isPinned == 0 }
+            itemDao.update(it.copy(isPinned = 0, pinnedAt = null, sortOrder = 0))
+            unpinned.forEachIndexed { idx, x -> itemDao.updateSortOrder(x.id, idx + 1) }
+        }
     }
+    fun setSortOrder(id: Long, order: Int) = itemDao.updateSortOrder(id, order)
 
     fun setActive(id: Long, active: Boolean) {
         val it = itemDao.getById(id) ?: return

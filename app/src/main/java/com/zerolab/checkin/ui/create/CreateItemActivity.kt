@@ -179,6 +179,15 @@ class CreateItemActivity : AppCompatActivity() {
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
+                if (on && findViewById<CompoundButton>(R.id.cb_time_window).isChecked && m.key == Method.AUTO.key) {
+                    // v1.1.7：固定时间段已开启时点自动打卡 → 互斥提示
+                    sw.isChecked = false
+                    panel.visibility = View.GONE
+                    cfg.methods.remove(m.key)
+                    toast("温馨提示：固定时间段与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                    refreshConflicts()
+                    return@setOnCheckedChangeListener
+                }
                 if (on && m.key in Method.conflictsWith(cfg.methods)) {
                     // 尝试开启互斥方式：拒绝切换并提示
                     sw.isChecked = false
@@ -423,7 +432,7 @@ class CreateItemActivity : AppCompatActivity() {
         rows.forEach { (key, row) ->
             val isBlocked = key in blocked
             val twBlock = twOn && key == Method.AUTO.key
-            row.switch.isEnabled = !locked && !twBlock
+            row.switch.isEnabled = !locked // v1.1.7：保持可点击，点击时在监听器里弹互斥提示
             row.switch.alpha = if (isBlocked || twBlock) 0.4f else 1f
             if (isBlocked && row.switch.isChecked) {
                 row.switch.isChecked = false // 双保险
@@ -434,7 +443,7 @@ class CreateItemActivity : AppCompatActivity() {
         }
         // v1.1.6 反向互斥：自动已选时固定时间段不可选
         val autoOn = Method.AUTO.key in cfg.methods
-        findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = !locked && !autoOn
+        findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = !locked // v1.1.7：保持可点击，点击时在监听器里弹互斥提示
         if (autoOn) findViewById<CompoundButton>(R.id.cb_time_window).alpha = 0.4f
         else findViewById<CompoundButton>(R.id.cb_time_window).alpha = 1f
         // v1.1.4：组合打卡（多方式）每日次数固定为 1，不可调整
@@ -476,6 +485,13 @@ class CreateItemActivity : AppCompatActivity() {
             refreshConflicts()
         }
         cbTw.setOnCheckedChangeListener { _, on ->
+            if (on && Method.AUTO.key in cfg.methods) {
+                // v1.1.7：自动打卡已开启时点固定时间段 → 互斥提示
+                cbTw.isChecked = false
+                toast("温馨提示：固定时间段与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                refreshConflicts()
+                return@setOnCheckedChangeListener
+            }
             if (on) { cbNeg.isChecked = false; cbCustom.isChecked = false }
             findViewById<View>(R.id.tw_panel).visibility = if (on) View.VISIBLE else View.GONE
             refreshConflicts()

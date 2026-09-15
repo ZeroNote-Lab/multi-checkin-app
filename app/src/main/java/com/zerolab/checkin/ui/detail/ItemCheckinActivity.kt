@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.ui.detail
+package com.zerolab.checkin.ui.detail
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeManager
 import com.zerolab.checkin.ui.quick.NfcHub
 import com.zerolab.checkin.ui.quick.QuickCheckinFragment
 
@@ -32,7 +33,7 @@ class ItemCheckinActivity : AppCompatActivity() {
         if (item == null) { finish(); return }
 
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
-        findViewById<TextView>(R.id.tv_title).text = item.name
+        findViewById<TextView>(R.id.tv_title).text = "${ThemeManager.of(item.theme).emoji} ${item.name}" // v1.1.7：顶部显示主题emoji
         findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
             startActivity(Intent(this, ItemDetailActivity::class.java).putExtra(ItemDetailActivity.EXTRA_ID, id))
         }

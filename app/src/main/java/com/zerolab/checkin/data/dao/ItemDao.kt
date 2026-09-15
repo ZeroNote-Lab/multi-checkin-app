@@ -28,4 +28,8 @@ interface ItemDao {
 
     @Query("SELECT COUNT(*) FROM checkin_item")
     fun count(): Int
+
+    // v1.1.7：拖拽排序持久化
+    @Query("UPDATE checkin_item SET sortOrder = :order WHERE id = :id")
+    fun updateSortOrder(id: Long, order: Int)
 }

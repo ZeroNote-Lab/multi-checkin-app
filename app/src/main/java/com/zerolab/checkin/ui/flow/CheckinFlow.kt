@@ -559,7 +559,11 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     // ---------- 语音 ----------
     private fun doVoice() {
         val c = cfg ?: return
-        val btn = Button(ctx).apply { text = "开始录音（最长 ${c.voiceMaxSeconds} 秒）"; setPadding(40, 60, 40, 60) }
+        val btn = Button(ctx).apply {
+            text = "开始录音（最长 ${c.voiceMaxSeconds} 秒）"; setPadding(40, 60, 40, 60)
+            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF39C5BB.toInt())
+            setTextColor(android.graphics.Color.WHITE)
+        }
         val dlg = AlertDialog.Builder(ctx).setTitle("语音打卡").setView(btn).setNegativeButton("取消", null).create()
         var recording = false
         btn.setOnClickListener {

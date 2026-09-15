@@ -73,7 +73,7 @@ class MonthCalendarView @JvmOverloads constructor(
                 !inMonth -> 0
                 info == null -> if (date > DateUtils.today()) 0 else 0
                 info.state == DayState.SUCCESS -> successC      // 手动/自动成功统一绿色
-                info.state == DayState.FAIL -> if (date == DateUtils.today()) 0 else failC // 今天不填充（保留描边），次日缺卡红
+            info.state == DayState.FAIL -> if (date == DateUtils.today() && info.records.isEmpty() && !info.finalToday) 0 else failC // v1.1.7：破戒/固定时间段超时当天红；普通缺卡次日红
                 info.state == DayState.OFFSET -> offsetC
                 info.state == DayState.SKIP -> skipC            // 无需打卡日：橙色
                 info.state == DayState.PARTIAL -> partialC     // v1.1.6 部分完成：黄色

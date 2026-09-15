@@ -15,7 +15,8 @@ data class DayInfo(
     val state: DayState,
     val count: Int,            // 当日记录条数
     val isAuto: Boolean,
-    val records: List<CheckinRecord>
+    val records: List<CheckinRecord>,
+    val finalToday: Boolean = false   // v1.1.7：当天已定论（固定时间段超时未打卡当天即红）
 )
 
 sealed class CheckinResult {
@@ -86,6 +87,10 @@ object CheckinEngine {
                 }
                 DayInfo(date, st, records.size, auto, records)
             }
+            // v1.1.7：固定时间段——已过窗口结束时间且今天仍未打卡 → 当天直接判定缺卡（不等次日）
+            date == today && c.timeWindowEnabled && records.isEmpty() &&
+                DateUtils.nowMinutes() > DateUtils.parseHHmm(c.twEnd) ->
+                DayInfo(date, DayState.FAIL, 0, false, records, finalToday = true)
             date == today -> DayInfo(date, DayState.UNCHECKED, 0, false, records) // 今天进行中
             else -> {
                 // 过去且无记录：正常=缺卡（红色显示）；负打卡=无操作成功
