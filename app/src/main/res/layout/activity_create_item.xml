@@ -122,14 +122,6 @@
                     android:textSize="13sp" />
 
                 <RadioButton
-                    android:id="@+id/cb_custom_neg"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="双时间自定义负打卡（限定可记录时段）"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
-
-                <RadioButton
                     android:id="@+id/cb_time_window"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -165,35 +157,6 @@
                         android:textSize="12sp"
                         android:text="仅在所选时间段内可打卡成功；不支持跨天（如 23:00–01:00）；开启后将无法选择自动打卡。" />
                 </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/custom_neg_panel"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="12dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="时间点1  " android:textColor="@color/text_secondary"/>
-                        <Button android:id="@+id/btn_t1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:insetTop="0dp" android:insetBottom="0dp" android:text="05:00" android:textColor="@color/brand_dark"/>
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="16dp" android:text="时间点2  " android:textColor="@color/text_secondary"/>
-                        <Button android:id="@+id/btn_t2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:insetTop="0dp" android:insetBottom="0dp" android:text="15:00" android:textColor="@color/brand_dark"/>
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tv_custom_hint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:paddingHorizontal="12dp"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
 
             </LinearLayout>
 

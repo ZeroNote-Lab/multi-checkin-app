@@ -472,17 +472,10 @@ class CreateItemActivity : AppCompatActivity() {
             dailyLimit = if (dailyLimit == -1) 1 else dailyLimit + 1; renderLimit()
         }
         val cbNeg = findViewById<CompoundButton>(R.id.cb_negative)
-        val cbCustom = findViewById<CompoundButton>(R.id.cb_custom_neg)
         val cbTw = findViewById<CompoundButton>(R.id.cb_time_window)
-        // v1.1.6：负打卡 / 双时间自定义负打卡 / 固定时间段打卡 三者互斥（圆形单选）
+        // v1.1.6：负打卡 / 固定时间段打卡 互斥（圆形单选）；双时间自定义负打卡 v1.1.8 起移除
         cbNeg.setOnCheckedChangeListener { _, on ->
-            if (on) { cbCustom.isChecked = false; cbTw.isChecked = false }
-        }
-        cbCustom.setOnCheckedChangeListener { _, on ->
-            if (on) { cbNeg.isChecked = false; cbTw.isChecked = false }
-            findViewById<View>(R.id.custom_neg_panel).visibility = if (on) View.VISIBLE else View.GONE
-            updateCustomHint()
-            refreshConflicts()
+            if (on) { cbTw.isChecked = false }
         }
         cbTw.setOnCheckedChangeListener { _, on ->
             if (on && Method.AUTO.key in cfg.methods) {
@@ -492,12 +485,10 @@ class CreateItemActivity : AppCompatActivity() {
                 refreshConflicts()
                 return@setOnCheckedChangeListener
             }
-            if (on) { cbNeg.isChecked = false; cbCustom.isChecked = false }
+            if (on) { cbNeg.isChecked = false }
             findViewById<View>(R.id.tw_panel).visibility = if (on) View.VISIBLE else View.GONE
             refreshConflicts()
         }
-        findViewById<Button>(R.id.btn_t1).setOnClickListener { pickTime(findViewById(R.id.btn_t1), true) }
-        findViewById<Button>(R.id.btn_t2).setOnClickListener { pickTime(findViewById(R.id.btn_t2), false) }
         findViewById<Button>(R.id.btn_tw_start).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_start), true) }
         findViewById<Button>(R.id.btn_tw_end).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_end), false) }
     }
@@ -510,23 +501,6 @@ class CreateItemActivity : AppCompatActivity() {
             btn.text = "%02d:%02d".format(hour, minute)
         }, h, mi, true).show()
     }
-
-    private fun pickTime(btn: Button, isT1: Boolean) {
-        val cur = btn.text.toString().split(":")
-        val h = cur[0].toInt(); val mi = cur[1].toInt()
-        TimePickerDialog(this, { _, hour, minute ->
-            btn.text = "%02d:%02d".format(hour, minute)
-            updateCustomHint()
-        }, h, mi, true).show()
-    }
-
-    private fun updateCustomHint() {
-        val t1 = findViewById<Button>(R.id.btn_t1).text.toString()
-        val t2 = findViewById<Button>(R.id.btn_t2).text.toString()
-        findViewById<TextView>(R.id.tv_custom_hint).text =
-            "00:00–$t1 操作 → 记「昨天未打卡」；$t1–$t2 操作 → 记「今天打卡成功」；$t2–24:00 操作 → 记「今天未打卡」；无操作默认成功。"
-    }
-
     // ---------- 抵消 ----------
     private fun bindOffset() {
         val cb = findViewById<CheckBox>(R.id.cb_offset)
@@ -612,8 +586,8 @@ class CreateItemActivity : AppCompatActivity() {
         val loaded = ItemConfig.parse(it.configJson)
         // 拷贝到工作 cfg
         cfg.methods.clear(); cfg.methods.addAll(loaded.methods)
-        cfg.dailyLimit = loaded.dailyLimit; cfg.negative = loaded.negative; cfg.customNeg = loaded.customNeg
-        cfg.t1 = loaded.t1; cfg.t2 = loaded.t2; cfg.offsetBackfill = loaded.offsetBackfill
+        cfg.dailyLimit = loaded.dailyLimit; cfg.negative = loaded.negative
+        cfg.offsetBackfill = loaded.offsetBackfill
         cfg.timeWindowEnabled = loaded.timeWindowEnabled; cfg.twStart = loaded.twStart; cfg.twEnd = loaded.twEnd
         cfg.photoFromCamera = loaded.photoFromCamera; cfg.photoFromAlbum = loaded.photoFromAlbum
         cfg.textMinWords = loaded.textMinWords; cfg.textNoRepeat = loaded.textNoRepeat
@@ -633,11 +607,6 @@ class CreateItemActivity : AppCompatActivity() {
         dailyLimit = cfg.dailyLimit
         findViewById<TextView>(R.id.tv_limit).text = if (dailyLimit < 0) "不限" else dailyLimit.toString()
         findViewById<CompoundButton>(R.id.cb_negative).isChecked = cfg.negative
-        findViewById<CompoundButton>(R.id.cb_custom_neg).isChecked = cfg.customNeg
-        findViewById<View>(R.id.custom_neg_panel).visibility = if (cfg.customNeg) View.VISIBLE else View.GONE
-        findViewById<Button>(R.id.btn_t1).text = cfg.t1
-        findViewById<Button>(R.id.btn_t2).text = cfg.t2
-        updateCustomHint()
         findViewById<CompoundButton>(R.id.cb_time_window).isChecked = cfg.timeWindowEnabled
         findViewById<View>(R.id.tw_panel).visibility = if (cfg.timeWindowEnabled) View.VISIBLE else View.GONE
         findViewById<Button>(R.id.btn_tw_start).text = cfg.twStart
@@ -698,15 +667,12 @@ class CreateItemActivity : AppCompatActivity() {
         toast(msg)
         rows.values.forEach { it.switch.isEnabled = false }
         findViewById<CompoundButton>(R.id.cb_negative).isEnabled = false
-        findViewById<CompoundButton>(R.id.cb_custom_neg).isEnabled = false
         findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = false
         findViewById<Button>(R.id.btn_tw_start).isEnabled = false
         findViewById<Button>(R.id.btn_tw_end).isEnabled = false
         findViewById<CheckBox>(R.id.cb_offset).isEnabled = false
         findViewById<Button>(R.id.btn_limit_minus).isEnabled = false
         findViewById<Button>(R.id.btn_limit_plus).isEnabled = false
-        findViewById<Button>(R.id.btn_t1).isEnabled = false
-        findViewById<Button>(R.id.btn_t2).isEnabled = false
         findViewById<RadioButton>(R.id.rb_mode_a).isEnabled = false
         findViewById<RadioButton>(R.id.rb_mode_b).isEnabled = false
         findViewById<RadioButton>(R.id.rb_mode_c).isEnabled = false
@@ -744,9 +710,6 @@ class CreateItemActivity : AppCompatActivity() {
     private fun collectConfigFromUi() {
         cfg.dailyLimit = dailyLimit
         cfg.negative = findViewById<CompoundButton>(R.id.cb_negative).isChecked
-        cfg.customNeg = findViewById<CompoundButton>(R.id.cb_custom_neg).isChecked
-        cfg.t1 = findViewById<Button>(R.id.btn_t1).text.toString()
-        cfg.t2 = findViewById<Button>(R.id.btn_t2).text.toString()
         cfg.timeWindowEnabled = findViewById<CompoundButton>(R.id.cb_time_window).isChecked
         cfg.twStart = findViewById<Button>(R.id.btn_tw_start).text.toString()
         cfg.twEnd = findViewById<Button>(R.id.btn_tw_end).text.toString()
@@ -818,10 +781,6 @@ class CreateItemActivity : AppCompatActivity() {
         if (Method.LOCATION.key in cfg.methods && cfg.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return }
         if (Method.PHOTO.key in cfg.methods && !cfg.photoFromCamera && !cfg.photoFromAlbum) { toast("拍照打卡需至少勾选一种图片来源"); return }
         if (Method.NFC.key in cfg.methods && cfg.nfcTagId.isBlank()) { toast("NFC打卡需先绑定 NFC 标签"); return }
-        if (cfg.customNeg) {
-            val a = DateUtils.parseHHmm(cfg.t1); val b = DateUtils.parseHHmm(cfg.t2)
-            if (a < 0 || b < 0 || a >= b) { toast("时间点1需早于时间点2（如 05:00 / 13:00）"); return }
-        }
         if (cfg.timeWindowEnabled) {
             val a = DateUtils.parseHHmm(cfg.twStart); val b = DateUtils.parseHHmm(cfg.twEnd)
             if (a < 0 || b < 0 || a >= b) { toast("时间段开始需早于结束（如 05:00 / 08:30），暂不支持跨天"); return }

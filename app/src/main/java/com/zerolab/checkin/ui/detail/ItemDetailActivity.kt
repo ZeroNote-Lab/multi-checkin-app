@@ -41,7 +41,7 @@ class ItemDetailActivity : AppCompatActivity() {
         sb.appendLine("打卡方式：${methodNames.joinToString(" + ")}")
         sb.appendLine("每日次数：${if (cfg.dailyLimit < 0) "不限" else cfg.dailyLimit}")
         sb.appendLine("负打卡（状态反转）：${if (cfg.negative) "是" else "否"}")
-        if (cfg.customNeg) sb.appendLine("双时间负打卡：${cfg.t1} / ${cfg.t2}")
+        // v1.1.8：双时间自定义负打卡已移除（老数据 customNeg 不再展示）
         if (cfg.textMinWords > 0 && Method.TEXT.key in cfg.methods) sb.appendLine("文字最低字数：${cfg.textMinWords}")
         if (Method.LOCATION.key in cfg.methods) {
             sb.appendLine("位置负打卡：${if (cfg.locNegative) "是（离开范围有效）" else "否（范围内有效）"}")
