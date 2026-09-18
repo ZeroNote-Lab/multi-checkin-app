@@ -221,8 +221,8 @@ class CreateItemActivity : AppCompatActivity() {
     private fun setJournalMode(on: Boolean) {
         if (journalMode == on) return
         if (on) {
-            // 切到随心记：自动移除不允许的方式并置灰提示（NORMAL/AUTO/NFC/STEPS/TIMER）
-            val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key)
+            // 切到随心记：自动移除不允许的方式并置灰提示（NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE）
+            val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key)
             forbidden.forEach { k ->
                 if (k in cfg.methods) {
                     cfg.methods.remove(k)
@@ -331,13 +331,22 @@ class CreateItemActivity : AppCompatActivity() {
             buildMethodParam(m, panel)
             card.addView(head); card.addView(panel)
             sw.setOnCheckedChangeListener { _, on ->
-                // v1.2.0：随心记仅禁用 NORMAL/AUTO/NFC/STEPS/TIMER，其余方式可正常开启
-                val journalForbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key)
+                // v1.2.1：随心记禁用 NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE，其余方式可正常开启
+                val journalForbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key)
                 if (on && journalMode && m.key in journalForbidden) {
                     sw.isChecked = false
                     panel.visibility = View.GONE
                     cfg.methods.remove(m.key)
                     toast("温馨提示：随心记暂不支持「${m.label}」哦 (｡•́︿•̀｡)")
+                    refreshConflicts()
+                    return@setOnCheckedChangeListener
+                }
+                if (on && m.key == Method.AUTO.key && findViewById<CompoundButton>(R.id.cb_negative).isChecked) {
+                    // v1.2.1：负打卡已开启时点自动打卡 → 互斥提示
+                    sw.isChecked = false
+                    panel.visibility = View.GONE
+                    cfg.methods.remove(m.key)
+                    toast("温馨提示：负打卡与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
@@ -575,10 +584,13 @@ class CreateItemActivity : AppCompatActivity() {
                 panel.addView(sectionLabel("时长（分钟）"))
                 etTimer = input("25", true); panel.addView(etTimer)
                 panel.addView(sectionLabel("计时方式"))
+                // v1.2.1：RadioButton 必须设唯一 id，否则 RadioGroup 单选失效（双选 bug）
                 rbTimerCountdown = RadioButton(this).apply {
+                    id = View.generateViewId()
                     text = "倒计时：从设定时长倒数，时间到才能完成"; isChecked = true; textSize = 13f; setTextColor(0xFF1F2430.toInt())
                 }
                 rbTimerCountup = RadioButton(this).apply {
+                    id = View.generateViewId()
                     text = "正计时：从 0 开始计时，超过设定时长后才能完成"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
                 }
                 val rg = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
@@ -588,6 +600,13 @@ class CreateItemActivity : AppCompatActivity() {
                     text = "允许暂停保存：随时暂停保存进度，下次打卡继续计时"; isChecked = false; textSize = 13f; setTextColor(0xFF1F2430.toInt())
                 }
                 panel.addView(cbTimerPausable)
+                // v1.2.1：仅正计时支持暂停保存；倒计时不显示该勾选项
+                cbTimerPausable?.visibility = View.GONE
+                rg.setOnCheckedChangeListener { _, checkedId ->
+                    val countUp = checkedId == rbTimerCountup?.id
+                    cbTimerPausable?.visibility = if (countUp) View.VISIBLE else View.GONE
+                    if (!countUp) cbTimerPausable?.isChecked = false
+                }
             }
             Method.QRCODE -> {
                 // v1.2.0：二维码打卡可扫现有二维码绑定，也可用专属二维码
@@ -639,19 +658,25 @@ class CreateItemActivity : AppCompatActivity() {
     private fun refreshConflicts() {
         val blocked = Method.conflictsWith(cfg.methods)
         val twOn = findViewById<CompoundButton>(R.id.cb_time_window).isChecked
-        // v1.2.0：随心记额外禁用 NORMAL/AUTO/NFC/STEPS/TIMER
+        // v1.2.1：随心记额外禁用 NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE
         val journalBlocked = if (journalMode)
-            setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key) else emptySet()
+            setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key) else emptySet()
+        // v1.2.1：负打卡与自动打卡互斥（双向置灰，点击时在监听器里弹提示）
+        val negOn = findViewById<CompoundButton>(R.id.cb_negative).isChecked
         rows.forEach { (key, row) ->
             val isBlocked = key in blocked || key in journalBlocked
             val twBlock = twOn && key == Method.AUTO.key
+            val negBlock = negOn && key == Method.AUTO.key
             row.switch.isEnabled = !locked // v1.1.7：保持可点击，点击时在监听器里弹互斥提示
-            row.switch.alpha = if (isBlocked || twBlock) 0.4f else 1f
+            row.switch.alpha = if (isBlocked || twBlock || negBlock) 0.4f else 1f
             if (isBlocked && row.switch.isChecked) {
                 row.switch.isChecked = false // 双保险
             }
             if (twBlock && row.switch.isChecked) {
                 row.switch.isChecked = false // v1.1.6：时间段开启时自动打卡不可选
+            }
+            if (negBlock && row.switch.isChecked) {
+                row.switch.isChecked = false // v1.2.1：负打卡开启时自动打卡不可选
             }
         }
         // v1.1.6 反向互斥：自动已选时固定时间段不可选
@@ -676,9 +701,10 @@ class CreateItemActivity : AppCompatActivity() {
             btnLimitPlus?.isEnabled = true
         }
         // v1.2.0：随心记下频率与规则保持可点击（点击时在监听器里弹提示），视觉置灰
+        // v1.2.1：自动打卡已选时负打卡置灰（互斥）
         val ruleGrey = journalMode
         findViewById<CompoundButton>(R.id.cb_negative).isEnabled = !locked
-        findViewById<CompoundButton>(R.id.cb_negative).alpha = if (ruleGrey) 0.4f else 1f
+        findViewById<CompoundButton>(R.id.cb_negative).alpha = if (ruleGrey || autoOn) 0.4f else 1f
         findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = !locked
         findViewById<CompoundButton>(R.id.cb_time_window).alpha = if (ruleGrey || autoOn) 0.4f else 1f
         findViewById<Button>(R.id.btn_tw_start).isEnabled = !locked
@@ -717,22 +743,45 @@ class CreateItemActivity : AppCompatActivity() {
         }
         val cbNeg = findViewById<CompoundButton>(R.id.cb_negative)
         val cbTw = findViewById<CompoundButton>(R.id.cb_time_window)
+        // v1.2.1（bug4）：独立 RadioButton 点击已选中项默认不取消。
+        // performClick 先 toggle 再回调 onClickListener：点击前未选中会触发 OnCheckedChangeListener
+        // （JustToggled=true，表示刚选中，不取消）；点击前已选中不触发（JustToggled=false，手动取消）。
+        var negJustToggled = false
+        var twJustToggled = false
         // v1.1.6：负打卡 / 固定时间段打卡 互斥（圆形单选）；双时间自定义负打卡 v1.1.8 起移除
         cbNeg.setOnCheckedChangeListener { _, on ->
+            negJustToggled = true
             if (on) {
                 if (journalMode) {  // v1.2.0：随心记不支持负打卡
                     cbNeg.isChecked = false
                     toast("温馨提示：随心记不记录失败，暂不支持负打卡哦 (｡•́︿•̀｡)")
+                    refreshConflicts()
+                    return@setOnCheckedChangeListener
+                }
+                if (Method.AUTO.key in cfg.methods) {  // v1.2.1：负打卡与自动打卡互斥
+                    cbNeg.isChecked = false
+                    toast("温馨提示：负打卡与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                    refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
                 cbTw.isChecked = false
                 hideTimerAdvancedOptions()   // v1.2.0：负打卡开启时隐藏正计时/暂停选项（保持原倒计时）
+            } else {
+                showTimerAdvancedOptions()   // v1.2.1：取消负打卡后恢复正计时/暂停选项
             }
+            refreshConflicts()
+        }
+        // v1.2.1（bug4）：已选中再点击 → 取消选中
+        cbNeg.setOnClickListener {
+            if (cbNeg.isChecked && !negJustToggled) cbNeg.isChecked = false
+            negJustToggled = false
         }
         cbTw.setOnCheckedChangeListener { _, on ->
+            twJustToggled = true
             if (on && journalMode) {  // v1.2.0：随心记不支持固定时间段
                 cbTw.isChecked = false
                 toast("温馨提示：随心记不设排期，暂不支持固定时间段哦 (｡•́︿•̀｡)")
+                refreshConflicts()
                 return@setOnCheckedChangeListener
             }
             if (on && Method.AUTO.key in cfg.methods) {
@@ -745,6 +794,11 @@ class CreateItemActivity : AppCompatActivity() {
             if (on) { cbNeg.isChecked = false }
             findViewById<View>(R.id.tw_panel).visibility = if (on) View.VISIBLE else View.GONE
             refreshConflicts()
+        }
+        // v1.2.1（bug4）：已选中再点击 → 取消选中
+        cbTw.setOnClickListener {
+            if (cbTw.isChecked && !twJustToggled) cbTw.isChecked = false
+            twJustToggled = false
         }
         findViewById<Button>(R.id.btn_tw_start).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_start), true) }
         findViewById<Button>(R.id.btn_tw_end).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_end), false) }
@@ -763,6 +817,12 @@ class CreateItemActivity : AppCompatActivity() {
         cbTimerPausable?.isChecked = false
         rbTimerCountup?.visibility = View.GONE
         cbTimerPausable?.visibility = View.GONE
+    }
+
+    /** v1.2.1：取消负打卡后恢复正计时/暂停选项（暂停仅正计时时显示） */
+    private fun showTimerAdvancedOptions() {
+        rbTimerCountup?.visibility = View.VISIBLE
+        cbTimerPausable?.visibility = if (rbTimerCountup?.isChecked == true) View.VISIBLE else View.GONE
     }
 
     /** v1.1.6 固定时间段起止时间选择 */
@@ -1033,7 +1093,8 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.journalMode = journalMode
         cfg.comboRequired = comboRequired
         cfg.timerMode = if (rbTimerCountup?.isChecked == true) "COUNTUP" else "COUNTDOWN"
-        cfg.timerPausable = cbTimerPausable?.isChecked ?: false
+        // v1.2.1：仅正计时支持暂停保存，倒计时一律 false（防脏配置）
+        cfg.timerPausable = if (rbTimerCountup?.isChecked == true) (cbTimerPausable?.isChecked ?: false) else false
     }
 
     /** 生成二维码位图（ZXing，600x600） */

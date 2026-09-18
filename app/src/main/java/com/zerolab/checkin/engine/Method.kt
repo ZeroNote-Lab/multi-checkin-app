@@ -32,9 +32,9 @@ enum class Method(val key: String, val label: String, val emoji: String) {
             if (others.any { it in selected }) blocked += NORMAL.key
             // 自动打卡与需人工操作/素材的方式互斥
             if (AUTO.key in selected) {
-                blocked += listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key)
+                blocked += listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key, LOCATION.key, STEPS.key)
             }
-            if (listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key).any { it in selected }) {
+            if (listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key, LOCATION.key, STEPS.key).any { it in selected }) {
                 blocked += AUTO.key
             }
             // 自身不算互斥
