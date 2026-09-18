@@ -85,7 +85,13 @@ class ItemListFragment : Fragment() {
         thread {
             val list = repo.getItems()
             val quickId = repo.getQuickId()
-            val enriched = list.map { Triple(it, repo.availableCredits(it.id), CheckinEngine.streak(it, repo)) }
+            // v1.2.0：随心记项显示"记录天数"，普通项显示"连续天数"
+            val enriched = list.map {
+                val c = ItemConfig.parse(it.configJson)
+                Row(it, repo.availableCredits(it.id),
+                    if (c.journalMode) CheckinEngine.recordDays(it, repo) else CheckinEngine.streak(it, repo),
+                    c.journalMode)
+            }
             activity?.runOnUiThread {
                 items.clear(); items.addAll(list)
                 emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
@@ -95,7 +101,7 @@ class ItemListFragment : Fragment() {
         }
     }
 
-    private data class Row(val item: CheckinItem, val credits: Int, val streak: Int)
+    data class Row(val item: CheckinItem, val credits: Int, val streak: Int, val journal: Boolean = false)
 
     private fun methodLabel(item: CheckinItem): String {
         val c = ItemConfig.parse(item.configJson)
@@ -107,10 +113,9 @@ class ItemListFragment : Fragment() {
         private val rows = mutableListOf<Row>()
         private var quickId: Long? = null
 
-        fun submit(data: List<Triple<CheckinItem, Int, Int>>, qid: Long?) {
-            rows.clear(); rows.addAll(data.map { Row(it.first, it.second, it.third) })
+        fun submit(data: List<Row>, qid: Long?) {
+            rows.clear(); rows.addAll(data)
             quickId = qid; notifyDataSetChanged()
-
         }
 
         fun moveRow(from: Int, to: Int) {
@@ -148,8 +153,9 @@ class ItemListFragment : Fragment() {
             if (item.isPinned == 1) badges.append("📌 ")
             h.name.text = badges.toString() + (if (item.isActive == 0) "${item.name}（已暂停）" else item.name)
             h.type.text = methodLabel(item)
-            h.streak.text = "🔥 ${row.streak}天"
-            if (row.credits > 0) { h.credits.visibility = View.VISIBLE; h.credits.text = "🛡️×${row.credits}" }
+            // v1.2.0：随心记显示记录天数（📔），普通项保持连续天数（🔥）
+            h.streak.text = if (row.journal) "📔 ${row.streak}天" else "🔥 ${row.streak}天"
+            if (row.credits > 0 && !row.journal) { h.credits.visibility = View.VISIBLE; h.credits.text = "🛡️×${row.credits}" }
             else h.credits.visibility = View.GONE
             // v1.1.7：拖动手柄——置顶项隐藏（不可拖动），暂停项弱化
             h.drag.visibility = if (item.isPinned == 1) View.INVISIBLE else View.VISIBLE

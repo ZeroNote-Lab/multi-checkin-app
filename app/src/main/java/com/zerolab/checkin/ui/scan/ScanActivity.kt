@@ -31,6 +31,7 @@ class ScanActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_EXPECT = "expect"
+        const val EXTRA_TITLE = "title"   // v1.2.0：可选标题（绑定模式用）
     }
 
     private var expectContent = ""
@@ -52,7 +53,11 @@ class ScanActivity : AppCompatActivity() {
         previewView = findViewById(R.id.pv_preview)
         findViewById<Button>(R.id.btn_scan_cancel).setOnClickListener { finish() }
         val tvHint = findViewById<TextView>(R.id.tv_scan_hint)
-        tvHint.text = "将专属二维码对准取景框，自动识别打卡\n预设内容：${expectContent.take(20)}…"
+        // v1.2.0：无期望内容 → 自由绑定模式（扫到任意二维码直接返回内容）
+        tvHint.text = if (expectContent.isBlank())
+            "将任意二维码对准取景框，识别后自动返回内容进行绑定"
+        else
+            "将专属二维码对准取景框，自动识别打卡\n预设内容：${expectContent.take(20)}…"
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
             startCamera()
@@ -110,7 +115,8 @@ class ScanActivity : AppCompatActivity() {
                 if (!handled) {
                     handled = true
                     runOnUiThread {
-                        if (text == expectContent) {
+                        // v1.2.0：自由模式（expectContent 为空）扫到任意二维码直接返回内容
+                        if (expectContent.isBlank() || text == expectContent) {
                             setResult(RESULT_OK, Intent().putExtra("content", text))
                             finish()
                         } else {

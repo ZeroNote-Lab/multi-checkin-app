@@ -12,14 +12,14 @@ android {
         applicationId "com.zerolab.checkin"
         minSdk 24
         targetSdk 34
-        versionCode 74
-        versionName "1.1.8"
+        versionCode 75
+        versionName "1.2.0"
         vectorDrawables.useSupportLibrary = true
     }
 
     signingConfigs {
         zerolab {
-            storeFile file("../../CheckinApp/zerolab.keystore")
+            storeFile file("../zerolab.keystore")
             storePassword "zerolab2026"
             keyAlias "zerolab"
             keyPassword "zerolab2026"

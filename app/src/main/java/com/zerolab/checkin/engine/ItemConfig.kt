@@ -46,6 +46,15 @@ class ItemConfig {
     var voiceMaxSeconds: Int = 10
     var autoForeground: Boolean = true
 
+    // v1.2.0 随心记模式：只记录成功、不记缺卡、可多次记录（日记式）
+    var journalMode: Boolean = false
+    // v1.2.0 组合打卡：完成 N 个方式即完成（0=全部完成）
+    var comboRequired: Int = 0
+    // v1.2.0 时间打卡：COUNTDOWN 倒计时 / COUNTUP 正计时
+    var timerMode: String = "COUNTDOWN"
+    // v1.2.0 时间打卡：允许暂停保存、下次续时
+    var timerPausable: Boolean = false
+
     // 打卡日期（v6.1.0）：DAILY=每天 / WEEKDAYS=每周固定几天 / DOUBLE_REST=双休 / BIGSMALL=大小周
     var scheduleMode: String = "DAILY"
     val weekDays: MutableSet<Int> = linkedSetOf()   // 1=周一 … 7=周日（WEEKDAYS 模式使用）
@@ -79,6 +88,10 @@ class ItemConfig {
         o.put("nfcTagId", nfcTagId)
         o.put("voiceMaxSeconds", voiceMaxSeconds)
         o.put("autoForeground", autoForeground)
+        o.put("journalMode", journalMode)
+        o.put("comboRequired", comboRequired)
+        o.put("timerMode", timerMode)
+        o.put("timerPausable", timerPausable)
         o.put("scheduleMode", scheduleMode)
         o.put("weekDays", JSONArray(weekDays.toList()))
         o.put("bigSmallStart", bigSmallStart)
@@ -131,6 +144,10 @@ class ItemConfig {
                 c.nfcTagId = o.optString("nfcTagId", "")
                 c.voiceMaxSeconds = o.optInt("voiceMaxSeconds", 10)
                 c.autoForeground = o.optBoolean("autoForeground", true)
+                c.journalMode = o.optBoolean("journalMode", false)
+                c.comboRequired = o.optInt("comboRequired", 0)
+                c.timerMode = o.optString("timerMode", "COUNTDOWN")
+                c.timerPausable = o.optBoolean("timerPausable", false)
                 c.scheduleMode = o.optString("scheduleMode", "DAILY")
                 o.optJSONArray("weekDays")?.let { wd ->
                     c.weekDays.clear()

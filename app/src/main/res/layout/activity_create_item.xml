@@ -48,6 +48,23 @@
                     android:orientation="horizontal" />
             </HorizontalScrollView>
 
+            <!-- v1.2.0 打卡模式：普通打卡 / 随心记 -->
+            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡模式" />
+            <LinearLayout
+                android:id="@+id/mode_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal" />
+            <TextView
+                android:id="@+id/tv_mode_hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="普通打卡：按规则打卡，有缺卡与连续天数。\n随心记：日记式记录，只记成功、可多次记录、不记缺卡、不设排期。"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
             <!-- 打卡方式开关 -->
             <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡方式（可多选组合）" />
             <TextView
