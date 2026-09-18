@@ -278,13 +278,24 @@ class CreateItemActivity : AppCompatActivity() {
             gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(56.dp, 44.dp)
             text = "全部"
         }
+        // v1.2.2：组合完成数环形调节（1~total-1 显示数字，total 显示"全部"，双向循环不卡边界）
+        // 内部 comboRequired：0=全部(total)，1~total-1=完成 N 项
         comboNMinus!!.setOnClickListener {
-            comboRequired = if (comboRequired == 0) -1 else comboRequired - 1
-            comboRequired = if (comboRequired == 0) 0 else comboRequired.coerceAtLeast(1)
+            val total = cfg.methods.filter { it != Method.AUTO.key }.size
+            comboRequired = when {
+                comboRequired == 0 -> (total - 1).coerceAtLeast(1)   // 全部 → total-1
+                comboRequired <= 1 -> 0                                // 1 → 全部
+                else -> comboRequired - 1
+            }
             refreshComboNRow()
         }
         comboNPlus!!.setOnClickListener {
-            comboRequired = if (comboRequired == 0) 1 else comboRequired + 1
+            val total = cfg.methods.filter { it != Method.AUTO.key }.size
+            comboRequired = when {
+                comboRequired == 0 -> 1                                // 全部 → 1
+                comboRequired >= total - 1 -> 0                        // total-1 → 全部
+                else -> comboRequired + 1
+            }
             refreshComboNRow()
         }
         comboNRow!!.addView(comboNLabel)
@@ -684,22 +695,22 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = !locked // v1.1.7：保持可点击，点击时在监听器里弹互斥提示
         if (autoOn) findViewById<CompoundButton>(R.id.cb_time_window).alpha = 0.4f
         else findViewById<CompoundButton>(R.id.cb_time_window).alpha = 1f
-        // v1.1.4：组合打卡（多方式）每日次数固定为 1，不可调整；v1.2.0 随心记固定"不限"
+        // v1.1.4：组合打卡（多方式）每日次数固定为 1；v1.2.0 随心记固定"不限"；v1.2.2 自动打卡固定 1
         val multi = cfg.methods.count { it != Method.AUTO.key } > 1
         if (journalMode) {
             dailyLimit = -1
             findViewById<TextView>(R.id.tv_limit).text = "不限"
-            btnLimitMinus?.isEnabled = false
-            btnLimitPlus?.isEnabled = false
-        } else if (multi) {
+        } else if (multi || autoOn) {
             dailyLimit = 1
             findViewById<TextView>(R.id.tv_limit).text = "1"
-            btnLimitMinus?.isEnabled = false
-            btnLimitPlus?.isEnabled = false
         } else if (!locked) {
             btnLimitMinus?.isEnabled = true
             btnLimitPlus?.isEnabled = true
         }
+        // v1.2.2：每日次数 +/− 在 随心记/组合/自动打卡 下视觉置灰（保持可点击，点击时在监听器里弹提示）
+        val limitGrey = journalMode || multi || autoOn
+        findViewById<Button>(R.id.btn_limit_minus).alpha = if (limitGrey) 0.4f else 1f
+        findViewById<Button>(R.id.btn_limit_plus).alpha = if (limitGrey) 0.4f else 1f
         // v1.2.0：随心记下频率与规则保持可点击（点击时在监听器里弹提示），视觉置灰
         // v1.2.1：自动打卡已选时负打卡置灰（互斥）
         val ruleGrey = journalMode
@@ -735,10 +746,13 @@ class CreateItemActivity : AppCompatActivity() {
         btnLimitMinus!!.setOnClickListener {
             // v1.2.0：随心记每日次数固定"不限"
             if (journalMode) { toast("温馨提示：随心记每日不限次数，无需设置哦 (｡•́︿•̀｡)"); return@setOnClickListener }
+            // v1.2.2：自动打卡每日固定 1 次
+            if (Method.AUTO.key in cfg.methods) { toast("温馨提示：自动打卡每日固定 1 次，无需设置哦"); return@setOnClickListener }
             dailyLimit = when { dailyLimit == -1 -> 1; dailyLimit <= 1 -> -1; else -> dailyLimit - 1 }; renderLimit()
         }
         btnLimitPlus!!.setOnClickListener {
             if (journalMode) { toast("温馨提示：随心记每日不限次数，无需设置哦 (｡•́︿•̀｡)"); return@setOnClickListener }
+            if (Method.AUTO.key in cfg.methods) { toast("温馨提示：自动打卡每日固定 1 次，无需设置哦"); return@setOnClickListener }
             dailyLimit = if (dailyLimit == -1) 1 else dailyLimit + 1; renderLimit()
         }
         val cbNeg = findViewById<CompoundButton>(R.id.cb_negative)
@@ -1091,7 +1105,9 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.bigSmallStart = bigSmallStart
         // v1.2.0 新字段收集
         cfg.journalMode = journalMode
-        cfg.comboRequired = comboRequired
+        // v1.2.2：完成数越界兜底（历史脏数据/异常值归一为 0=全部），组合项 ≤1 时恒为全部
+        val comboTotal = cfg.methods.filter { it != Method.AUTO.key }.size
+        cfg.comboRequired = if (comboTotal <= 1) 0 else if (comboRequired !in 1 until comboTotal) 0 else comboRequired
         cfg.timerMode = if (rbTimerCountup?.isChecked == true) "COUNTUP" else "COUNTDOWN"
         // v1.2.1：仅正计时支持暂停保存，倒计时一律 false（防脏配置）
         cfg.timerPausable = if (rbTimerCountup?.isChecked == true) (cbTimerPausable?.isChecked ?: false) else false
