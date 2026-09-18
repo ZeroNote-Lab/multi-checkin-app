@@ -24,6 +24,9 @@ captures/
 *测试报告*
 *TEST_REPORT*
 
+# 根目录 test 文件夹（uiautomator 测试产物，不入库）
+/test/
+
 # 签名文件（如存在密钥，绝不外传）
 *.jks
 *.keystore

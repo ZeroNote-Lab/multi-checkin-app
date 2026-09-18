@@ -33,9 +33,10 @@ object CheckinEngine {
     fun isNegative(c: ItemConfig) = c.negative // v1.1.8：移除双时间自定义负打卡
 
     // ---------- 打卡日期判定（v6.1.0） ----------
-    /** 某天是否属于该打卡项的需打卡日；false = 无需打卡（SKIP） */
+    /** 某天是否属于该打卡项的需打卡日；false = 无需打卡（SKIP）。v1.2.0：随心记排期失效，恒为需打卡日 */
     fun isScheduledDay(item: CheckinItem, date: String): Boolean {
         val c = cfg(item)
+        if (c.journalMode) return true
         return when (c.scheduleMode) {
             "WEEKDAYS" -> DateUtils.weekdayOf(date) in c.weekDays
             "DOUBLE_REST" -> DateUtils.weekdayOf(date) <= 5           // 周一~五需打卡，周六日休息
@@ -71,15 +72,25 @@ object CheckinEngine {
             date < created -> DayInfo(date, DayState.FUTURE, 0, false, records)
             date > today -> DayInfo(date, DayState.FUTURE, records.size, auto, records)
             offset -> DayInfo(date, DayState.OFFSET, records.size, auto, records)
+            // v1.2.0 随心记：只记成功；无操作日无任何底色（含过去缺记），不染色
+            c.journalMode -> {
+                val success = records.any { it.status == "SUCCESS" }
+                DayInfo(date, if (success) DayState.SUCCESS else DayState.UNCHECKED, records.size, auto, records)
+            }
             !isScheduledDay(item, date) -> DayInfo(date, DayState.SKIP, records.size, auto, records) // 无需打卡日
             records.isNotEmpty() -> {
-                // 组合方式（多开关）：当天成功 = 所有方式都有成功记录，否则视为进行中（无底色）
-                val comboAll = methods.size > 1 && methods.all { m ->
+                // v1.2.0 组合方式（多开关）：当天成功 = 完成方式数 >= comboRequired（0=全部），否则视为进行中
+                val req = if (c.comboRequired in 1..methods.size) c.comboRequired else methods.size
+                val comboDone = methods.count { m ->
                     records.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }
                 }
+                val comboAll = methods.size > 1 && comboDone >= req
                 val success = records.any { it.status == "SUCCESS" }
+                val paused = records.any { it.status == "PAUSED" }
                 val st = when {
                     !neg && methods.size > 1 -> if (comboAll) DayState.SUCCESS else DayState.PARTIAL // v1.1.6：组合未全完成=部分完成（黄色）
+                    // v1.2.0：时间打卡暂停未完成——今天=黄色部分完成；昨天（无 SUCCESS）=走下方 FAIL 红（次日缺卡）
+                    !neg && paused && !success && date == today -> DayState.PARTIAL
                     neg -> DayState.FAIL            // 负打卡：有操作=破戒失败
                     success -> DayState.SUCCESS
                     else -> DayState.FAIL
@@ -118,8 +129,7 @@ object CheckinEngine {
     }
 
     /** 连续成功天数 */
-    fun streak(item: CheckinItem, repo: CheckinRepository): Int {
-        var d = DateUtils.today()
+    fun streak(item: CheckinItem, repo: CheckinRepository): Int {        var d = DateUtils.today()
         // 今天未定论则从昨天起算
         if (!dayIsSuccess(item, d, repo)) d = DateUtils.addDays(d, -1)
         var n = 0
@@ -129,6 +139,14 @@ object CheckinEngine {
         }
         return n
     }
+
+    /** v1.2.0 随心记记录天数：有成功记录的去重天数（断签不归零、只增不减；PAUSED 暂停记录不计） */
+    fun recordDays(item: CheckinItem, repo: CheckinRepository): Int =
+        repo.allRecords(item.id).asSequence()
+            .filter { it.status == "SUCCESS" }
+            .map { it.checkinDate }
+            .distinct()
+            .count()
 
     /** 里程碑连续天数：从锚点（最近补签日）或创建日起算，用于抵消发放（补签后重新起算周期，防止补签白拿新机会） */
     private fun milestoneStreak(item: CheckinItem, repo: CheckinRepository): Int {
@@ -171,13 +189,13 @@ object CheckinEngine {
         val date = DateUtils.dateOf(now)
         val status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
 
-        // 无需打卡日：不允许打卡
-        if (!isScheduledDay(item, date)) return CheckinResult.Blocked("今日无需打卡")
+        // 无需打卡日：不允许打卡（v1.2.0 随心记排期失效，恒允许）
+        if (!c.journalMode && !isScheduledDay(item, date)) return CheckinResult.Blocked("今日无需打卡")
 
-        // 次数限制（正常模式，组合打卡按方式逐条记、不做条数拦截）；-1 不限
+        // 次数限制（正常模式，组合打卡按方式逐条记、不做条数拦截）；-1 不限；v1.2.0：随心记不限、PAUSED 暂停记录不计入已打次数
         val interactive = c.methods.filter { it != Method.AUTO.key }
-        val already = repo.countOfDay(item.id, date)
-        if (!isNegative(c) && c.dailyLimit > 0 && already >= c.dailyLimit && !isAuto && interactive.size <= 1) {
+        val already = repo.recordsOfDay(item.id, date).count { it.status != "PAUSED" }
+        if (!isNegative(c) && c.dailyLimit > 0 && already >= c.dailyLimit && !isAuto && interactive.size <= 1 && !c.journalMode) {
             return CheckinResult.Blocked("今日已完成目标次数")
         }
         // 负打卡模式：同一归属日重复操作直接累加记录（破戒次数），不做上限拦截
@@ -198,6 +216,7 @@ object CheckinEngine {
         val c = cfg(item)
         val off = c.offset
         if (!off.enabled) return
+        if (c.journalMode) return // v1.2.0：随心记不参与抵消机制
         // 参数保护：nDays/k 必须为正，否则不发放（防导入/异常配置除零崩溃）
         if (off.nDays <= 0 || off.k <= 0) return
         val today = DateUtils.today()
@@ -234,6 +253,7 @@ object CheckinEngine {
     /** 自动模式：漏签时自动/手动消耗一次抵消补签；返回是否补签 */
     fun offsetBackfill(item: CheckinItem, repo: CheckinRepository, date: String): Boolean {
         val c = cfg(item)
+        if (c.journalMode) return false // v1.2.0：随心记无抵消机制
         if (!c.offset.enabled) return false
         if (repo.availableCredits(item.id) <= 0) return false // 无可用机会，不写孤立记录
         val now = System.currentTimeMillis()
@@ -274,6 +294,7 @@ object CheckinEngine {
         repo.getItems().filter { it.isActive == 1 }.forEach { item ->
             val c = cfg(item)
             if (Method.AUTO.key !in c.methods) return@forEach
+            if (c.journalMode) return@forEach // v1.2.0：随心记不自动打卡
             val today = DateUtils.today()
             if (!isScheduledDay(item, today)) return@forEach // 无需打卡日不自动打卡
             val st = repo.autoState(item.id)

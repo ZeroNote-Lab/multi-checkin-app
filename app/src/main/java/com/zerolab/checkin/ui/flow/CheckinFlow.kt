@@ -72,6 +72,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private var voicePath: String? = null
     private var lat: Double? = null
     private var lng: Double? = null
+    // v1.2.0：时间打卡本次会话的实际计时信息（写记录时附加到 extraJson）
+    private var timerExtra: String? = null
 
     private var pendingPhotoUri: android.net.Uri? = null
     private var audioRecorder = AudioRecorder()
@@ -141,6 +143,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     fun start(item: CheckinItem, cfg: ItemConfig) {
         this.item = item; this.cfg = cfg
         photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
+        timerExtra = null
         doneMethods.clear(); queue.clear()
         val interactive = cfg.methods.filter { it != Method.AUTO.key }
         // 组合（多方式）：弹出方式卡片，逐个完成
@@ -151,7 +154,9 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             interactive.forEach { m ->
                 if (recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }) doneMethods.add(m)
             }
-            if (doneMethods.size >= interactive.size) { toast("今日已完成全部打卡项"); onDone(); return }
+            // v1.2.0：完成判定按 comboRequired（0=全部）；随心记日记式不做全完成判定、可继续记录
+            val req = if (cfg.comboRequired in 1..interactive.size) cfg.comboRequired else interactive.size
+            if (!cfg.journalMode && doneMethods.size >= req) { toast("今日已完成打卡目标"); onDone(); return }
             showComboCard()
             return
         }
@@ -174,8 +179,15 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         val m = comboCurrent ?: return
         val it = item ?: return
         thread {
+            // v1.2.0：组合方式记录合并时间打卡实际计时信息
+            val jo = org.json.JSONObject().put("method", m)
+            timerExtra?.let { te -> try {
+                val o = org.json.JSONObject(te)
+                val keys = o.keys()
+                while (keys.hasNext()) { val k = keys.next(); jo.put(k, o.get(k)) }
+            } catch (_: Exception) {} }
             val r = CheckinEngine.perform(it, repo, photoPath, textContent, voicePath, lat, lng,
-                extra = "{\"method\":\"$m\"}")
+                extra = jo.toString())
             main.post {
                 when (r) {
                     is CheckinResult.Blocked -> toast(r.reason)
@@ -193,21 +205,25 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private fun showComboCard() {
         val methods = comboMethods ?: return
         comboDialog?.dismiss()
+        val c = cfg ?: return
+        val journal = c.journalMode
         val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(36, 16, 36, 4) }
         methods.forEach { m ->
-            val done = m in doneMethods
+            // v1.2.0：随心记日记式——所有方式均可点，不锁定已完成项（可继续记录）
+            val done = !journal && m in doneMethods
             val row = TextView(ctx).apply {
                 text = "${if (done) "✅" else "○"}  ${Method.of(m)?.label ?: m}"
                 textSize = 16f
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, 22, 0, 22)
                 setTextColor(if (done) 0xFF2FBF71.toInt() else 0xFF1F2430.toInt())
-                if (!done) setOnClickListener { runMethod(m) }
+                setOnClickListener { runMethod(m) }
             }
             box.addView(row)
         }
         comboDialog = AlertDialog.Builder(ctx)
-            .setTitle("打卡方式（${doneMethods.size}/${methods.size}）")
+            .setTitle(if (journal) "📔 随心记 · 选择记录方式（今日已记 ${doneMethods.size} 次）"
+                else "打卡方式（${doneMethods.size}/${methods.size}）")
             .setView(box)
             .setNegativeButton("关闭", null)
             .create()
@@ -216,9 +232,12 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
 
     private fun updateComboCard() {
         val methods = comboMethods ?: return
-        if (methods.all { it in doneMethods }) {
+        val c = cfg ?: return
+        val req = if (c.comboRequired in 1..methods.size) c.comboRequired else methods.size
+        // v1.2.0：随心记日记式——完成即记录，不判全完成、保持弹窗可继续
+        if (!c.journalMode && doneMethods.size >= req) {
             comboDialog?.dismiss(); comboDialog = null
-            toast("全部完成，打卡成功 ✓")
+            toast(if (methods.size > 1) "已完成目标打卡项，打卡成功 ✓" else "打卡成功 ✓")
             onDone()
         } else {
             showComboCard()
@@ -228,8 +247,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     }
 
     private fun runMethod(m: String) {
-        // v1.1.4：组合模式下已完成的打卡项不可重复执行（以数据库记录为准）
-        if (comboMethods != null) {
+        // v1.1.4：组合模式下已完成的打卡项不可重复执行（以数据库记录为准）；v1.2.0 随心记除外
+        if (comboMethods != null && !(cfg?.journalMode == true)) {
             val it = item ?: return
             val recs = repo.recordsOfDay(it.id, DateUtils.today())
             if (recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }) {
@@ -239,6 +258,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         }
         comboCurrent = m
         photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
+        timerExtra = null
         when (m) {
             Method.TEXT.key -> doText()
             Method.PHOTO.key -> ensure(Manifest.permission.CAMERA, permCamera) { doPhoto() }
@@ -459,33 +479,125 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             if (!gotEvent) tv.text = "尚无计步数据，请走动几步后再看\n（此设备静止时不统计步数，走动即开始计数）"
         }, 5000)
     }
+    // ---------- 时间打卡（v1.2.0：倒计时 / 正计时 / 暂停保存续时） ----------
     private fun doTimer() {
         val c = cfg ?: return
+        val it = item ?: return
+        val countUp = c.timerMode == "COUNTUP"
+        val pausable = c.timerPausable
         val totalSec = (c.timerMinutes * 60).coerceAtLeast(60)
-        val endAt = System.currentTimeMillis() + totalSec * 1000L
+        val today = DateUtils.today()
+        // v1.2.0：读取当天最新 PAUSED 进度续时（倒计时续剩余 / 正计时续已走）
+        val lastPaused = repo.recordsOfDay(it.id, today).lastOrNull { r -> r.status == "PAUSED" }
+        var remainSec = totalSec
+        var elapsedSec = 0
+        var startBase = System.currentTimeMillis()
+        lastPaused?.extraJson?.let { js ->
+            try {
+                val o = org.json.JSONObject(js)
+                if (countUp) {
+                    elapsedSec = o.optInt("elapsedSec", 0)
+                    startBase = System.currentTimeMillis() - elapsedSec * 1000L
+                } else {
+                    remainSec = o.optInt("remainSec", totalSec)
+                    startBase = System.currentTimeMillis() - (totalSec - remainSec) * 1000L
+                }
+            } catch (_: Exception) {}
+        }
+        val endAt = System.currentTimeMillis() + remainSec * 1000L
         val tv = TextView(ctx).apply { textSize = 30f; gravity = android.view.Gravity.CENTER; setPadding(0, 40, 0, 40) }
-        val dlg = AlertDialog.Builder(ctx).setTitle("倒计时 ${c.timerMinutes} 分钟").setView(tv)
+        val builder = AlertDialog.Builder(ctx)
+            .setTitle(if (countUp) "正计时 · 目标 ${c.timerMinutes} 分钟" else "倒计时 ${c.timerMinutes} 分钟")
+            .setView(tv)
             .setCancelable(false)
             .setNegativeButton("放弃", null)
-            .setPositiveButton("完成打卡") { _, _ -> stepSuccess() }
-            .create()
+        if (pausable) {
+            builder.setNeutralButton("暂停保存") { _, _ ->
+                saveTimerPause(it.id, today, countUp, elapsedSec, remainSec, totalSec)
+                dlgSafeDismiss()
+                onDone()
+            }
+        }
+        builder.setPositiveButton("完成打卡") { _, _ ->
+            // v1.2.0 正计时：未达目标点击 → 提示失败、计时继续（弹窗不关闭）
+            if (countUp && elapsedSec < totalSec) {
+                val need = totalSec - elapsedSec
+                toast("未到目标时长（还需 %02d:%02d），计时继续 ~".format(need / 60, need % 60))
+            } else {
+                finishTimer(countUp, totalSec, elapsedSec)
+            }
+        }
+        val dlg = builder.create()
+        // v1.2.0 fix：在 show() 之前注册 onShow，复写 Positive 按钮点击，
+        // 避免 AlertDialog 默认点击即关闭——正计时未达目标时保持弹窗、计时继续；达标才完成并关闭
+        dlg.setOnShowListener {
+            val pb = dlg.getButton(AlertDialog.BUTTON_POSITIVE)
+            pb.isEnabled = countUp
+            pb.setOnClickListener {
+                if (countUp && elapsedSec < totalSec) {
+                    val need = totalSec - elapsedSec
+                    toast("未到目标时长（还需 %02d:%02d），计时继续 ~".format(need / 60, need % 60))
+                } else {
+                    finishTimer(countUp, totalSec, elapsedSec)
+                    dlg.dismiss()
+                }
+            }
+        }
         dlg.show()
+        timerDialogRef = dlg
         val posBtn = dlg.getButton(AlertDialog.BUTTON_POSITIVE)
-        posBtn.isEnabled = false // 倒计时结束才可完成
+        // 倒计时：结束才可完成；正计时：始终可点，未达目标点击提示失败并继续
+        posBtn.isEnabled = countUp
         val runnable = object : Runnable {
             override fun run() {
-                val remain = ((endAt - System.currentTimeMillis()) / 1000L).toInt()
-                if (remain <= 0) {
-                    tv.text = "时间到 ✓ 点击「完成打卡」"
-                    posBtn.isEnabled = true
-                    return
+                if (!dlg.isShowing) return
+                val now = System.currentTimeMillis()
+                if (countUp) {
+                    elapsedSec = ((now - startBase) / 1000L).toInt()
+                    val fmt = "%02d:%02d".format(elapsedSec / 60, elapsedSec % 60)
+                    tv.text = if (elapsedSec >= totalSec)
+                        "$fmt 已达标 ✓\n点击「完成打卡」记录用时" else
+                        "$fmt / %02d:%02d".format(totalSec / 60, totalSec % 60)
+                } else {
+                    val remain = ((endAt - now) / 1000L).toInt()
+                    if (remain <= 0) {
+                        tv.text = "时间到 ✓ 点击「完成打卡」"
+                        posBtn.isEnabled = true
+                        main.postDelayed(this, 500)
+                        return
+                    }
+                    tv.text = "%02d:%02d".format(remain / 60, remain % 60)
                 }
-                tv.text = "%02d:%02d".format(remain / 60, remain % 60)
                 main.postDelayed(this, 500)
             }
         }
         main.post(runnable)
     }
+
+    /** 暂停保存：写一条 PAUSED 记录（复用 checkin_record，不占打卡次数） */
+    private fun saveTimerPause(itemId: Long, today: String, countUp: Boolean, elapsedSec: Int, remainSec: Int, totalSec: Int) {
+        val jo = org.json.JSONObject()
+        jo.put("timerMode", if (countUp) "COUNTUP" else "COUNTDOWN")
+        if (countUp) { jo.put("elapsedSec", elapsedSec); jo.put("targetSec", totalSec) }
+        else { jo.put("remainSec", remainSec); jo.put("totalSec", totalSec) }
+        repo.insertRecord(com.zerolab.checkin.data.entity.CheckinRecord(
+            itemId = itemId, checkinDate = today, checkinTime = System.currentTimeMillis(),
+            status = "PAUSED", extraJson = jo.toString()))
+        toast("已暂停保存，下次打卡继续计时 ⏸")
+    }
+
+    /** 完成时间打卡：记录实际计时信息后走 stepSuccess */
+    private fun finishTimer(countUp: Boolean, totalSec: Int, elapsedSec: Int) {
+        val jo = org.json.JSONObject()
+        jo.put("timerMode", if (countUp) "COUNTUP" else "COUNTDOWN")
+        if (countUp) { jo.put("elapsedSec", elapsedSec); jo.put("targetSec", totalSec) }
+        else { jo.put("totalSec", totalSec) }
+        timerExtra = jo.toString()
+        stepSuccess()
+    }
+
+    private var timerDialogRef: AlertDialog? = null
+    private fun dlgSafeDismiss() { try { timerDialogRef?.dismiss() } catch (_: Exception) {} }
 
     // ---------- 扫码（真实相机扫码，匹配才打卡） ----------
     private val scanLauncher =
@@ -589,7 +701,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             val r = CheckinEngine.perform(
                 it, repo,
                 photoPath = photoPath, text = textContent, voicePath = voicePath,
-                lat = lat, lng = lng
+                lat = lat, lng = lng, extra = timerExtra // v1.2.0：时间打卡附加实际计时信息
             )
             main.post {
                 when (r) {

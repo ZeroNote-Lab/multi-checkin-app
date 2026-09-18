@@ -3,6 +3,7 @@ package com.zerolab.checkin.ui.create
 import android.Manifest
 import android.app.TimePickerDialog
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -28,6 +29,7 @@ import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.LocatePoint
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
+import com.zerolab.checkin.ui.scan.ScanActivity
 import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.formatLatLng
 import android.annotation.SuppressLint
@@ -67,6 +69,32 @@ class CreateItemActivity : AppCompatActivity() {
     private var btnNfcBind: Button? = null
     private var btnLimitMinus: Button? = null
     private var btnLimitPlus: Button? = null
+    private var qrBindBtn: Button? = null
+
+    // v1.2.0 随心记模式：普通打卡 / 随心记 chip
+    private var journalMode = false
+    private var modeHint: TextView? = null
+    private var comboNRow: LinearLayout? = null
+    private var comboNLabel: TextView? = null
+    private var comboNMinus: Button? = null
+    private var comboNPlus: Button? = null
+    private var comboRequired = 0   // 组合打卡：完成 N 个即完成（0=全部）
+    // v1.2.0 时间打卡模式：倒计时 / 正计时 / 允许暂停
+    private var rbTimerCountdown: RadioButton? = null
+    private var rbTimerCountup: RadioButton? = null
+    private var cbTimerPausable: CheckBox? = null
+    // v1.2.0 扫码绑定现有二维码
+    private val qrBindLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == RESULT_OK) {
+            val content = res.data?.getStringExtra("content")
+            if (!content.isNullOrBlank()) {
+                cfg.qrContent = content
+                tvQr?.text = "已绑定现有二维码：\n${content.take(48)}${if (content.length > 48) "…" else ""}"
+                ivQr?.setImageBitmap(makeQrBitmap(content))
+                toast("二维码绑定成功 ✓")
+            } else toast("未读取到二维码内容")
+        } else toast("已取消扫码绑定")
+    }
 
     // 真实 NFC 标签读取（enableReaderMode）
     private var nfcAdapter: NfcAdapter? = null
@@ -97,6 +125,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tv_title).text = if (editing != null) "编辑打卡项" else "新建打卡项"
 
         buildThemeChips()
+        buildModeSection()   // v1.2.0 打卡模式（普通打卡 / 随心记），在方式开关之前构建
         buildMethodRows()
         buildScheduleSection()
         bindRuleControls()
@@ -150,9 +179,141 @@ class CreateItemActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- v1.2.0 打卡模式：普通打卡 / 随心记 ----------
+    private fun buildModeSection() {
+        val container = findViewById<LinearLayout>(R.id.mode_container)
+        modeHint = findViewById(R.id.tv_mode_hint)
+        val normal = modeChip("✅ 普通打卡") { setJournalMode(false) }
+        val journal = modeChip("📔 随心记") { setJournalMode(true) }
+        container.addView(normal); container.addView(journal)
+        container.tag = listOf(normal, journal)   // 供 loadEditing 回显
+        renderModeChips()
+    }
+
+    private fun modeChip(text: String, onClick: () -> Unit): TextView =
+        TextView(this).apply {
+            this.text = text; textSize = 13f; gravity = Gravity.CENTER
+            setPadding(22, 12, 22, 12)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.marginEnd = 10
+            layoutParams = lp
+            setOnClickListener { onClick() }
+        }
+
+    private fun renderModeChips() {
+        val container = findViewById<LinearLayout>(R.id.mode_container)
+        val chips = container.tag as? List<*>
+        chips?.forEachIndexed { i, v ->
+            val tv = v as? TextView ?: return@forEachIndexed
+            val selected = (i == 0) != journalMode
+            val bg = GradientDrawable()
+            bg.cornerRadius = 20f
+            bg.setColor(if (selected) 0xFF3A4152.toInt() else 0xFFEEF1F6.toInt())
+            tv.background = bg
+            tv.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
+            tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        }
+        modeHint?.text = if (journalMode)
+            "📔 随心记：日记式记录，只记成功、可多次记录，不记缺卡、不设排期 ο(=•ω＜=)ρ⌒☆"
+            else "普通打卡：按规则打卡，有缺卡与连续天数。"
+    }
+
+    private fun setJournalMode(on: Boolean) {
+        if (journalMode == on) return
+        if (on) {
+            // 切到随心记：自动移除不允许的方式并置灰提示（NORMAL/AUTO/NFC/STEPS/TIMER）
+            val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key)
+            forbidden.forEach { k ->
+                if (k in cfg.methods) {
+                    cfg.methods.remove(k)
+                    rows[k]?.switch?.isChecked = false
+                    rows[k]?.panel?.visibility = View.GONE
+                }
+            }
+            // 固定时间段 / 负打卡 / 抵消机制一并关闭（随心记不支持）
+            findViewById<CompoundButton>(R.id.cb_negative).isChecked = false
+            findViewById<CompoundButton>(R.id.cb_time_window).isChecked = false
+            findViewById<View>(R.id.tw_panel).visibility = View.GONE
+            findViewById<CheckBox>(R.id.cb_offset).isChecked = false
+            findViewById<View>(R.id.offset_panel).visibility = View.GONE
+            // 每日次数固定"不限"
+            dailyLimit = -1
+            findViewById<TextView>(R.id.tv_limit).text = "不限"
+            comboRequired = 0
+        } else {
+            dailyLimit = 1
+            findViewById<TextView>(R.id.tv_limit).text = "1"
+        }
+        journalMode = on
+        renderModeChips()
+        refreshConflicts()
+        refreshComboNRow()
+    }
+
+    /** v1.2.0 组合打卡：完成 N 个即完成（0=全部）。嵌在打卡方式卡片下，多选时显示 */
+    private fun buildComboNRow() {
+        val container = findViewById<LinearLayout>(R.id.method_container)
+        comboNRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 14)
+            visibility = View.GONE
+        }
+        comboNLabel = TextView(this).apply {
+            textSize = 13f; setTextColor(0xFF6B7280.toInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        comboNMinus = Button(this).apply {
+            text = "-"; textSize = 15f; setTextColor(0xFF1F2430.toInt())
+            setPadding(0, 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(44.dp, 44.dp)
+        }
+        comboNPlus = Button(this).apply {
+            text = "+"; textSize = 15f; setTextColor(0xFF1F2430.toInt())
+            setPadding(0, 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(44.dp, 44.dp)
+        }
+        val count = TextView(this).apply {
+            id = View.generateViewId(); textSize = 15f; setTextColor(0xFF1F2430.toInt())
+            gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(56.dp, 44.dp)
+            text = "全部"
+        }
+        comboNMinus!!.setOnClickListener {
+            comboRequired = if (comboRequired == 0) -1 else comboRequired - 1
+            comboRequired = if (comboRequired == 0) 0 else comboRequired.coerceAtLeast(1)
+            refreshComboNRow()
+        }
+        comboNPlus!!.setOnClickListener {
+            comboRequired = if (comboRequired == 0) 1 else comboRequired + 1
+            refreshComboNRow()
+        }
+        comboNRow!!.addView(comboNLabel)
+        comboNRow!!.addView(comboNMinus)
+        comboNRow!!.addView(count)
+        comboNRow!!.addView(comboNPlus)
+        container.addView(comboNRow, 0)
+    }
+
+    private fun refreshComboNRow() {
+        val row = comboNRow ?: return
+        val interactive = cfg.methods.filter { it != Method.AUTO.key }
+        val n = interactive.size
+        if (journalMode || n <= 1) { row.visibility = View.GONE; return }
+        row.visibility = View.VISIBLE
+        val cnt = (comboNRow?.getChildAt(2) as? TextView)
+        val total = if (comboRequired == 0) "全部" else "$comboRequired"
+        cnt?.text = total
+        comboNLabel?.text = "组合打卡：完成 $total（共 $n 项）即视为完成"
+        comboNMinus?.isEnabled = !locked
+        comboNPlus?.isEnabled = !locked
+    }
+
+    private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
+
     // ---------- 方式开关行 ----------
     private fun buildMethodRows() {
         val container = findViewById<LinearLayout>(R.id.method_container)
+        buildComboNRow()   // v1.2.0 组合完成数选择行（多选时显示）
         Method.values().forEach { m ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -170,6 +331,16 @@ class CreateItemActivity : AppCompatActivity() {
             buildMethodParam(m, panel)
             card.addView(head); card.addView(panel)
             sw.setOnCheckedChangeListener { _, on ->
+                // v1.2.0：随心记仅禁用 NORMAL/AUTO/NFC/STEPS/TIMER，其余方式可正常开启
+                val journalForbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key)
+                if (on && journalMode && m.key in journalForbidden) {
+                    sw.isChecked = false
+                    panel.visibility = View.GONE
+                    cfg.methods.remove(m.key)
+                    toast("温馨提示：随心记暂不支持「${m.label}」哦 (｡•́︿•̀｡)")
+                    refreshConflicts()
+                    return@setOnCheckedChangeListener
+                }
                 if (on && m.key == Method.STEPS.key && m.key !in cfg.methods) {
                     // v6.1.0：步数功能开发中，新建/新开启时固定关闭并提示
                     sw.isChecked = false
@@ -223,7 +394,14 @@ class CreateItemActivity : AppCompatActivity() {
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.marginEnd = 10
             layoutParams = lp
-            setOnClickListener { onClick() }
+            setOnClickListener {
+                // v1.2.0：随心记不设排期，点击弹提示
+                if (journalMode) {
+                    toast("温馨提示：随心记不设排期，暂不支持调整打卡日期哦 (｡•́︿•̀｡)")
+                    return@setOnClickListener
+                }
+                onClick()
+            }
             applyScheduleChipStyle(this, selected)
         }
 
@@ -276,6 +454,11 @@ class CreateItemActivity : AppCompatActivity() {
                 lp.marginEnd = 8
                 layoutParams = lp
                 setOnClickListener {
+                    // v1.2.0：随心记不设排期
+                    if (journalMode) {
+                        toast("温馨提示：随心记不设排期，暂不支持选择星期哦 (｡•́︿•̀｡)")
+                        return@setOnClickListener
+                    }
                     if (day in weekDays) weekDays.remove(day) else weekDays.add(day)
                     renderWeekDayChips()
                 }
@@ -388,10 +571,37 @@ class CreateItemActivity : AppCompatActivity() {
                 etSteps = input("5000", true); panel.addView(etSteps)
             }
             Method.TIMER -> {
-                panel.addView(sectionLabel("倒计时时长（分钟）"))
+                // v1.2.0：时间打卡（倒计时 / 正计时）+ 允许暂停保存续时
+                panel.addView(sectionLabel("时长（分钟）"))
                 etTimer = input("25", true); panel.addView(etTimer)
+                panel.addView(sectionLabel("计时方式"))
+                rbTimerCountdown = RadioButton(this).apply {
+                    text = "倒计时：从设定时长倒数，时间到才能完成"; isChecked = true; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+                }
+                rbTimerCountup = RadioButton(this).apply {
+                    text = "正计时：从 0 开始计时，超过设定时长后才能完成"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+                }
+                val rg = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+                rg.addView(rbTimerCountdown); rg.addView(rbTimerCountup)
+                panel.addView(rg)
+                cbTimerPausable = CheckBox(this).apply {
+                    text = "允许暂停保存：随时暂停保存进度，下次打卡继续计时"; isChecked = false; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+                }
+                panel.addView(cbTimerPausable)
             }
             Method.QRCODE -> {
+                // v1.2.0：二维码打卡可扫现有二维码绑定，也可用专属二维码
+                val bindBtn = Button(this).apply {
+                    text = "📷 扫码绑定现有二维码"; setTextColor(0xFFFFFFFF.toInt())
+                    background?.setTint(0xFF39C5BB.toInt())
+                    setOnClickListener {
+                        val i = Intent(this@CreateItemActivity, ScanActivity::class.java)
+                        i.putExtra(ScanActivity.EXTRA_TITLE, "扫描要绑定的二维码")
+                        qrBindLauncher.launch(i)
+                    }
+                }
+                qrBindBtn = bindBtn
+                panel.addView(bindBtn)
                 cfg.qrContent = "uuid:" + java.util.UUID.randomUUID().toString()
                 ivQr = ImageView(this).apply {
                     val px = (220 * resources.displayMetrics.density).toInt()
@@ -429,8 +639,11 @@ class CreateItemActivity : AppCompatActivity() {
     private fun refreshConflicts() {
         val blocked = Method.conflictsWith(cfg.methods)
         val twOn = findViewById<CompoundButton>(R.id.cb_time_window).isChecked
+        // v1.2.0：随心记额外禁用 NORMAL/AUTO/NFC/STEPS/TIMER
+        val journalBlocked = if (journalMode)
+            setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key) else emptySet()
         rows.forEach { (key, row) ->
-            val isBlocked = key in blocked
+            val isBlocked = key in blocked || key in journalBlocked
             val twBlock = twOn && key == Method.AUTO.key
             row.switch.isEnabled = !locked // v1.1.7：保持可点击，点击时在监听器里弹互斥提示
             row.switch.alpha = if (isBlocked || twBlock) 0.4f else 1f
@@ -446,9 +659,14 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = !locked // v1.1.7：保持可点击，点击时在监听器里弹互斥提示
         if (autoOn) findViewById<CompoundButton>(R.id.cb_time_window).alpha = 0.4f
         else findViewById<CompoundButton>(R.id.cb_time_window).alpha = 1f
-        // v1.1.4：组合打卡（多方式）每日次数固定为 1，不可调整
+        // v1.1.4：组合打卡（多方式）每日次数固定为 1，不可调整；v1.2.0 随心记固定"不限"
         val multi = cfg.methods.count { it != Method.AUTO.key } > 1
-        if (multi) {
+        if (journalMode) {
+            dailyLimit = -1
+            findViewById<TextView>(R.id.tv_limit).text = "不限"
+            btnLimitMinus?.isEnabled = false
+            btnLimitPlus?.isEnabled = false
+        } else if (multi) {
             dailyLimit = 1
             findViewById<TextView>(R.id.tv_limit).text = "1"
             btnLimitMinus?.isEnabled = false
@@ -457,6 +675,29 @@ class CreateItemActivity : AppCompatActivity() {
             btnLimitMinus?.isEnabled = true
             btnLimitPlus?.isEnabled = true
         }
+        // v1.2.0：随心记下频率与规则保持可点击（点击时在监听器里弹提示），视觉置灰
+        val ruleGrey = journalMode
+        findViewById<CompoundButton>(R.id.cb_negative).isEnabled = !locked
+        findViewById<CompoundButton>(R.id.cb_negative).alpha = if (ruleGrey) 0.4f else 1f
+        findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = !locked
+        findViewById<CompoundButton>(R.id.cb_time_window).alpha = if (ruleGrey || autoOn) 0.4f else 1f
+        findViewById<Button>(R.id.btn_tw_start).isEnabled = !locked
+        findViewById<Button>(R.id.btn_tw_end).isEnabled = !locked
+        findViewById<CheckBox>(R.id.cb_offset).isEnabled = !locked
+        findViewById<CheckBox>(R.id.cb_offset).alpha = if (ruleGrey) 0.4f else 1f
+        findViewById<Button>(R.id.btn_limit_minus).isEnabled = !locked
+        findViewById<Button>(R.id.btn_limit_plus).isEnabled = !locked
+        findViewById<RadioButton>(R.id.rb_mode_a).isEnabled = !locked
+        findViewById<RadioButton>(R.id.rb_mode_b).isEnabled = !locked
+        findViewById<RadioButton>(R.id.rb_mode_c).isEnabled = !locked
+        findViewById<EditText>(R.id.et_offset_n).isEnabled = !locked
+        findViewById<EditText>(R.id.et_offset_k).isEnabled = !locked
+        findViewById<CheckBox>(R.id.cb_offset_auto).isEnabled = !locked
+        scheduleModeChips.values.forEach { it.isEnabled = !locked; it.alpha = if (ruleGrey) 0.4f else 1f }
+        weekDayChips.values.forEach { it.isEnabled = !locked; it.alpha = if (ruleGrey) 0.4f else 1f }
+        bigChip.isEnabled = !locked; bigChip.alpha = if (ruleGrey) 0.4f else 1f
+        smallChip.isEnabled = !locked; smallChip.alpha = if (ruleGrey) 0.4f else 1f
+        refreshComboNRow()
     }
 
     // ---------- 频率与规则 ----------
@@ -466,18 +707,34 @@ class CreateItemActivity : AppCompatActivity() {
         btnLimitMinus = findViewById(R.id.btn_limit_minus)
         btnLimitPlus = findViewById(R.id.btn_limit_plus)
         btnLimitMinus!!.setOnClickListener {
+            // v1.2.0：随心记每日次数固定"不限"
+            if (journalMode) { toast("温馨提示：随心记每日不限次数，无需设置哦 (｡•́︿•̀｡)"); return@setOnClickListener }
             dailyLimit = when { dailyLimit == -1 -> 1; dailyLimit <= 1 -> -1; else -> dailyLimit - 1 }; renderLimit()
         }
         btnLimitPlus!!.setOnClickListener {
+            if (journalMode) { toast("温馨提示：随心记每日不限次数，无需设置哦 (｡•́︿•̀｡)"); return@setOnClickListener }
             dailyLimit = if (dailyLimit == -1) 1 else dailyLimit + 1; renderLimit()
         }
         val cbNeg = findViewById<CompoundButton>(R.id.cb_negative)
         val cbTw = findViewById<CompoundButton>(R.id.cb_time_window)
         // v1.1.6：负打卡 / 固定时间段打卡 互斥（圆形单选）；双时间自定义负打卡 v1.1.8 起移除
         cbNeg.setOnCheckedChangeListener { _, on ->
-            if (on) { cbTw.isChecked = false }
+            if (on) {
+                if (journalMode) {  // v1.2.0：随心记不支持负打卡
+                    cbNeg.isChecked = false
+                    toast("温馨提示：随心记不记录失败，暂不支持负打卡哦 (｡•́︿•̀｡)")
+                    return@setOnCheckedChangeListener
+                }
+                cbTw.isChecked = false
+                hideTimerAdvancedOptions()   // v1.2.0：负打卡开启时隐藏正计时/暂停选项（保持原倒计时）
+            }
         }
         cbTw.setOnCheckedChangeListener { _, on ->
+            if (on && journalMode) {  // v1.2.0：随心记不支持固定时间段
+                cbTw.isChecked = false
+                toast("温馨提示：随心记不设排期，暂不支持固定时间段哦 (｡•́︿•̀｡)")
+                return@setOnCheckedChangeListener
+            }
             if (on && Method.AUTO.key in cfg.methods) {
                 // v1.1.7：自动打卡已开启时点固定时间段 → 互斥提示
                 cbTw.isChecked = false
@@ -491,6 +748,21 @@ class CreateItemActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btn_tw_start).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_start), true) }
         findViewById<Button>(R.id.btn_tw_end).setOnClickListener { pickTwTime(findViewById(R.id.btn_tw_end), false) }
+        findViewById<CheckBox>(R.id.cb_offset).setOnClickListener {  // v1.2.0：随心记不支持抵消机制
+            if (journalMode && findViewById<CheckBox>(R.id.cb_offset).isChecked) {
+                findViewById<CheckBox>(R.id.cb_offset).isChecked = false
+                toast("温馨提示：随心记暂不支持抵消机制哦 (｡•́︿•̀｡)")
+            }
+        }
+    }
+
+    /** v1.2.0：负打卡开启时，时间打卡只保留倒计时（隐藏正计时/暂停选项） */
+    private fun hideTimerAdvancedOptions() {
+        rbTimerCountup?.isChecked = false
+        rbTimerCountdown?.isChecked = true
+        cbTimerPausable?.isChecked = false
+        rbTimerCountup?.visibility = View.GONE
+        cbTimerPausable?.visibility = View.GONE
     }
 
     /** v1.1.6 固定时间段起止时间选择 */
@@ -507,7 +779,6 @@ class CreateItemActivity : AppCompatActivity() {
         val panel = findViewById<View>(R.id.offset_panel)
         cb.setOnCheckedChangeListener { _, on -> panel.visibility = if (on) View.VISIBLE else View.GONE }
     }
-
     // ---------- 修改策略 ----------
     private fun bindPolicy() {
         findViewById<android.widget.RadioButton>(R.id.rb_locked).setOnClickListener {
@@ -601,6 +872,19 @@ class CreateItemActivity : AppCompatActivity() {
         weekDays.clear(); weekDays.addAll(loaded.weekDays)
         if (weekDays.isEmpty()) weekDays.addAll(1..5) // 兜底：WEEKDAYS 模式默认周一~五
         bigSmallStart = loaded.bigSmallStart
+        // v1.2.0 新字段回显：随心记 / 组合完成数 / 时间打卡模式
+        journalMode = loaded.journalMode
+        comboRequired = loaded.comboRequired
+        if (loaded.timerMode == "COUNTUP") {
+            rbTimerCountup?.isChecked = true
+            rbTimerCountdown?.isChecked = false
+        } else {
+            rbTimerCountdown?.isChecked = true
+            rbTimerCountup?.isChecked = false
+        }
+        cbTimerPausable?.isChecked = loaded.timerPausable
+        // 负打卡开启时隐藏正计时/暂停选项（保持原倒计时）
+        if (loaded.negative) hideTimerAdvancedOptions()
 
         findViewById<EditText>(R.id.et_name).setText(it.name)
         selectedTheme = it.theme
@@ -659,6 +943,10 @@ class CreateItemActivity : AppCompatActivity() {
         renderWeekDayChips()
         renderBigSmallChips()
         renderThemeChips()
+        // v1.2.0：随心记模式回显 + 禁用态
+        renderModeChips()
+        refreshConflicts()
+        refreshComboNRow()
     }
 
     private var locked = false
@@ -694,6 +982,14 @@ class CreateItemActivity : AppCompatActivity() {
         weekDayChips.values.forEach { it.isEnabled = false; it.alpha = 0.4f }
         bigChip.isEnabled = false; bigChip.alpha = 0.4f
         smallChip.isEnabled = false; smallChip.alpha = 0.4f
+        // v1.2.0：模式切换、组合完成数、时间打卡选项、扫码绑定一并锁定
+        (findViewById<LinearLayout>(R.id.mode_container).tag as? List<*>)?.forEach { (it as? View)?.isEnabled = false }
+        comboNMinus?.isEnabled = false
+        comboNPlus?.isEnabled = false
+        rbTimerCountdown?.isEnabled = false
+        rbTimerCountup?.isEnabled = false
+        cbTimerPausable?.isEnabled = false
+        qrBindBtn?.isEnabled = false
     }
 
     private fun fillParamUi() {
@@ -733,6 +1029,11 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.scheduleMode = scheduleMode
         cfg.weekDays.clear(); cfg.weekDays.addAll(weekDays)
         cfg.bigSmallStart = bigSmallStart
+        // v1.2.0 新字段收集
+        cfg.journalMode = journalMode
+        cfg.comboRequired = comboRequired
+        cfg.timerMode = if (rbTimerCountup?.isChecked == true) "COUNTUP" else "COUNTDOWN"
+        cfg.timerPausable = cbTimerPausable?.isChecked ?: false
     }
 
     /** 生成二维码位图（ZXing，600x600） */
@@ -776,6 +1077,20 @@ class CreateItemActivity : AppCompatActivity() {
         if (!Method.isValid(cfg.methods)) { toast("所选方式存在互斥冲突"); return }
         // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）
         collectConfigFromUi()
+        // v1.2.0：随心记强制规则（兜底，防脏配置）
+        if (cfg.journalMode) {
+            cfg.negative = false
+            cfg.timeWindowEnabled = false
+            cfg.offset.enabled = false
+            cfg.offset.autoConsume = false
+            cfg.dailyLimit = -1
+            cfg.methods.remove(Method.NORMAL.key)
+            cfg.methods.remove(Method.AUTO.key)
+            cfg.methods.remove(Method.NFC.key)
+            cfg.methods.remove(Method.STEPS.key)
+            cfg.methods.remove(Method.TIMER.key)
+            if (cfg.methods.isEmpty()) { toast("随心记需至少选择一种记录方式（如文字/图片）"); return }
+        }
         // 组合打卡每日次数固定为 1（UI 已置灰，此处兜底）
         if (cfg.methods.count { it != Method.AUTO.key } > 1) { dailyLimit = 1; cfg.dailyLimit = 1 }
         if (Method.LOCATION.key in cfg.methods && cfg.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return }

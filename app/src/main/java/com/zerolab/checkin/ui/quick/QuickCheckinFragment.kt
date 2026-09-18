@@ -188,9 +188,11 @@ class QuickCheckinFragment : Fragment() {
         val isAuto = Method.AUTO.key in cfg.methods
         val statusView = root.findViewById<TextView>(R.id.tv_today_status)
         val streakView = root.findViewById<TextView>(R.id.tv_streak)
-        val streak = CheckinEngine.streak(it, repo)
+        // v1.2.0：随心记显示"记录天数"（有记录+1、断签不归零）；普通模式保持连续天数
+        val journal = cfg.journalMode
+        val days = if (journal) CheckinEngine.recordDays(it, repo) else CheckinEngine.streak(it, repo)
         val credits = repo.availableCredits(it.id)
-        val sb = StringBuilder("🔥 连续 $streak 天")
+        val sb = if (journal) StringBuilder("📔 已记录 $days 天") else StringBuilder("🔥 连续 $days 天")
         if (credits > 0) sb.append("    🛡️×$credits")
         if (cfg.dailyLimit > 1 && !neg) sb.append("    目标：每日${cfg.dailyLimit}次")
         streakView.text = sb.toString()
@@ -199,6 +201,11 @@ class QuickCheckinFragment : Fragment() {
         btnCheckin.isEnabled = true
         when {
             paused -> { statusView.text = "状态：已暂停"; btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn() }
+            // v1.2.0 随心记：记录 / 继续记录（一天可多次，只记成功）
+            journal -> {
+                statusView.text = if (cnt == 0) "状态：随心记 · 今天还没记录" else "状态：今日已记录 $cnt 次 ✓"
+                btnCheckin.text = if (cnt == 0) "记录" else "继续记录 ($cnt)"
+            }
             !CheckinEngine.isScheduledDay(it, today) -> {
                 // 无需打卡日：自动完成另一种打卡（橙色标注）
                 statusView.text = "状态：今日无需打卡 ✓"
@@ -230,10 +237,17 @@ class QuickCheckinFragment : Fragment() {
                 statusView.text = if (cnt == 0) "状态：坚持中（无操作=成功）" else "状态：今日已记录 $cnt 次破戒"
                 btnCheckin.text = if (cnt == 0) "记录一次（破戒）" else "再记录一次（$cnt）"
             }
+            // v1.2.0：时间打卡暂停进行中——按钮继续计时（续 PAUSED 进度）
+            todayRecs.any { it.status == "PAUSED" } && todayRecs.none { it.status == "SUCCESS" } && !isAuto -> {
+                statusView.text = "状态：计时进行中（已暂停保存，可继续）"
+                btnCheckin.text = "继续计时"
+            }
             !neg && interactive.size > 1 -> {
+                // v1.2.0：组合完成判定按 comboRequired（0=全部）
+                val req = if (cfg.comboRequired in 1..interactive.size) cfg.comboRequired else interactive.size
                 val done = interactive.count { m -> todayRecs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true } }
-                if (done >= interactive.size) { statusView.text = "状态：今日已完成 ✓"; btnCheckin.text = "今日已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
-                else { statusView.text = "状态：$done/${interactive.size}"; btnCheckin.text = if (done == 0) "打卡" else "继续打卡 ($done/${interactive.size})" }
+                if (done >= req) { statusView.text = "状态：今日已完成 ✓"; btnCheckin.text = "今日已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
+                else { statusView.text = "状态：$done/$req"; btnCheckin.text = if (done == 0) "打卡" else "继续打卡 ($done/$req)" }
             }
             cfg.dailyLimit == 1 -> {
                 if (cnt == 0) { statusView.text = "状态：未打卡"; btnCheckin.text = "打卡" } else { statusView.text = "状态：已打卡 ✓"; btnCheckin.text = "已完成 ✓"; btnCheckin.isEnabled = false; grayBtn() }
@@ -274,11 +288,14 @@ class QuickCheckinFragment : Fragment() {
             recs.any { it.status == "OFFSET" } -> "↩"
             recs.any { it.isAuto == 1 } -> "⚡"
             recs.any { it.status == "FAIL" } -> "❌"
+            recs.any { it.status == "PAUSED" } -> "⏸"
             else -> "✅"
         }
         title.text = "$statePrefix $date  共 ${recs.size} 条记录"
         if (recs.isEmpty()) {
             body.text = when {
+                // v1.2.0：随心记无记录日不显示缺卡文案（不染色）
+                cfg.journalMode -> "📔 该日无记录（随心记不记缺卡）"
                 date == DateUtils.today() -> if (neg) "⏳ 今天暂无操作（坚持中）" else "⏳ 今天尚未打卡"
                 neg -> "✅ 已打卡（当天无操作）"
                 else -> "❌ 未打卡（缺卡）"
@@ -300,9 +317,26 @@ class QuickCheckinFragment : Fragment() {
                 r.status == "OFFSET" -> "↩ 补签"
                 r.isAuto == 1 -> "⚡ 自动"
                 r.status == "FAIL" -> "❌ 破戒"
+                r.status == "PAUSED" -> "⏸ 暂停"   // v1.2.0：时间打卡暂停留痕
                 else -> "✅"
             }
             val sb = StringBuilder("$prefix ${fmt.format(java.util.Date(r.checkinTime))}")
+            // v1.2.0：时间打卡记录附带计时信息（暂停剩余/已走，完成用时）
+            if (r.extraJson != null) {
+                try {
+                    val o = org.json.JSONObject(r.extraJson!!)
+                    val tm = o.optString("timerMode", "")
+                    if (tm == "COUNTUP") {
+                        if (r.status == "PAUSED") sb.append("   正计时暂停 已走 %02d:%02d / 目标 %02d:%02d".format(
+                            o.optInt("elapsedSec") / 60, o.optInt("elapsedSec") % 60, o.optInt("targetSec") / 60, o.optInt("targetSec") % 60))
+                        else if (o.has("elapsedSec")) sb.append("   用时 %02d:%02d".format(o.optInt("elapsedSec") / 60, o.optInt("elapsedSec") % 60))
+                    } else if (tm == "COUNTDOWN") {
+                        if (r.status == "PAUSED") sb.append("   倒计时暂停 剩余 %02d:%02d".format(
+                            o.optInt("remainSec") / 60, o.optInt("remainSec") % 60))
+                        else if (o.has("totalSec")) sb.append("   倒计时 %02d:%02d".format(o.optInt("totalSec") / 60, o.optInt("totalSec") % 60))
+                    }
+                } catch (_: Exception) {}
+            }
             if (!r.textContent.isNullOrBlank()) sb.append("\n   文字：${r.textContent}")
             if (r.latitude != null && r.longitude != null) sb.append("\n   📍 位置：${formatLatLng(r.latitude!!, r.longitude!!)}")
             val tv = TextView(requireContext()).apply {

@@ -9,7 +9,7 @@ enum class Method(val key: String, val label: String, val emoji: String) {
     TEXT("TEXT", "文字打卡", "📝"),
     LOCATION("LOCATION", "位置打卡", "📍"),
     STEPS("STEPS", "步数打卡", "👟"),
-    TIMER("TIMER", "倒计时打卡", "⏳"),
+    TIMER("TIMER", "时间打卡", "⏳"),
     QRCODE("QRCODE", "扫码打卡", "🔳"),
     NFC("NFC", "NFC打卡", "📡"),
     VOICE("VOICE", "语音打卡", "🎤"),
