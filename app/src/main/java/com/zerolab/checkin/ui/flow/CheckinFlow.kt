@@ -484,7 +484,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         val c = cfg ?: return
         val it = item ?: return
         val countUp = c.timerMode == "COUNTUP"
-        val pausable = c.timerPausable
+        val pausable = c.timerPausable && countUp // v1.2.1：仅正计时支持暂停保存，倒计时按旧UI
         val totalSec = (c.timerMinutes * 60).coerceAtLeast(60)
         val today = DateUtils.today()
         // v1.2.0：读取当天最新 PAUSED 进度续时（倒计时续剩余 / 正计时续已走）
