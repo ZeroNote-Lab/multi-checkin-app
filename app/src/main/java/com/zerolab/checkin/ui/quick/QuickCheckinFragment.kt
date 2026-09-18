@@ -337,6 +337,20 @@ class QuickCheckinFragment : Fragment() {
                     }
                 } catch (_: Exception) {}
             }
+            // v1.2.2：无内容记录（无计时/文字/位置/媒体）追加完成方式说明，避免备注栏只有时间空荡荡
+            val hasTimer = try { org.json.JSONObject(r.extraJson ?: "{}").has("timerMode") } catch (_: Exception) { false }
+            val hasMedia = (r.photoPath?.isNotBlank() == true) || (r.voicePath?.isNotBlank() == true)
+            if (!hasTimer && r.textContent.isNullOrBlank() && r.latitude == null && r.longitude == null && !hasMedia) {
+                val label = when {
+                    r.isAuto == 1 -> "自动打卡"
+                    else -> {
+                        val m = try { org.json.JSONObject(r.extraJson ?: "{}").optString("method", "") } catch (_: Exception) { "" }
+                        if (m.isNotBlank()) Method.of(m)?.label ?: m
+                        else cfg.methods.firstOrNull { it != Method.AUTO.key }?.let { Method.of(it)?.label ?: it } ?: "打卡"
+                    }
+                }
+                sb.append("   完成$label")
+            }
             if (!r.textContent.isNullOrBlank()) sb.append("\n   文字：${r.textContent}")
             if (r.latitude != null && r.longitude != null) sb.append("\n   📍 位置：${formatLatLng(r.latitude!!, r.longitude!!)}")
             val tv = TextView(requireContext()).apply {
