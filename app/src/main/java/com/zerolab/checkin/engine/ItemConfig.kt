@@ -43,7 +43,7 @@ class ItemConfig {
     var timerMinutes: Int = 25
     var qrContent: String = ""
     var nfcTagId: String = ""
-    var voiceMaxSeconds: Int = 10
+    var voiceMaxSeconds: Int = 60
     var autoForeground: Boolean = true
 
     // v1.2.0 随心记模式：只记录成功、不记缺卡、可多次记录（日记式）
@@ -149,7 +149,7 @@ class ItemConfig {
                 c.timerMinutes = o.optInt("timerMinutes", 25)
                 c.qrContent = o.optString("qrContent", "")
                 c.nfcTagId = o.optString("nfcTagId", "")
-                c.voiceMaxSeconds = o.optInt("voiceMaxSeconds", 10)
+                c.voiceMaxSeconds = o.optInt("voiceMaxSeconds", 60)
                 c.autoForeground = o.optBoolean("autoForeground", true)
                 c.journalMode = o.optBoolean("journalMode", false)
                 c.moodMode = o.optBoolean("moodMode", false)

@@ -52,7 +52,7 @@ class CreateItemActivity : AppCompatActivity() {
     private val rows = LinkedHashMap<String, MethodRow>()
     // v1.3.3：日记 tab 把 PHOTO/TEXT/VOICE 的 card 动态移到记录类型之间，记录它们在普通 method_container 里的原 index
     private val journalMethodOrigIndex = HashMap<String, Int>()
-    private val journalMethods = setOf(Method.PHOTO.key, Method.TEXT.key, Method.VOICE.key)
+    private val journalMethods = setOf(Method.PHOTO.key, Method.TEXT.key, Method.VOICE.key, Method.LOCATION.key)
 
     // 参数控件引用
     private var cbPhotoCamera: CheckBox? = null
@@ -223,8 +223,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.tv_method_desc).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.tv_rule_title).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.rule_card).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.tv_schedule_title).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.schedule_container).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.schedule_card).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.tv_offset_title).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.offset_card).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.tv_policy_title).visibility = if (journal) View.GONE else View.VISIBLE
@@ -235,6 +234,7 @@ class CreateItemActivity : AppCompatActivity() {
         val methodContainer = findViewById<LinearLayout>(R.id.method_container)
         val journalMethodsBox = findViewById<LinearLayout>(R.id.journal_methods)
         methodContainer.visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.method_card).visibility = if (journal) View.GONE else View.VISIBLE
         if (journal) {
             // 移到 journal_methods
             journalMethods.forEach { k ->
@@ -252,15 +252,19 @@ class CreateItemActivity : AppCompatActivity() {
         }
 
         // 方式行：普通=全部显示（MOOD 除外）；心情日记=全隐藏；随心记=只留 PHOTO/TEXT/VOICE
-        val forbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key, Method.LOCATION.key)
+        val forbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key)
         rows.forEach { (k, row) ->
             row.card.visibility = when {
                 k == Method.MOOD.key -> View.GONE
                 !journal -> View.VISIBLE
                 moodMode -> View.GONE
                 k in forbidden -> View.GONE
+                // v1.3.4：随心记的位置打卡需要联网增强，未开启则隐藏
+                k == Method.LOCATION.key && journal && !com.zerolab.checkin.util.NetGeo.enabled(this) -> View.GONE
                 else -> View.VISIBLE
             }
+            // v1.3.4：随心记模式下所有方式只显示一级开关，二级 panel 全部隐藏
+            if (journal) row.panel?.visibility = View.GONE
         }
         // 随心记方式区仅在随心记（非心情日记）时显示
         journalMethodsBox.visibility = if (journal && !moodMode) View.VISIBLE else View.GONE
@@ -306,7 +310,7 @@ class CreateItemActivity : AppCompatActivity() {
         if (journalMode == on) return
         if (on) {
             // 切到日记：自动移除不允许的方式（NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE）
-            val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key, Method.LOCATION.key, Method.MOOD.key)
+            val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key, Method.MOOD.key)
             forbidden.forEach { k ->
                 if (k in cfg.methods) {
                     cfg.methods.remove(k)
@@ -478,7 +482,8 @@ class CreateItemActivity : AppCompatActivity() {
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
-                panel.visibility = if (on) View.VISIBLE else View.GONE
+                // v1.3.4：随心记模式下只显示一级开关，二级 panel 全部隐藏
+                panel.visibility = if (on && !journalMode) View.VISIBLE else View.GONE
                 if (on) cfg.methods.add(m.key) else cfg.methods.remove(m.key)
                 refreshConflicts()
             }
@@ -1087,7 +1092,7 @@ class CreateItemActivity : AppCompatActivity() {
         rows.forEach { (key, row) ->
             val on = key in cfg.methods
             row.switch.isChecked = on
-            row.panel.visibility = if (on) View.VISIBLE else View.GONE
+            row.panel.visibility = if (on && !journalMode) View.VISIBLE else View.GONE
         }
         fillParamUi()
         tvLocPoints?.text = if (cfg.locPoints.isEmpty()) "" else
@@ -1282,7 +1287,7 @@ class CreateItemActivity : AppCompatActivity() {
         }
         // 组合打卡每日次数固定为 1（UI 已置灰，此处兜底）
         if (cfg.methods.count { it != Method.AUTO.key } > 1) { dailyLimit = 1; cfg.dailyLimit = 1 }
-        if (Method.LOCATION.key in cfg.methods && cfg.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return }
+        if (Method.LOCATION.key in cfg.methods && !cfg.journalMode && cfg.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return }
         if (Method.PHOTO.key in cfg.methods && !cfg.photoFromCamera && !cfg.photoFromAlbum) { toast("拍照打卡需至少勾选一种图片来源"); return }
         if (Method.NFC.key in cfg.methods && cfg.nfcTagId.isBlank()) { toast("NFC打卡需先绑定 NFC 标签"); return }
         if (cfg.timeWindowEnabled) {

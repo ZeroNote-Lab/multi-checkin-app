@@ -21,10 +21,15 @@
     </LinearLayout>
     <View android:layout_width="match_parent" android:layout_height="0.5dp" android:background="@color/divider" />
 
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:orientation="vertical"
         android:padding="14dp">
 
@@ -220,4 +225,5 @@
             android:textColor="@color/text_hint"
             android:textSize="12sp" />
     </LinearLayout>
+    </ScrollView>
 </LinearLayout>
