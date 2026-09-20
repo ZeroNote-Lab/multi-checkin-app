@@ -130,6 +130,8 @@ object CheckinEngine {
 
     /** 连续成功天数 */
     fun streak(item: CheckinItem, repo: CheckinRepository): Int {        var d = DateUtils.today()
+        // v1.3.1：负打卡破戒当天立即归零（破戒是主动失败、当天已成事实，不再从昨日回溯）
+        if (isNegative(cfg(item)) && repo.recordsOfDay(item.id, d).any { it.status == "FAIL" }) return 0
         // 今天未定论则从昨天起算
         if (!dayIsSuccess(item, d, repo)) d = DateUtils.addDays(d, -1)
         var n = 0
