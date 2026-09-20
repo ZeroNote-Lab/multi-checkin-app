@@ -19,15 +19,16 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- v1.3.1：打卡类型文件夹标签式切换（顶部小三角 + 左右两半，选中侧白底凸起） -->
+            <!-- v1.3.3：分段胶囊式切换（iOS style，灰底圆角 + 选中白底滑块） -->
             <LinearLayout
                 android:id="@+id/mode_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
+                android:background="@drawable/bg_seg"
+                android:padding="4dp"
                 android:orientation="horizontal">
 
-                <!-- 左：普通打卡 -->
                 <LinearLayout
                     android:id="@+id/tab_normal"
                     android:layout_width="0dp"
@@ -35,28 +36,19 @@
                     android:layout_weight="1"
                     android:clickable="true"
                     android:focusable="true"
-                    android:orientation="vertical">
-
-                    <View
-                        android:id="@+id/tab_normal_arrow"
-                        android:layout_width="20dp"
-                        android:layout_height="10dp"
-                        android:layout_gravity="center_horizontal"
-                        android:background="@drawable/tab_arrow_up"
-                        android:visibility="gone" />
-
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="10dp">
                     <TextView
                         android:id="@+id/tv_tab_normal"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center"
-                        android:padding="14dp"
                         android:text="✅ 普通打卡"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp" />
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
                 </LinearLayout>
 
-                <!-- 右：日记打卡 -->
                 <LinearLayout
                     android:id="@+id/tab_journal"
                     android:layout_width="0dp"
@@ -64,34 +56,25 @@
                     android:layout_weight="1"
                     android:clickable="true"
                     android:focusable="true"
-                    android:orientation="vertical">
-
-                    <View
-                        android:id="@+id/tab_journal_arrow"
-                        android:layout_width="20dp"
-                        android:layout_height="10dp"
-                        android:layout_gravity="center_horizontal"
-                        android:background="@drawable/tab_arrow_up"
-                        android:visibility="gone" />
-
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="10dp">
                     <TextView
                         android:id="@+id/tv_tab_journal"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center"
-                        android:padding="14dp"
                         android:text="📔 日记打卡"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp" />
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
                 </LinearLayout>
             </LinearLayout>
-
             <!-- v1.3.1：选中 tab + 内容白色面板一体（文件夹翻开效果） -->
             <LinearLayout
                 android:id="@+id/content_panel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_panel_top_square"
+                android:background="@drawable/bg_card"
                 android:orientation="vertical"
                 android:padding="16dp">
 
@@ -144,7 +127,7 @@
                 android:visibility="gone">
 
                 <TextView style="@style/SectionTitle" android:text="记录类型" />
-                <RadioGroup
+                <LinearLayout
                     android:id="@+id/rg_journal_type"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -157,9 +140,18 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:checked="true"
-                        android:text="📔 随心记（文字 / 拍照 / 语音）"
+                        android:text="📔 随心记"
                         android:textColor="@color/text_primary"
                         android:textSize="13sp" />
+
+                    <!-- v1.3.3：随心记的方式开关（拍照/文字/语音）动态插入到这两个单选项之间 -->
+                    <LinearLayout
+                        android:id="@+id/journal_methods"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="vertical" />
+
                     <RadioButton
                         android:id="@+id/rb_journal_mood"
                         android:layout_width="match_parent"
@@ -168,7 +160,7 @@
                         android:text="😊 心情日记（5 档心情 + 可选文字）"
                         android:textColor="@color/text_primary"
                         android:textSize="13sp" />
-                </RadioGroup>
+                </LinearLayout>
 
                 <CheckBox
                     android:id="@+id/cb_mood_chart"
