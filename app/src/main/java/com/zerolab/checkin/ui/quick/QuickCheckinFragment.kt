@@ -86,8 +86,8 @@ class QuickCheckinFragment : Fragment() {
         view.findViewById<ImageButton>(R.id.btn_next).setOnClickListener { shiftMonth(1) }
         view.findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
             item?.let {
-                val i = Intent(requireContext(), ItemDetailActivity::class.java)
-                i.putExtra(ItemDetailActivity.EXTRA_ID, it.id); startActivity(i)
+                // v1.3.0：⋮ 菜单（心情折线图开关 + 编辑/详情）
+                com.zerolab.checkin.util.MoodChartMenu.show(requireActivity(), it, view.findViewById(R.id.btn_menu)) { refresh() }
             }
         }
         btnCheckin.setOnClickListener { flow.start(item!!, cfg) }
@@ -158,7 +158,7 @@ class QuickCheckinFragment : Fragment() {
             d = DateUtils.addDays(d, 1)
         }
         calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg)) { date -> showDayDetail(date) }
-        // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽）
+        // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽；v1.3.0：随心记/心情日记按实际改图例）
         val legendTv = root.findViewById<TextView>(R.id.tv_legend)
         val sb = SpannableStringBuilder()
         fun dot(color: Int, label: String) {
@@ -167,13 +167,33 @@ class QuickCheckinFragment : Fragment() {
             sb.setSpan(ForegroundColorSpan(color), s, s + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         sb.append("○今日  ")
-        if (CheckinEngine.isNegative(cfg)) {
-            dot(0xFF2FBF71.toInt(), "已打卡"); dot(0xFFEF5350.toInt(), "破戒"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFF59E0B.toInt(), "无需打卡")
-        } else {
-            dot(0xFF2FBF71.toInt(), "已打卡"); dot(0xFFEF5350.toInt(), "缺卡"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFFFC53D.toInt(), "部分完成"); dot(0xFFF59E0B.toInt(), "无需打卡")
+        when {
+            cfg.moodMode -> {
+                // 心情日记：○今日 + 5 档心情色点
+                dot(MonthCalendarView.MOOD_COLORS[1], "😄开心"); dot(MonthCalendarView.MOOD_COLORS[2], "🙂不错")
+                dot(MonthCalendarView.MOOD_COLORS[3], "😐一般"); dot(MonthCalendarView.MOOD_COLORS[4], "😟低落")
+                dot(MonthCalendarView.MOOD_COLORS[5], "😖很差")
+            }
+            cfg.journalMode -> {
+                // 随心记：○今日 + ●已记录（没有缺卡/补签/破戒等）
+                dot(0xFF2FBF71.toInt(), "已记录")
+            }
+            CheckinEngine.isNegative(cfg) -> {
+                dot(0xFF2FBF71.toInt(), "已打卡"); dot(0xFFEF5350.toInt(), "破戒"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFF59E0B.toInt(), "无需打卡")
+            }
+            else -> {
+                dot(0xFF2FBF71.toInt(), "已打卡"); dot(0xFFEF5350.toInt(), "缺卡"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFFFC53D.toInt(), "部分完成"); dot(0xFFF59E0B.toInt(), "无需打卡")
+            }
         }
         sb.append("\n")
-        sb.append(if (CheckinEngine.isNegative(cfg)) "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌破戒/缺卡" else "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌缺卡")
+        sb.append(
+            when {
+                cfg.moodMode -> "⏳今天没记录  😊记录心情  📝可附文字"
+                cfg.journalMode -> "⏳今天没记录  ●已记录"
+                CheckinEngine.isNegative(cfg) -> "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌破戒/缺卡"
+                else -> "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌缺卡"
+            }
+        )
         legendTv.text = sb
     }
 
@@ -181,29 +201,39 @@ class QuickCheckinFragment : Fragment() {
         val it = item ?: return
         val today = DateUtils.today()
         val todayRecs = repo.recordsOfDay(it.id, today)
-        val cnt = todayRecs.size
+        // v1.3.0：心情日记次数只计带心情的记录（4 次心情+3 次文字 = 4）
+        val journal = cfg.journalMode
+        val mood = cfg.moodMode
+        val cnt = if (mood) todayRecs.count { r -> r.status == "SUCCESS" && moodOf(r) != null } else todayRecs.size
         val neg = CheckinEngine.isNegative(cfg)
         val interactive = cfg.methods.filter { m -> m != Method.AUTO.key }
         val paused = it.isActive == 0
         val isAuto = Method.AUTO.key in cfg.methods
         val statusView = root.findViewById<TextView>(R.id.tv_today_status)
         val streakView = root.findViewById<TextView>(R.id.tv_streak)
-        // v1.2.0：随心记显示"记录天数"（有记录+1、断签不归零）；普通模式保持连续天数
-        val journal = cfg.journalMode
-        val days = if (journal) CheckinEngine.recordDays(it, repo) else CheckinEngine.streak(it, repo)
+        // v1.2.0：随心记显示"记录天数"（有记录+1、断签不归零）；v1.3.0：心情日记同；普通模式保持连续天数
+        val days = if (journal || mood) CheckinEngine.recordDays(it, repo) else CheckinEngine.streak(it, repo)
         val credits = repo.availableCredits(it.id)
-        val sb = if (journal) StringBuilder("📔 已记录 $days 天") else StringBuilder("🔥 连续 $days 天")
+        val sb = when {
+            mood -> StringBuilder("😊 记录 $days 天")
+            journal -> StringBuilder("📔 已记录 $days 天")
+            else -> StringBuilder("🔥 连续 $days 天")
+        }
         if (credits > 0) sb.append("    🛡️×$credits")
-        if (cfg.dailyLimit > 1 && !neg) sb.append("    目标：每日${cfg.dailyLimit}次")
+        if (cfg.dailyLimit > 1 && !neg && !journal && !mood) sb.append("    目标：每日${cfg.dailyLimit}次")
         streakView.text = sb.toString()
+        // v1.3.0：🔥连续天数文字深灰（红=缺卡语义，用于成就违和）；🔥 emoji 自带橙红不动
+        streakView.setTextColor(0xFF4A4A4A.toInt())
 
         btnCheckin.background?.setTint(ThemeManager.of(it.theme).primary)
         btnCheckin.isEnabled = true
         when {
             paused -> { statusView.text = "状态：已暂停"; btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn() }
-            // v1.2.0 随心记：记录 / 继续记录（一天可多次，只记成功）
-            journal -> {
-                statusView.text = if (cnt == 0) "状态：随心记 · 今天还没记录" else "状态：今日已记录 $cnt 次 ✓"
+            // v1.2.0 随心记 / v1.3.0 心情日记：记录 / 继续记录（一天可多次，只记成功）
+            journal || mood -> {
+                statusView.text = if (cnt == 0)
+                    (if (mood) "状态：心情日记 · 今天还没记录" else "状态：随心记 · 今天还没记录")
+                    else "状态：今日已记录 $cnt 次 ✓"
                 btnCheckin.text = if (cnt == 0) "记录" else "继续记录 ($cnt)"
             }
             !CheckinEngine.isScheduledDay(it, today) -> {
@@ -266,6 +296,24 @@ class QuickCheckinFragment : Fragment() {
 
     private fun grayBtn() { btnCheckin.background?.setTint(0xFFB6BCC9.toInt()) }
 
+    /** v1.3.0：记录的心情档位（extraJson.mood，1~5；无心情返回 null） */
+    private fun moodOf(r: com.zerolab.checkin.data.entity.CheckinRecord): Int? = try {
+        org.json.JSONObject(r.extraJson ?: "{}").optInt("mood", 0).takeIf { it in 1..5 }
+    } catch (_: Exception) { null }
+
+    /** v1.3.0：心情日记当天多条带心情记录时，备注栏第一行画心情折线图 */
+    private fun moodLineView(recs: List<com.zerolab.checkin.data.entity.CheckinRecord>): View? {
+        if (!cfg.moodMode || !cfg.moodChart) return null
+        val moods = recs.filter { moodOf(it) != null }.mapNotNull { moodOf(it) }
+        if (moods.size < 2) return null
+        return MoodLineView(requireContext()).apply {
+            setMoods(moods)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (76 * resources.displayMetrics.density).toInt())
+            lp.bottomMargin = (6 * resources.displayMetrics.density).toInt()
+            layoutParams = lp
+        }
+    }
+
     /** 点击日期：备注栏显示次数/时间/文字/缩略图/语音（v1.1.6：媒体内联到对应记录行，不再统一堆底部） */
     private fun showDayDetail(date: String) {
         val it = item ?: return
@@ -282,8 +330,9 @@ class QuickCheckinFragment : Fragment() {
             body.text = "🟠 该日无需打卡，自动视为完成，不中断连续天数"
             return
         }
-        // 标题带状态符号（美化备注栏）
+        // 标题带状态符号（美化备注栏）；v1.3.0：心情日记次数只计带心情的记录
         val neg = CheckinEngine.isNegative(cfg)
+        val shownCount = if (cfg.moodMode) recs.count { moodOf(it) != null } else recs.size
         val statePrefix = when {
             recs.any { it.status == "OFFSET" } -> "↩"
             recs.any { it.isAuto == 1 } -> "⚡"
@@ -291,10 +340,11 @@ class QuickCheckinFragment : Fragment() {
             recs.any { it.status == "PAUSED" } -> "⏸"
             else -> "✅"
         }
-        title.text = "$statePrefix $date  共 ${recs.size} 条记录"
+        title.text = "$statePrefix $date  共 $shownCount 条记录"
         if (recs.isEmpty()) {
             body.text = when {
-                // v1.2.0：随心记无记录日不显示缺卡文案（不染色）
+                // v1.2.0：随心记 / v1.3.0：心情日记无记录日不显示缺卡文案（不染色）
+                cfg.moodMode -> "😊 该日无记录（心情日记不记缺卡）"
                 cfg.journalMode -> "📔 该日无记录（随心记不记缺卡）"
                 date == DateUtils.today() -> if (neg) "⏳ 今天暂无操作（坚持中）" else "⏳ 今天尚未打卡"
                 neg -> "✅ 已打卡（当天无操作）"
@@ -303,6 +353,8 @@ class QuickCheckinFragment : Fragment() {
             offerManualBackfill(it, date, neg)
             return
         }
+        // v1.3.0：心情折线图置于记录区第一行（当天 ≥2 条带心情记录且开关开启）
+        moodLineView(recs)?.let { recordsBox.addView(it) }
         // 有记录：逐条渲染（文本 + 内联媒体）
         body.visibility = View.GONE
         val fmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
@@ -321,6 +373,8 @@ class QuickCheckinFragment : Fragment() {
                 else -> "✅"
             }
             val sb = StringBuilder("$prefix ${fmt.format(java.util.Date(r.checkinTime))}")
+            // v1.3.0：心情日记——心情 emoji 紧跟时间（多次记录每条可见）
+            moodOf(r)?.let { sb.append("   ${MonthCalendarView.MOOD_EMOJIS[it - 1]}") }
             // v1.2.0：时间打卡记录附带计时信息（暂停剩余/已走，完成用时）
             if (r.extraJson != null) {
                 try {
@@ -351,13 +405,39 @@ class QuickCheckinFragment : Fragment() {
                 }
                 sb.append("   完成$label")
             }
-            if (!r.textContent.isNullOrBlank()) sb.append("\n   文字：${r.textContent}")
-            if (r.latitude != null && r.longitude != null) sb.append("\n   📍 位置：${formatLatLng(r.latitude!!, r.longitude!!)}")
+            // v1.3.0：去"文字："前缀，时间后直接衔接文字；位置有真实地名（locName）时显示地名
+            if (!r.textContent.isNullOrBlank()) sb.append("\n   ${r.textContent}")
+            if (r.latitude != null && r.longitude != null) {
+                val locName = try { org.json.JSONObject(r.extraJson ?: "{}").optString("locName", "") } catch (_: Exception) { "" }
+                sb.append("\n   📍 位置：${if (locName.isNotBlank()) locName else formatLatLng(r.latitude!!, r.longitude!!)}")
+            }
             val tv = TextView(requireContext()).apply {
                 text = sb.toString(); textSize = 13f
                 setTextColor(0xFF1F2430.toInt()); setLineSpacing(3f * resources.displayMetrics.scaledDensity, 1f)
+                // v1.3.0：普通打卡文字超 5 行折叠（日记全文显示，不折叠）
+                if (!cfg.journalMode && !cfg.moodMode && r.textContent?.length ?: 0 > 120) {
+                    maxLines = 5
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
             }
-            row.addView(tv)
+            // v1.3.0：折叠时追加「…展开」点击看全文（仅普通打卡长文）
+            if (!cfg.journalMode && !cfg.moodMode && (r.textContent?.length ?: 0) > 120) {
+                val btnExpand = TextView(requireContext()).apply {
+                    text = "…展开"
+                    textSize = 12f
+                    setTextColor(0xFF4C8DFF.toInt())
+                    setPadding(0, 2, 0, 0)
+                }
+                btnExpand.setOnClickListener {
+                    tv.maxLines = Int.MAX_VALUE
+                    tv.ellipsize = null
+                    btnExpand.visibility = View.GONE
+                }
+                row.addView(tv)
+                row.addView(btnExpand)
+            } else {
+                row.addView(tv)
+            }
             // 媒体内联：该条照片缩略图 + 语音按钮（位于本条文字下方，与其他记录对齐）
             val mediaRow = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.HORIZONTAL

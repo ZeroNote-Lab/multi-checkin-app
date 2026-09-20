@@ -48,7 +48,7 @@ class CreateItemActivity : AppCompatActivity() {
     private val cfg = ItemConfig()
     private var selectedTheme = "sakura"
 
-    private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout)
+    private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout)
     private val rows = LinkedHashMap<String, MethodRow>()
 
     // 参数控件引用
@@ -73,6 +73,8 @@ class CreateItemActivity : AppCompatActivity() {
 
     // v1.2.0 随心记模式：普通打卡 / 随心记 chip
     private var journalMode = false
+    // v1.3.0 心情日记（日记 tab 内记录类型：false=随心记 true=心情日记）
+    private var moodMode = false
     private var modeHint: TextView? = null
     private var comboNRow: LinearLayout? = null
     private var comboNLabel: TextView? = null
@@ -125,12 +127,13 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tv_title).text = if (editing != null) "编辑打卡项" else "新建打卡项"
 
         buildThemeChips()
-        buildModeSection()   // v1.2.0 打卡模式（普通打卡 / 随心记），在方式开关之前构建
+        buildModeSection()   // v1.3.0 打卡类型双 tab（普通打卡 / 日记打卡），在方式开关之前构建
         buildMethodRows()
         buildScheduleSection()
         bindRuleControls()
         bindOffset()
         bindPolicy()
+        bindJournalPanel()   // v1.3.0 日记 tab 记录类型单选 + 心情折线图开关
 
         if (editing != null) loadEditing() else {
             // 默认勾选普通
@@ -179,12 +182,12 @@ class CreateItemActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- v1.2.0 打卡模式：普通打卡 / 随心记 ----------
+    // ---------- v1.3.0 打卡类型双 tab：普通打卡 / 日记打卡 ----------
     private fun buildModeSection() {
         val container = findViewById<LinearLayout>(R.id.mode_container)
         modeHint = findViewById(R.id.tv_mode_hint)
         val normal = modeChip("✅ 普通打卡") { setJournalMode(false) }
-        val journal = modeChip("📔 随心记") { setJournalMode(true) }
+        val journal = modeChip("📔 日记打卡") { setJournalMode(true) }
         container.addView(normal); container.addView(journal)
         container.tag = listOf(normal, journal)   // 供 loadEditing 回显
         renderModeChips()
@@ -214,14 +217,71 @@ class CreateItemActivity : AppCompatActivity() {
             tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         }
         modeHint?.text = if (journalMode)
-            "📔 随心记：日记式记录，只记成功、可多次记录，不记缺卡、不设排期 ο(=•ω＜=)ρ⌒☆"
-            else "普通打卡：按规则打卡，有缺卡与连续天数。"
+            "📔 日记打卡：日记式记录，只记成功、可多次记录，不记缺卡、不设排期 ο(=•ω＜=)ρ⌒☆"
+            else "✅ 普通打卡：按规则打卡，有缺卡与连续天数。"
+    }
+
+    /** v1.3.0：日记 tab 下按记录类型/模式刷新区块与方式行可见性（纯视图，不改配置） */
+    private fun refreshJournalVisibility() {
+        val journal = journalMode
+        findViewById<View>(R.id.tv_method_title).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tv_method_desc).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tv_rule_title).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.rule_card).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tv_schedule_title).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.schedule_container).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tv_offset_title).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.offset_card).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tv_policy_title).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.policy_card).visibility = if (journal) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.journal_panel).visibility = if (journal) View.VISIBLE else View.GONE
+        // 方式行：普通=全部显示；心情日记=全隐藏（无方式开关）；随心记=只留 PHOTO/TEXT/LOCATION/VOICE
+        val forbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key)
+        rows.forEach { (k, row) ->
+            row.card.visibility = when {
+                !journal -> View.VISIBLE
+                moodMode -> View.GONE
+                k in forbidden -> View.GONE
+                else -> View.VISIBLE
+            }
+        }
+        findViewById<View>(R.id.cb_mood_chart).visibility = if (journal && moodMode) View.VISIBLE else View.GONE
+        refreshComboNRow()
+    }
+
+    /** v1.3.0：日记 tab 记录类型单选（📔随心记 | 😊心情日记） */
+    private fun setMoodMode(on: Boolean) {
+        if (moodMode == on) return
+        moodMode = on
+        if (on) {
+            // 心情日记：只保留 MOOD 一种"方式"，清空其余
+            cfg.methods.clear()
+            rows.values.forEach { it.switch.isChecked = false; it.panel.visibility = View.GONE }
+            cfg.methods.add(Method.MOOD.key)
+            dailyLimit = -1
+            findViewById<TextView>(R.id.tv_limit).text = "不限"
+        } else {
+            // 回到随心记：移除 MOOD，恢复日记允许方式
+            cfg.methods.remove(Method.MOOD.key)
+            rows[Method.MOOD.key]?.switch?.isChecked = false
+            rows[Method.MOOD.key]?.panel?.visibility = View.GONE
+        }
+        refreshJournalVisibility()
+        refreshConflicts()
+        refreshComboNRow()
+    }
+
+    private fun bindJournalPanel() {
+        findViewById<RadioButton>(R.id.rb_journal_suixinsui).setOnClickListener { setMoodMode(false) }
+        findViewById<RadioButton>(R.id.rb_journal_mood).setOnClickListener { setMoodMode(true) }
+        // v1.3.0：折线图开关默认跟随 cfg.moodChart（默认开启），避免新建时 UI 与配置不一致
+        findViewById<CheckBox>(R.id.cb_mood_chart).isChecked = cfg.moodChart
     }
 
     private fun setJournalMode(on: Boolean) {
         if (journalMode == on) return
         if (on) {
-            // 切到随心记：自动移除不允许的方式并置灰提示（NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE）
+            // 切到日记：自动移除不允许的方式（NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE）
             val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key)
             forbidden.forEach { k ->
                 if (k in cfg.methods) {
@@ -230,7 +290,7 @@ class CreateItemActivity : AppCompatActivity() {
                     rows[k]?.panel?.visibility = View.GONE
                 }
             }
-            // 固定时间段 / 负打卡 / 抵消机制一并关闭（随心记不支持）
+            // 固定时间段 / 负打卡 / 抵消机制一并关闭（日记不支持）
             findViewById<CompoundButton>(R.id.cb_negative).isChecked = false
             findViewById<CompoundButton>(R.id.cb_time_window).isChecked = false
             findViewById<View>(R.id.tw_panel).visibility = View.GONE
@@ -241,11 +301,16 @@ class CreateItemActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.tv_limit).text = "不限"
             comboRequired = 0
         } else {
+            // 回到普通：恢复默认每日 1 次；日记记录类型复位随心记
+            moodMode = false
+            findViewById<RadioButton>(R.id.rb_journal_suixinsui).isChecked = true
+            cfg.methods.remove(Method.MOOD.key)
             dailyLimit = 1
             findViewById<TextView>(R.id.tv_limit).text = "1"
         }
         journalMode = on
         renderModeChips()
+        refreshJournalVisibility()
         refreshConflicts()
         refreshComboNRow()
     }
@@ -393,7 +458,7 @@ class CreateItemActivity : AppCompatActivity() {
                 refreshConflicts()
             }
             container.addView(card)
-            rows[m.key] = MethodRow(sw, panel)
+            rows[m.key] = MethodRow(sw, panel, card)
         }
     }
 
@@ -661,6 +726,7 @@ class CreateItemActivity : AppCompatActivity() {
                 panel.addView(sectionLabel("最大录制时长（秒）"))
                 etVoice = input("10", true); panel.addView(etVoice)
             }
+            Method.MOOD -> panel.addView(sectionLabel("心情日记：打卡时选择 5 档心情，可附文字。"))
             Method.AUTO -> panel.addView(sectionLabel("App 回到前台/冷启动时自动完成，无需手动操作。"))
         }
     }
@@ -948,6 +1014,11 @@ class CreateItemActivity : AppCompatActivity() {
         bigSmallStart = loaded.bigSmallStart
         // v1.2.0 新字段回显：随心记 / 组合完成数 / 时间打卡模式
         journalMode = loaded.journalMode
+        // v1.3.0 心情日记回显
+        moodMode = loaded.moodMode
+        if (loaded.moodMode) findViewById<RadioButton>(R.id.rb_journal_mood).isChecked = true
+        else findViewById<RadioButton>(R.id.rb_journal_suixinsui).isChecked = true
+        findViewById<CheckBox>(R.id.cb_mood_chart).isChecked = loaded.moodChart
         comboRequired = loaded.comboRequired
         if (loaded.timerMode == "COUNTUP") {
             rbTimerCountup?.isChecked = true
@@ -1000,12 +1071,14 @@ class CreateItemActivity : AppCompatActivity() {
         ivQr?.setImageBitmap(makeQrBitmap(cfg.qrContent))
         tvNfc?.text = if (cfg.nfcTagId.isBlank()) "尚未绑定标签" else "已绑定标签：${cfg.nfcTagId}"
 
+        // v1.3.0：日记项不设修改策略（始终可修改），即使历史 LOCKED 也放行
+        val isDiary = cfg.journalMode || cfg.moodMode
         // 不可修改策略：规则整体锁定（bug8：之前 LOCKED 仍可改，现在强制生效）
-        if (it.editPolicy == "LOCKED") {
+        if (it.editPolicy == "LOCKED" && !isDiary) {
             lockRules("规则已锁定（创建后不可修改），仅可修改名称/主题")
         }
         // INTERVAL_N 锁定期：仅名称/主题可改，其余规则禁用
-        if (it.editPolicy == "INTERVAL_N" && it.lastEditDate != null &&
+        if (it.editPolicy == "INTERVAL_N" && !isDiary && it.lastEditDate != null &&
             DateUtils.daysSince(it.lastEditDate) < (it.editInterval ?: 0)) {
             lockRules("距上次修改不足 ${it.editInterval} 天，规则暂不可改")
         }
@@ -1019,6 +1092,7 @@ class CreateItemActivity : AppCompatActivity() {
         renderThemeChips()
         // v1.2.0：随心记模式回显 + 禁用态
         renderModeChips()
+        refreshJournalVisibility()   // v1.3.0 双 tab 可见性
         refreshConflicts()
         refreshComboNRow()
     }
@@ -1085,7 +1159,7 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.twEnd = findViewById<Button>(R.id.btn_tw_end).text.toString()
         cbPhotoCamera?.let { cfg.photoFromCamera = it.isChecked }
         cbPhotoAlbum?.let { cfg.photoFromAlbum = it.isChecked }
-        etTextMin?.let { cfg.textMinWords = it.text.toString().toIntOrNull()?.coerceAtLeast(0) ?: 1 }
+        etTextMin?.let { cfg.textMinWords = (it.text.toString().toIntOrNull() ?: 1).coerceIn(1, 99) }  // v1.3.0：最低字数 1~99
         cbTextNoRepeat?.let { cfg.textNoRepeat = it.isChecked }
         cbLocNeg?.let { cfg.locNegative = it.isChecked }
         etSteps?.let { cfg.stepTarget = it.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 5000 }
@@ -1105,6 +1179,9 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.bigSmallStart = bigSmallStart
         // v1.2.0 新字段收集
         cfg.journalMode = journalMode
+        // v1.3.0 心情日记字段收集（心情折线图开关随时可改）
+        cfg.moodMode = moodMode
+        cfg.moodChart = findViewById<CheckBox>(R.id.cb_mood_chart).isChecked
         // v1.2.2：完成数越界兜底（历史脏数据/异常值归一为 0=全部），组合项 ≤1 时恒为全部
         val comboTotal = cfg.methods.filter { it != Method.AUTO.key }.size
         cfg.comboRequired = if (comboTotal <= 1) 0 else if (comboRequired !in 1 until comboTotal) 0 else comboRequired
@@ -1149,11 +1226,16 @@ class CreateItemActivity : AppCompatActivity() {
     private fun save() {
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
         if (name.isBlank()) { toast("请填写打卡名称"); return }
-        if (scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
-        if (cfg.methods.isEmpty()) { toast("请至少打开一种打卡方式"); return }
-        if (!Method.isValid(cfg.methods)) { toast("所选方式存在互斥冲突"); return }
+        if (!journalMode && scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
         // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）
         collectConfigFromUi()
+        // v1.3.0：心情日记强制规则（只保留 MOOD，隐含日记语义）
+        if (cfg.moodMode) {
+            cfg.methods.clear(); cfg.methods.add(Method.MOOD.key)
+            cfg.journalMode = true
+        }
+        if (cfg.methods.isEmpty()) { toast("请至少打开一种打卡方式"); return }
+        if (!Method.isValid(cfg.methods)) { toast("所选方式存在互斥冲突"); return }
         // v1.2.0：随心记强制规则（兜底，防脏配置）
         if (cfg.journalMode) {
             cfg.negative = false
@@ -1180,6 +1262,10 @@ class CreateItemActivity : AppCompatActivity() {
 
         val policyInterval = findViewById<RadioButton>(R.id.rb_interval).isChecked
         val intervalN = findViewById<EditText>(R.id.et_interval).text.toString().toIntOrNull()
+        // v1.3.0：日记项不设修改策略（FLEX=可随时修改）
+        val isDiary = cfg.journalMode || cfg.moodMode
+        val editPolicy = if (isDiary) "FLEX" else if (policyInterval) "INTERVAL_N" else "LOCKED"
+        val editInterval = if (!isDiary && policyInterval) (intervalN ?: 7) else null
         val now = System.currentTimeMillis()
         thread {
             if (editing != null) {
@@ -1187,8 +1273,8 @@ class CreateItemActivity : AppCompatActivity() {
                 val updated = old.copy(
                     name = name, theme = selectedTheme,
                     type = ItemConfig.mainType(cfg.methods), configJson = cfg.toJson(),
-                    editPolicy = if (policyInterval) "INTERVAL_N" else "LOCKED",
-                    editInterval = if (policyInterval) (intervalN ?: 7) else null,
+                    editPolicy = editPolicy,
+                    editInterval = editInterval,
                     lastEditDate = if (!locked || old.lastEditDate == null) DateUtils.today() else old.lastEditDate,
                     updatedAt = now
                 )
@@ -1197,8 +1283,8 @@ class CreateItemActivity : AppCompatActivity() {
                 val item = CheckinItem(
                     name = name, type = ItemConfig.mainType(cfg.methods), configJson = cfg.toJson(),
                     icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
-                    editPolicy = if (policyInterval) "INTERVAL_N" else "LOCKED",
-                    editInterval = if (policyInterval) (intervalN ?: 7) else null,
+                    editPolicy = editPolicy,
+                    editInterval = editInterval,
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                 )
                 repo.insertItem(item)

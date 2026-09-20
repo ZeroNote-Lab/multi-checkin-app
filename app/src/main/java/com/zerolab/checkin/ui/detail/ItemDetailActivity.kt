@@ -46,8 +46,9 @@ class ItemDetailActivity : AppCompatActivity() {
             "主题：${theme.name}    状态：${if (item.isActive == 1) "启用中" else "已暂停"}"
 
         val sb = StringBuilder()
-        // v1.2.0：随心记模式展示
-        if (cfg.journalMode) sb.appendLine("打卡模式：📔 随心记（只记成功、可多次记录、不记缺卡）")
+        // v1.2.0：随心记模式展示；v1.3.0：心情日记
+        if (cfg.moodMode) sb.appendLine("打卡模式：😊 心情日记（5 档心情 + 可选文字，只记记录、不记缺卡）")
+        else if (cfg.journalMode) sb.appendLine("打卡模式：📔 随心记（只记成功、可多次记录、不记缺卡）")
         val methodNames = cfg.methods.mapNotNull { Method.of(it)?.label }
         sb.appendLine("打卡方式：${methodNames.joinToString(" + ")}")
         sb.appendLine("每日次数：${if (cfg.journalMode || cfg.dailyLimit < 0) "不限" else cfg.dailyLimit}")
@@ -71,16 +72,17 @@ class ItemDetailActivity : AppCompatActivity() {
         if (Method.NFC.key in cfg.methods) sb.appendLine("NFC 标签：${cfg.nfcTagId.ifBlank { "未绑定" }}")
         if (Method.VOICE.key in cfg.methods) sb.appendLine("语音最长：${cfg.voiceMaxSeconds} 秒")
         if (cfg.offset.enabled) sb.appendLine("抵消机制：模式${cfg.offset.mode}，每${cfg.offset.nDays}天得${cfg.offset.k}次，${if (cfg.offset.autoConsume) "自动消耗" else "手动消耗"}")
-        sb.appendLine("修改策略：${if (item.editPolicy == "LOCKED") "不可修改" else "每${item.editInterval}天可改一次"}")
+        // v1.3.0：FLEX=日记项可随时修改
+        sb.appendLine("修改策略：${when (item.editPolicy) { "LOCKED" -> "不可修改"; "INTERVAL_N" -> "每${item.editInterval}天可改一次"; else -> "可随时修改" }}")
         sb.append("创建时间：${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(item.createdAt))}")
         findViewById<TextView>(R.id.tv_detail).text = sb.toString()
 
         thread {
-            // v1.2.0：随心记显示"记录天数"，普通模式保持连续天数
+            // v1.2.0：随心记显示"记录天数"，普通模式保持连续天数；v1.3.0：心情日记同
             val days = if (cfg.journalMode) CheckinEngine.recordDays(item, repo)
                 else CheckinEngine.streak(item, repo)
             val credits = repo.availableCredits(item.id)
-            val prefix = if (cfg.journalMode) "📔已记录" else "🔥连续"
+            val prefix = if (cfg.moodMode) "😊已记录" else if (cfg.journalMode) "📔已记录" else "🔥连续"
             runOnUiThread {
                 findViewById<TextView>(R.id.tv_sub).text =
                     "主题：${theme.name}    $prefix${days}天" + if (credits > 0 && !cfg.journalMode) "    🛡️×$credits" else ""

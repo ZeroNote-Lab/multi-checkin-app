@@ -74,6 +74,10 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private var lng: Double? = null
     // v1.2.0：时间打卡本次会话的实际计时信息（写记录时附加到 extraJson）
     private var timerExtra: String? = null
+    // v1.3.0：心情日记（MOOD）选择的心情档位 1~5（写记录时附加 extraJson.mood）
+    private var moodValue: Int? = null
+    // v1.3.0：位置增强解析出的真实地名（写记录时附加 extraJson.locName；离线为 null 只显经纬度）
+    private var locName: String? = null
 
     private var pendingPhotoUri: android.net.Uri? = null
     private var audioRecorder = AudioRecorder()
@@ -143,7 +147,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     fun start(item: CheckinItem, cfg: ItemConfig) {
         this.item = item; this.cfg = cfg
         photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
-        timerExtra = null
+        timerExtra = null; moodValue = null; locName = null
         doneMethods.clear(); queue.clear()
         val interactive = cfg.methods.filter { it != Method.AUTO.key }
         // 组合（多方式）：弹出方式卡片，逐个完成
@@ -179,13 +183,14 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         val m = comboCurrent ?: return
         val it = item ?: return
         thread {
-            // v1.2.0：组合方式记录合并时间打卡实际计时信息
+            // v1.2.0：组合方式记录合并时间打卡实际计时信息；v1.3.0：合并位置真实地名 locName
             val jo = org.json.JSONObject().put("method", m)
             timerExtra?.let { te -> try {
                 val o = org.json.JSONObject(te)
                 val keys = o.keys()
                 while (keys.hasNext()) { val k = keys.next(); jo.put(k, o.get(k)) }
             } catch (_: Exception) {} }
+            locName?.let { jo.put("locName", it) }
             val r = CheckinEngine.perform(it, repo, photoPath, textContent, voicePath, lat, lng,
                 extra = jo.toString())
             main.post {
@@ -258,7 +263,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         }
         comboCurrent = m
         photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
-        timerExtra = null
+        timerExtra = null; moodValue = null; locName = null
         when (m) {
             Method.TEXT.key -> doText()
             Method.PHOTO.key -> ensure(Manifest.permission.CAMERA, permCamera) { doPhoto() }
@@ -268,6 +273,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             Method.TIMER.key -> doTimer()
             Method.QRCODE.key -> doQr()
             Method.NFC.key -> doNfc()
+            Method.MOOD.key -> doMood()
             else -> stepSuccess()
         }
     }
@@ -280,19 +286,91 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     // ---------- 文字 ----------
     private fun doText() {
         val c = cfg ?: return
-        val et = EditText(ctx).apply { hint = "输入打卡内容（至少 ${c.textMinWords} 字）"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE; setMinLines(2) }
+        val et = EditText(ctx).apply {
+            hint = "输入打卡内容（至少 ${c.textMinWords} 字）"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setMinLines(2)
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5000))  // v1.3.0：防极限输入
+        }
         val container = LinearLayout(ctx).apply { setPadding(48, 24, 48, 0); addView(et) }
-        AlertDialog.Builder(ctx).setTitle("文字打卡").setView(container)
+        val dialog = AlertDialog.Builder(ctx).setTitle("文字打卡").setView(container)
             .setNegativeButton("取消", null)
-            .setPositiveButton("确定") { _, _ ->
+            .setPositiveButton("确定", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val s = et.text.toString().trim()
-                if (s.length < c.textMinWords) { toast("字数不足"); return@setPositiveButton }
+                if (s.length < c.textMinWords) { toast("字数不足哦 (｡•́︿•̀｡)"); return@setOnClickListener }
                 if (c.textNoRepeat) {
                     val last = repo.allRecords(item!!.id).firstOrNull { !it.textContent.isNullOrBlank() }?.textContent
-                    if (last == s) { toast("内容不可与上次重复"); return@setPositiveButton }
+                    if (last == s) { toast("内容不可与上次重复哦"); return@setOnClickListener }
                 }
-                textContent = s; stepSuccess()
-            }.show()
+                textContent = s
+                dialog.dismiss()
+                stepSuccess()
+            }
+        }
+        dialog.show()
+    }
+
+    // ---------- 心情日记（MOOD，v1.3.0）：5 档心情必选 + 文字可选（先选心情才能写） ----------
+    private fun doMood() {
+        val moods = listOf("😄" to 1, "🙂" to 2, "😐" to 3, "😟" to 4, "😖" to 5)
+        var selected = 0
+        val views = mutableListOf<TextView>()
+        val et = EditText(ctx).apply {
+            hint = "可选：记录一句心情备注"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setMinLines(2)
+            isEnabled = false
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5000))
+        }
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 8, 0, 8)
+        }
+        moods.forEach { (emoji, v) ->
+            val b = TextView(ctx).apply {
+                text = emoji
+                textSize = 30f
+                gravity = Gravity.CENTER
+                setPadding(0, 14, 0, 14)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener {
+                    selected = v
+                    et.isEnabled = true
+                    views.forEach { t ->
+                        val hit = t.tag as? Int == v
+                        t.setBackgroundResource(if (hit) R.drawable.bg_card else 0)
+                        t.alpha = if (hit) 1f else 0.45f
+                    }
+                }
+            }
+            b.tag = v
+            views.add(b)
+            row.addView(b)
+        }
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 16, 48, 0)
+            addView(row)
+            addView(et)
+        }
+        val dialog = AlertDialog.Builder(ctx).setTitle("😊 心情日记 · 记录此刻心情").setView(box)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("记录", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (selected == 0) { toast("请先选择一个心情 (｡•́︿•̀｡)"); return@setOnClickListener }
+                moodValue = selected
+                val s = et.text.toString().trim()
+                textContent = s.ifBlank { null }
+                dialog.dismiss()
+                stepSuccess()
+            }
+        }
+        dialog.show()
     }
 
     // ---------- 拍照 ----------
@@ -378,7 +456,21 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             msg + if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
             else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
         ).setNegativeButton("取消", null)
-            .setPositiveButton("使用该位置") { _, _ -> stepSuccess() }
+            .setPositiveButton("使用该位置") { _, _ ->
+                // v1.3.0：联网增强开启时异步解析真实地名（3s 超时，失败降级只存经纬度）；离线直接完成
+                if (!com.zerolab.checkin.util.NetGeo.enabled(ctx)) {
+                    locName = null; stepSuccess(); return@setPositiveButton
+                }
+                val loading = AlertDialog.Builder(ctx).setMessage("正在获取位置名称…").setCancelable(false).show()
+                thread {
+                    val name = try { com.zerolab.checkin.util.NetGeo.regeo(ctx, la, ln) } catch (_: Exception) { null }
+                    main.post {
+                        try { loading.dismiss() } catch (_: Exception) {}
+                        locName = name
+                        stepSuccess()
+                    }
+                }
+            }
             .show()
 
     }
@@ -698,10 +790,20 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private fun finalize() {
         val it = item ?: return
         thread {
+            // v1.2.0：时间打卡计时信息；v1.3.0：心情 mood / 位置地名 locName 一并附加 extraJson
+            val jo = org.json.JSONObject()
+            timerExtra?.let { te -> try {
+                val o = org.json.JSONObject(te)
+                val keys = o.keys()
+                while (keys.hasNext()) { val k = keys.next(); jo.put(k, o.get(k)) }
+            } catch (_: Exception) {} }
+            moodValue?.let { jo.put("mood", it) }
+            locName?.let { jo.put("locName", it) }
+            val extra = if (jo.length() > 0) jo.toString() else null
             val r = CheckinEngine.perform(
                 it, repo,
                 photoPath = photoPath, text = textContent, voicePath = voicePath,
-                lat = lat, lng = lng, extra = timerExtra // v1.2.0：时间打卡附加实际计时信息
+                lat = lat, lng = lng, extra = extra
             )
             main.post {
                 when (r) {

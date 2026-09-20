@@ -13,6 +13,7 @@ enum class Method(val key: String, val label: String, val emoji: String) {
     QRCODE("QRCODE", "扫码打卡", "🔳"),
     NFC("NFC", "NFC打卡", "📡"),
     VOICE("VOICE", "语音打卡", "🎤"),
+    MOOD("MOOD", "心情打卡", "😊"),
     AUTO("AUTO", "自动打卡", "⚡");
 
     companion object {

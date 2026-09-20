@@ -48,8 +48,8 @@
                     android:orientation="horizontal" />
             </HorizontalScrollView>
 
-            <!-- v1.2.0 打卡模式：普通打卡 / 随心记 -->
-            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡模式" />
+            <!-- v1.3.0 打卡类型双 tab：普通打卡 / 日记打卡 -->
+            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡类型" />
             <LinearLayout
                 android:id="@+id/mode_container"
                 android:layout_width="match_parent"
@@ -61,13 +61,65 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:text="普通打卡：按规则打卡，有缺卡与连续天数。\n随心记：日记式记录，只记成功、可多次记录、不记缺卡、不设排期。"
+                android:text="普通打卡：按规则打卡，有缺卡与连续天数。\n日记打卡：日记式记录，只记成功、可多次记录、不记缺卡、不设排期。"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
+            <!-- v1.3.0 日记 tab 内容：记录类型单选 + 心情折线图开关 -->
+            <LinearLayout
+                android:id="@+id/journal_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView style="@style/SectionTitle" android:text="记录类型" />
+                <RadioGroup
+                    android:id="@+id/rg_journal_type"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+                    <RadioButton
+                        android:id="@+id/rb_journal_suixinsui"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:text="📔 随心记（文字 / 拍照 / 位置 / 语音）"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+                    <RadioButton
+                        android:id="@+id/rb_journal_mood"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="😊 心情日记（5 档心情 + 可选文字）"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+                </RadioGroup>
+
+                <CheckBox
+                    android:id="@+id/cb_mood_chart"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="心情折线图（当日多条心情时在备注栏画趋势线，随时可改）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
             <!-- 打卡方式开关 -->
-            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡方式（可多选组合）" />
             <TextView
+                android:id="@+id/tv_method_title"
+                style="@style/SectionTitle"
+                android:layout_marginTop="18dp"
+                android:text="打卡方式（可多选组合）" />
+            <TextView
+                android:id="@+id/tv_method_desc"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
@@ -82,8 +134,13 @@
                 android:orientation="vertical" />
 
             <!-- 频率与规则 -->
-            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="频率与规则" />
+            <TextView
+                android:id="@+id/tv_rule_title"
+                style="@style/SectionTitle"
+                android:layout_marginTop="18dp"
+                android:text="频率与规则" />
             <LinearLayout
+                android:id="@+id/rule_card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -178,7 +235,11 @@
             </LinearLayout>
 
             <!-- 打卡日期（v6.1.0 新增） -->
-            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡日期" />
+            <TextView
+                android:id="@+id/tv_schedule_title"
+                style="@style/SectionTitle"
+                android:layout_marginTop="18dp"
+                android:text="打卡日期" />
             <LinearLayout
                 android:id="@+id/schedule_container"
                 android:layout_width="match_parent"
@@ -190,8 +251,13 @@
             </LinearLayout>
 
             <!-- 抵消机制 -->
-            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="连续打卡抵消机制" />
+            <TextView
+                android:id="@+id/tv_offset_title"
+                style="@style/SectionTitle"
+                android:layout_marginTop="18dp"
+                android:text="连续打卡抵消机制" />
             <LinearLayout
+                android:id="@+id/offset_card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -247,8 +313,13 @@
             </LinearLayout>
 
             <!-- 修改策略 -->
-            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="逻辑修改策略（创建后不可更改）" />
+            <TextView
+                android:id="@+id/tv_policy_title"
+                style="@style/SectionTitle"
+                android:layout_marginTop="18dp"
+                android:text="逻辑修改策略（创建后不可更改）" />
             <RadioGroup
+                android:id="@+id/policy_card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
