@@ -325,9 +325,10 @@ class CreateItemActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.tv_limit).text = "不限"
             comboRequired = 0
         } else {
-            // 回到普通：恢复默认每日 1 次；日记记录类型复位随心记
+            // 回到普通：恢复默认每日 1 次；日记记录类型复位随心记（v1.3.3：同时清 mood 勾选，避免双选残留）
             moodMode = false
             findViewById<RadioButton>(R.id.rb_journal_suixinsui).isChecked = true
+            findViewById<RadioButton>(R.id.rb_journal_mood).isChecked = false
             cfg.methods.remove(Method.MOOD.key)
             dailyLimit = 1
             findViewById<TextView>(R.id.tv_limit).text = "1"
