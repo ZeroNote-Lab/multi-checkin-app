@@ -38,6 +38,24 @@ class MonthCalendarView @JvmOverloads constructor(
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
 
+    /** v1.3.0：心情 5 档色值（index 1~5：😄 开心绿 → 😖 很差红），图例/折线图/日历共用 */
+    companion object {
+        val MOOD_COLORS = listOf(
+            0,
+            0xFF2FBF71.toInt(),  // 1 😄 开心
+            0xFF9CCC65.toInt(),  // 2 🙂 不错
+            0xFFFBC02D.toInt(),  // 3 😐 一般
+            0xFFFB8C00.toInt(),  // 4 😟 低落
+            0xFFE53935.toInt()   // 5 😖 很差
+        )
+        val MOOD_EMOJIS = listOf("😄", "🙂", "😐", "😟", "😖")
+
+        /** 解析记录的心情档位（extraJson.mood，1~5；无返回 null） */
+        fun moodOf(r: com.zerolab.checkin.data.entity.CheckinRecord): Int? = try {
+            org.json.JSONObject(r.extraJson ?: "{}").optInt("mood", 0).takeIf { it in 1..5 }
+        } catch (_: Exception) { null }
+    }
+
     fun setData(year: Int, month0: Int, infos: Map<String, DayInfo>, negative: Boolean, onClick: (String) -> Unit) {
         this.year = year; this.month = month0
         this.grid = DateUtils.monthGrid(year, month0)
@@ -72,8 +90,10 @@ class MonthCalendarView @JvmOverloads constructor(
             val bg = when {
                 !inMonth -> 0
                 info == null -> if (date > DateUtils.today()) 0 else 0
-                info.state == DayState.SUCCESS -> successC      // 手动/自动成功统一绿色
-            info.state == DayState.FAIL -> if (date == DateUtils.today() && info.records.isEmpty() && !info.finalToday) 0 else failC // v1.1.7：破戒/固定时间段超时当天红；普通缺卡次日红
+                // v1.3.0：心情日记——有心情记录取当天最后一次打卡心情色（无心情记录回退成功绿）
+                info.state == DayState.SUCCESS -> info.records.lastOrNull { moodOf(it) != null }
+                    ?.let { MOOD_COLORS[moodOf(it)!!] } ?: successC
+                info.state == DayState.FAIL -> if (date == DateUtils.today() && info.records.isEmpty() && !info.finalToday) 0 else failC // v1.1.7：破戒/固定时间段超时当天红；普通缺卡次日红
                 info.state == DayState.OFFSET -> offsetC
                 info.state == DayState.SKIP -> skipC            // 无需打卡日：橙色
                 info.state == DayState.PARTIAL -> partialC     // v1.1.6 部分完成：黄色
@@ -107,9 +127,11 @@ class MonthCalendarView @JvmOverloads constructor(
             }
             textPaint.textSize = 14f * resources.displayMetrics.scaledDensity
             textPaint.isFakeBoldText = bg != 0
+            // v1.3.0：心情黄/黄绿底用深色文字保证对比度（其他底色白字）
+            val textOnBg = if (bg == MOOD_COLORS[2] || bg == MOOD_COLORS[3]) 0xFF1F2430.toInt() else 0xFFFFFFFF.toInt()
             textPaint.color = when {
                 !inMonth -> futureText
-                bg != 0 -> 0xFFFFFFFF.toInt()
+                bg != 0 -> textOnBg
                 else -> normalText
             }
             val hasBottom = info != null && (info.isAuto || info.count > 1)
@@ -120,7 +142,7 @@ class MonthCalendarView @JvmOverloads constructor(
             if (hasBottom) {
                 val inf = info!!
                 textPaint.textSize = 9f * resources.displayMetrics.scaledDensity
-                textPaint.color = if (bg != 0) 0xFFFFFFFF.toInt() else normalText
+                textPaint.color = if (bg != 0) textOnBg else normalText
                 val label = (if (inf.isAuto) "⚡" else "") + (if (inf.count > 1) "${inf.count}次" else "")
                 canvas.drawText(label, cx, cy + rowH * 0.26f, textPaint)
             }

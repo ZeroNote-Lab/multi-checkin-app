@@ -55,6 +55,11 @@ class ItemConfig {
     // v1.2.0 时间打卡：允许暂停保存、下次续时
     var timerPausable: Boolean = false
 
+    // v1.3.0 心情日记（日记 tab 记录类型单选：随心记 / 心情日记；moodMode=true 隐含日记语义）
+    var moodMode: Boolean = false
+    // v1.3.0 心情折线图开关（创建页 + 打卡项设置页 ⋮ 均可改，LOCKED 管不着）
+    var moodChart: Boolean = true
+
     // 打卡日期（v6.1.0）：DAILY=每天 / WEEKDAYS=每周固定几天 / DOUBLE_REST=双休 / BIGSMALL=大小周
     var scheduleMode: String = "DAILY"
     val weekDays: MutableSet<Int> = linkedSetOf()   // 1=周一 … 7=周日（WEEKDAYS 模式使用）
@@ -89,6 +94,8 @@ class ItemConfig {
         o.put("voiceMaxSeconds", voiceMaxSeconds)
         o.put("autoForeground", autoForeground)
         o.put("journalMode", journalMode)
+        o.put("moodMode", moodMode)
+        o.put("moodChart", moodChart)
         o.put("comboRequired", comboRequired)
         o.put("timerMode", timerMode)
         o.put("timerPausable", timerPausable)
@@ -145,6 +152,8 @@ class ItemConfig {
                 c.voiceMaxSeconds = o.optInt("voiceMaxSeconds", 10)
                 c.autoForeground = o.optBoolean("autoForeground", true)
                 c.journalMode = o.optBoolean("journalMode", false)
+                c.moodMode = o.optBoolean("moodMode", false)
+                c.moodChart = o.optBoolean("moodChart", true)
                 c.comboRequired = o.optInt("comboRequired", 0)
                 c.timerMode = o.optString("timerMode", "COUNTDOWN")
                 c.timerPausable = o.optBoolean("timerPausable", false)
