@@ -86,8 +86,9 @@ class QuickCheckinFragment : Fragment() {
         view.findViewById<ImageButton>(R.id.btn_next).setOnClickListener { shiftMonth(1) }
         view.findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
             item?.let {
-                // v1.3.0：⋮ 菜单（心情折线图开关 + 编辑/详情）
-                com.zerolab.checkin.util.MoodChartMenu.show(requireActivity(), it, view.findViewById(R.id.btn_menu)) { refresh() }
+                // v1.3.2：⋮ 直接进详情页
+                requireActivity().startActivity(android.content.Intent(requireActivity(), com.zerolab.checkin.ui.detail.ItemDetailActivity::class.java)
+                    .putExtra(com.zerolab.checkin.ui.detail.ItemDetailActivity.EXTRA_ID, it.id))
             }
         }
         btnCheckin.setOnClickListener { flow.start(item!!, cfg) }

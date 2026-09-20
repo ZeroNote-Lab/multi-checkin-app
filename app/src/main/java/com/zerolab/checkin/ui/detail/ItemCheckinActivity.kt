@@ -35,8 +35,9 @@ class ItemCheckinActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
         findViewById<TextView>(R.id.tv_title).text = "${ThemeManager.of(item.theme).emoji} ${item.name}" // v1.1.7：顶部显示主题emoji
         findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
-            // v1.3.0：⋮ 菜单（心情折线图开关 + 编辑/详情）
-            com.zerolab.checkin.util.MoodChartMenu.show(this, item, findViewById(R.id.btn_menu)) { checkinFragment?.refresh() }
+            // v1.3.2：⋮ 直接进详情页
+            startActivity(android.content.Intent(this, com.zerolab.checkin.ui.detail.ItemDetailActivity::class.java)
+                .putExtra(com.zerolab.checkin.ui.detail.ItemDetailActivity.EXTRA_ID, id))
         }
 
         if (savedInstanceState == null) {
