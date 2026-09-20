@@ -405,8 +405,11 @@ class QuickCheckinFragment : Fragment() {
                 }
                 sb.append("   完成$label")
             }
-            // v1.3.0：去"文字："前缀，时间后直接衔接文字；位置有真实地名（locName）时显示地名
-            if (!r.textContent.isNullOrBlank()) sb.append("\n   ${r.textContent}")
+            // v1.3.0：去"文字："前缀；v1.3.1：心情日记的文字紧跟心情 emoji 同行，其余仍换行
+            if (!r.textContent.isNullOrBlank()) {
+                if (moodOf(r) != null) sb.append("  ${r.textContent}")
+                else sb.append("\n   ${r.textContent}")
+            }
             if (r.latitude != null && r.longitude != null) {
                 val locName = try { org.json.JSONObject(r.extraJson ?: "{}").optString("locName", "") } catch (_: Exception) { "" }
                 sb.append("\n   📍 位置：${if (locName.isNotBlank()) locName else formatLatLng(r.latitude!!, r.longitude!!)}")

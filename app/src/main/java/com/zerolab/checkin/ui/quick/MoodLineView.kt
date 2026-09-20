@@ -67,17 +67,10 @@ class MoodLineView @JvmOverloads constructor(
         }
         linePaint.color = 0xFF8A93A6.toInt()
         canvas.drawPath(path, linePaint)
-        // 圆点（点色=该条心情色）
+        // 圆点（点色=该条心情色；v1.3.1：统一小半径，圆心严格贴网格线，不再用大白圈）
         pts.forEachIndexed { idx, p ->
             dotPaint.color = MonthCalendarView.MOOD_COLORS[moods[idx]]
-            canvas.drawCircle(p.x, p.y, 5f * resources.displayMetrics.density, dotPaint)
-            // 首末点稍大
-            if (idx == 0 || idx == pts.size - 1) {
-                dotPaint.color = 0xFFFFFFFF.toInt()
-                canvas.drawCircle(p.x, p.y, 8f * resources.displayMetrics.density, dotPaint)
-                dotPaint.color = MonthCalendarView.MOOD_COLORS[moods[idx]]
-                canvas.drawCircle(p.x, p.y, 6.5f * resources.displayMetrics.density, dotPaint)
-            }
+            canvas.drawCircle(p.x, p.y, 4f * resources.displayMetrics.density, dotPaint)
         }
     }
 }
