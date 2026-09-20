@@ -182,40 +182,32 @@ class CreateItemActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- v1.3.0 打卡类型双 tab：普通打卡 / 日记打卡 ----------
+    // ---------- v1.3.0 打卡类型双 tab：普通打卡 / 日记打卡（v1.3.1 文件夹标签样式） ----------
     private fun buildModeSection() {
-        val container = findViewById<LinearLayout>(R.id.mode_container)
         modeHint = findViewById(R.id.tv_mode_hint)
-        val normal = modeChip("✅ 普通打卡") { setJournalMode(false) }
-        val journal = modeChip("📔 日记打卡") { setJournalMode(true) }
-        container.addView(normal); container.addView(journal)
-        container.tag = listOf(normal, journal)   // 供 loadEditing 回显
+        findViewById<View>(R.id.tab_normal).setOnClickListener { setJournalMode(false) }
+        findViewById<View>(R.id.tab_journal).setOnClickListener { setJournalMode(true) }
         renderModeChips()
     }
 
-    private fun modeChip(text: String, onClick: () -> Unit): TextView =
-        TextView(this).apply {
-            this.text = text; textSize = 13f; gravity = Gravity.CENTER
-            setPadding(22, 12, 22, 12)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.marginEnd = 10
-            layoutParams = lp
-            setOnClickListener { onClick() }
-        }
-
     private fun renderModeChips() {
-        val container = findViewById<LinearLayout>(R.id.mode_container)
-        val chips = container.tag as? List<*>
-        chips?.forEachIndexed { i, v ->
-            val tv = v as? TextView ?: return@forEachIndexed
-            val selected = (i == 0) != journalMode
-            val bg = GradientDrawable()
-            bg.cornerRadius = 20f
-            bg.setColor(if (selected) 0xFF3A4152.toInt() else 0xFFEEF1F6.toInt())
-            tv.background = bg
-            tv.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
-            tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-        }
+        val normalTab = findViewById<View>(R.id.tab_normal)
+        val journalTab = findViewById<View>(R.id.tab_journal)
+        val normalArrow = findViewById<View>(R.id.tab_normal_arrow)
+        val journalArrow = findViewById<View>(R.id.tab_journal_arrow)
+        val normalTv = findViewById<TextView>(R.id.tv_tab_normal)
+        val journalTv = findViewById<TextView>(R.id.tv_tab_journal)
+
+        normalTv.setBackgroundResource(if (!journalMode) R.drawable.bg_tab_selected else 0)
+        normalArrow.visibility = if (!journalMode) View.VISIBLE else View.GONE
+        normalTv.setTextColor(if (!journalMode) 0xFFE5559B.toInt() else 0xFF8A90A0.toInt())
+        normalTv.typeface = if (!journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+
+        journalTv.setBackgroundResource(if (journalMode) R.drawable.bg_tab_selected else 0)
+        journalArrow.visibility = if (journalMode) View.VISIBLE else View.GONE
+        journalTv.setTextColor(if (journalMode) 0xFFE5559B.toInt() else 0xFF8A90A0.toInt())
+        journalTv.typeface = if (journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+
         modeHint?.text = if (journalMode)
             "📔 日记打卡：日记式记录，只记成功、可多次记录，不记缺卡、不设排期 ο(=•ω＜=)ρ⌒☆"
             else "✅ 普通打卡：按规则打卡，有缺卡与连续天数。"
@@ -1131,7 +1123,7 @@ class CreateItemActivity : AppCompatActivity() {
         bigChip.isEnabled = false; bigChip.alpha = 0.4f
         smallChip.isEnabled = false; smallChip.alpha = 0.4f
         // v1.2.0：模式切换、组合完成数、时间打卡选项、扫码绑定一并锁定
-        (findViewById<LinearLayout>(R.id.mode_container).tag as? List<*>)?.forEach { (it as? View)?.isEnabled = false }
+        findViewById<View>(R.id.tab_normal).isEnabled = false; findViewById<View>(R.id.tab_journal).isEnabled = false
         comboNMinus?.isEnabled = false
         comboNPlus?.isEnabled = false
         rbTimerCountdown?.isEnabled = false
