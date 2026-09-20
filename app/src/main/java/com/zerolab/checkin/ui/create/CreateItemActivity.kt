@@ -199,12 +199,12 @@ class CreateItemActivity : AppCompatActivity() {
         val journalTv = findViewById<TextView>(R.id.tv_tab_journal)
 
         normalTv.setBackgroundResource(if (!journalMode) R.drawable.bg_tab_selected else 0)
-        normalArrow.visibility = if (!journalMode) View.VISIBLE else View.GONE
+        normalArrow.visibility = View.GONE
         normalTv.setTextColor(if (!journalMode) 0xFFE5559B.toInt() else 0xFF8A90A0.toInt())
         normalTv.typeface = if (!journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 
         journalTv.setBackgroundResource(if (journalMode) R.drawable.bg_tab_selected else 0)
-        journalArrow.visibility = if (journalMode) View.VISIBLE else View.GONE
+        journalArrow.visibility = View.GONE
         journalTv.setTextColor(if (journalMode) 0xFFE5559B.toInt() else 0xFF8A90A0.toInt())
         journalTv.typeface = if (journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 

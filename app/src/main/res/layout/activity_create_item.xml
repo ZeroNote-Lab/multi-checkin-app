@@ -91,7 +91,7 @@
                 android:id="@+id/content_panel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_card"
+                android:background="@drawable/bg_panel_top_square"
                 android:orientation="vertical"
                 android:padding="16dp">
 
@@ -167,7 +167,7 @@
                 android:textColorHint="@color/text_hint" />
 
             <!-- 主题 -->
-            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="花卉主题" />
+            <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="主题" />
             <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
