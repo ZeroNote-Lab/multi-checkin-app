@@ -50,6 +50,9 @@ class CreateItemActivity : AppCompatActivity() {
 
     private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout)
     private val rows = LinkedHashMap<String, MethodRow>()
+    // v1.3.3：日记 tab 把 PHOTO/TEXT/VOICE 的 card 动态移到记录类型之间，记录它们在普通 method_container 里的原 index
+    private val journalMethodOrigIndex = HashMap<String, Int>()
+    private val journalMethods = setOf(Method.PHOTO.key, Method.TEXT.key, Method.VOICE.key)
 
     // 参数控件引用
     private var cbPhotoCamera: CheckBox? = null
@@ -129,6 +132,9 @@ class CreateItemActivity : AppCompatActivity() {
         buildThemeChips()
         buildModeSection()   // v1.3.0 打卡类型双 tab（普通打卡 / 日记打卡），在方式开关之前构建
         buildMethodRows()
+        // v1.3.3：记录日记方式在普通列表里的原 index
+        val mc = findViewById<LinearLayout>(R.id.method_container)
+        journalMethods.forEach { k -> journalMethodOrigIndex[k] = mc.indexOfChild(rows[k]!!.card) }
         buildScheduleSection()
         bindRuleControls()
         bindOffset()
@@ -193,18 +199,15 @@ class CreateItemActivity : AppCompatActivity() {
     private fun renderModeChips() {
         val normalTab = findViewById<View>(R.id.tab_normal)
         val journalTab = findViewById<View>(R.id.tab_journal)
-        val normalArrow = findViewById<View>(R.id.tab_normal_arrow)
-        val journalArrow = findViewById<View>(R.id.tab_journal_arrow)
         val normalTv = findViewById<TextView>(R.id.tv_tab_normal)
         val journalTv = findViewById<TextView>(R.id.tv_tab_journal)
 
-        normalTv.setBackgroundResource(if (!journalMode) R.drawable.bg_tab_selected else 0)
-        normalArrow.visibility = View.GONE
+        // v1.3.3：分段胶囊，选中项白底滑块
+        normalTab.setBackgroundResource(if (!journalMode) R.drawable.bg_seg_item else 0)
         normalTv.setTextColor(if (!journalMode) 0xFFE5559B.toInt() else 0xFF8A90A0.toInt())
         normalTv.typeface = if (!journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 
-        journalTv.setBackgroundResource(if (journalMode) R.drawable.bg_tab_selected else 0)
-        journalArrow.visibility = View.GONE
+        journalTab.setBackgroundResource(if (journalMode) R.drawable.bg_seg_item else 0)
         journalTv.setTextColor(if (journalMode) 0xFFE5559B.toInt() else 0xFF8A90A0.toInt())
         journalTv.typeface = if (journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 
@@ -227,7 +230,28 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.tv_policy_title).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.policy_card).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.journal_panel).visibility = if (journal) View.VISIBLE else View.GONE
-        // 方式行：普通=全部显示（MOOD 除外，它是日记记录类型）；心情日记=全隐藏；随心记=只留 PHOTO/TEXT/VOICE
+
+        // v1.3.3：普通方式容器仅普通 tab 显示；日记 tab 下 PHOTO/TEXT/VOICE 的 card 移到记录类型之间
+        val methodContainer = findViewById<LinearLayout>(R.id.method_container)
+        val journalMethodsBox = findViewById<LinearLayout>(R.id.journal_methods)
+        methodContainer.visibility = if (journal) View.GONE else View.VISIBLE
+        if (journal) {
+            // 移到 journal_methods
+            journalMethods.forEach { k ->
+                val card = rows[k]!!.card
+                (card.parent as? android.view.ViewGroup)?.removeView(card)
+                journalMethodsBox.addView(card)
+            }
+        } else {
+            // 移回 method_container 原位置
+            journalMethods.forEach { k ->
+                val card = rows[k]!!.card
+                (card.parent as? android.view.ViewGroup)?.removeView(card)
+                methodContainer.addView(card, journalMethodOrigIndex[k] ?: methodContainer.childCount)
+            }
+        }
+
+        // 方式行：普通=全部显示（MOOD 除外）；心情日记=全隐藏；随心记=只留 PHOTO/TEXT/VOICE
         val forbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key, Method.LOCATION.key)
         rows.forEach { (k, row) ->
             row.card.visibility = when {
@@ -238,12 +262,17 @@ class CreateItemActivity : AppCompatActivity() {
                 else -> View.VISIBLE
             }
         }
+        // 随心记方式区仅在随心记（非心情日记）时显示
+        journalMethodsBox.visibility = if (journal && !moodMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.cb_mood_chart).visibility = if (journal && moodMode) View.VISIBLE else View.GONE
         refreshComboNRow()
     }
 
     /** v1.3.0：日记 tab 记录类型单选（📔随心记 | 😊心情日记） */
     private fun setMoodMode(on: Boolean) {
+        // v1.3.3：无论是否提前 return，都先同步两个 RadioButton 的互斥勾选（编辑页回显时也需要）
+        findViewById<RadioButton>(R.id.rb_journal_suixinsui).isChecked = !on
+        findViewById<RadioButton>(R.id.rb_journal_mood).isChecked = on
         if (moodMode == on) return
         moodMode = on
         if (on) {
@@ -1009,10 +1038,10 @@ class CreateItemActivity : AppCompatActivity() {
         bigSmallStart = loaded.bigSmallStart
         // v1.2.0 新字段回显：随心记 / 组合完成数 / 时间打卡模式
         journalMode = loaded.journalMode
-        // v1.3.0 心情日记回显
+        // v1.3.0 心情日记回显；v1.3.3：显式同时设置两个 RadioButton，避免 XML 默认 checked 残留
         moodMode = loaded.moodMode
-        if (loaded.moodMode) findViewById<RadioButton>(R.id.rb_journal_mood).isChecked = true
-        else findViewById<RadioButton>(R.id.rb_journal_suixinsui).isChecked = true
+        findViewById<RadioButton>(R.id.rb_journal_suixinsui).isChecked = !loaded.moodMode
+        findViewById<RadioButton>(R.id.rb_journal_mood).isChecked = loaded.moodMode
         findViewById<CheckBox>(R.id.cb_mood_chart).isChecked = loaded.moodChart
         comboRequired = loaded.comboRequired
         if (loaded.timerMode == "COUNTUP") {
@@ -1090,6 +1119,11 @@ class CreateItemActivity : AppCompatActivity() {
         refreshJournalVisibility()   // v1.3.0 双 tab 可见性
         refreshConflicts()
         refreshComboNRow()
+        // v1.3.3：编辑已有日记项时，记录类型（随心记/心情日记）锁定不可切换；方式开关仍可改
+        if (journalMode) {
+            findViewById<RadioButton>(R.id.rb_journal_suixinsui).isEnabled = false
+            findViewById<RadioButton>(R.id.rb_journal_mood).isEnabled = false
+        }
     }
 
     private var locked = false
