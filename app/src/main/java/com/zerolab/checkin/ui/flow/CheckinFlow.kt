@@ -452,27 +452,28 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             ).setPositiveButton("知道了", null).show()
             return
         }
-        AlertDialog.Builder(ctx).setTitle("位置符合要求").setMessage(
-            msg + if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
-            else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
-        ).setNegativeButton("取消", null)
+        val tail = if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
+                   else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
+        val baseMsg = msg + tail
+        // v1.3.4：联网增强开启时，弹窗一出来就异步解析真实地名，地名回来后追加到弹窗
+        val dialog = AlertDialog.Builder(ctx).setTitle("位置符合要求").setMessage(baseMsg)
+            .setNegativeButton("取消", null)
             .setPositiveButton("使用该位置") { _, _ ->
-                // v1.3.0：联网增强开启时异步解析真实地名（3s 超时，失败降级只存经纬度）；离线直接完成
-                if (!com.zerolab.checkin.util.NetGeo.enabled(ctx)) {
-                    locName = null; stepSuccess(); return@setPositiveButton
-                }
-                val loading = AlertDialog.Builder(ctx).setMessage("正在获取位置名称…").setCancelable(false).show()
-                thread {
-                    val name = try { com.zerolab.checkin.util.NetGeo.regeo(ctx, la, ln) } catch (_: Exception) { null }
-                    main.post {
-                        try { loading.dismiss() } catch (_: Exception) {}
-                        locName = name
-                        stepSuccess()
+                if (!com.zerolab.checkin.util.NetGeo.enabled(ctx)) locName = null
+                stepSuccess()
+            }
+            .show()
+        if (com.zerolab.checkin.util.NetGeo.enabled(ctx)) {
+            thread {
+                val name = try { com.zerolab.checkin.util.NetGeo.regeo(ctx, la, ln) } catch (_: Exception) { null }
+                main.post {
+                    locName = name
+                    if (name != null) {
+                        try { dialog.setMessage(baseMsg + "\n📍 " + name) } catch (_: Exception) {}
                     }
                 }
             }
-            .show()
-
+        }
     }
 
     private fun distanceMeters(la1: Double, ln1: Double, la2: Double, ln2: Double): Double {
