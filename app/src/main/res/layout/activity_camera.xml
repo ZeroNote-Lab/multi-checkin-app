@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.3.5：应用内相机，预览 / 拍照锁定 3:4（传感器原生比例） -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF000000">
+
+    <!-- 3:4 预览区域，高度由代码按屏幕宽度 * 4/3 设置 -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center" />
+
+    <!-- 顶部栏：取消 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="20dp">
+        <TextView
+            android:id="@+id/btn_cancel"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/camera_circle_bg"
+            android:gravity="center"
+            android:text="✕"
+            android:textColor="#FFFFFFFF"
+            android:textSize="18sp" />
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <TextView
+            android:id="@+id/btn_flash"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/camera_circle_bg"
+            android:gravity="center"
+            android:text="⚡"
+            android:textColor="#FFFFFFFF"
+            android:textSize="18sp" />
+        <TextView
+            android:id="@+id/btn_switch"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/camera_circle_bg"
+            android:gravity="center"
+            android:text="⟳"
+            android:textColor="#FFFFFFFF"
+            android:textSize="18sp" />
+    </LinearLayout>
+
+    <!-- 底部快门栏 -->
+    <LinearLayout
+        android:id="@+id/capture_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingBottom="48dp"
+        android:paddingTop="24dp">
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+        <TextView
+            android:id="@+id/btn_shutter"
+            android:layout_width="76dp"
+            android:layout_height="76dp"
+            android:background="@drawable/camera_shutter_bg"
+            android:gravity="center" />
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <!-- 拍照后确认预览 -->
+    <ImageView
+        android:id="@+id/confirm_preview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:adjustViewBounds="true"
+        android:contentDescription="照片预览"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/confirm_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingBottom="48dp"
+        android:paddingTop="24dp"
+        android:visibility="gone">
+        <TextView
+            android:id="@+id/btn_retake"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/camera_pill_bg"
+            android:paddingHorizontal="34dp"
+            android:paddingVertical="14dp"
+            android:text="重拍"
+            android:textColor="#FFFFFFFF"
+            android:textSize="15sp" />
+        <View android:layout_width="28dp" android:layout_height="1dp" />
+        <TextView
+            android:id="@+id/btn_use"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/camera_pill_accent"
+            android:paddingHorizontal="34dp"
+            android:paddingVertical="14dp"
+            android:text="使用照片"
+            android:textColor="#FFFFFFFF"
+            android:textSize="15sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tv_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="正在启动相机…"
+        android:textColor="#CCFFFFFF"
+        android:textSize="14sp"
+        android:visibility="gone" />
+</FrameLayout>

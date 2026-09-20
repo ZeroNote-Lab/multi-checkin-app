@@ -95,6 +95,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private val permSensor = fragment.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) doSteps() else toast("需要身体传感器权限才能步数打卡")
     }
+    // 系统相机 TakePicture（v1.3.5 应用内相机已回退：系统自带相机可直接用）
     private val takePhoto = fragment.registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         if (ok) {
             val uri = pendingPhotoUri
@@ -107,7 +108,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                     if (uri != null) {
                         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         if (bytes != null && bytes.isNotEmpty()) {
-                            FileOutputStream(src).use { it.write(bytes) }
+                            java.io.FileOutputStream(src).use { it.write(bytes) }
                             compressed = ImageUtil.compressWebp(src, outDir)
                             if (compressed == null) err = "压缩失败或图片为空"
                         } else err = "照片数据为空"
@@ -115,13 +116,11 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 } catch (e: Exception) {
                     err = e.message
                 }
-                if (err != null) android.util.Log.e("CheckinFlow", "photo save failed: $err") else android.util.Log.i("CheckinFlow", "photo compress ok: ${compressed?.absolutePath}")
                 main.post {
                     if (compressed != null) {
                         photoPath = compressed.absolutePath
                         toast("照片已保存")
                     } else {
-                        // PRD：打卡状态不依赖文件，图片失败也完成打卡
                         toast("照片保存失败，已按打卡成功处理")
                     }
                     stepSuccess()
@@ -389,6 +388,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
 
     private fun openCamera() {
         try {
+            // 系统自带相机（v1.3.5 应用内相机已回退）
             val tmp = File(ctx.cacheDir, "photo_tmp.jpg")
             val authority = ctx.packageName + ".fileprovider"
             val uri = androidx.core.content.FileProvider.getUriForFile(ctx, authority, tmp)
@@ -435,6 +435,34 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         }
     }
     private fun judgeLocation(c: ItemConfig, la: Double, ln: Double) {
+        // v1.3.4：随心记模式下位置打卡不做范围判定，只记录当前地名
+        if (c.journalMode) {
+            lat = la; lng = ln
+            if (!com.zerolab.checkin.util.NetGeo.enabled(ctx)) {
+                toast("定位增强未开启，无法记录位置名称"); return
+            }
+            val loading = AlertDialog.Builder(ctx).setMessage("正在获取位置名称…").setCancelable(false).show()
+            thread {
+                val name = try { com.zerolab.checkin.util.NetGeo.regeo(ctx, la, ln) } catch (_: Exception) { null }
+                main.post {
+                    try { loading.dismiss() } catch (_: Exception) {}
+                    if (name == null) {
+                        locName = null; lat = null; lng = null
+                        AlertDialog.Builder(ctx).setTitle("位置记录失败")
+                            .setMessage("位置名称解析失败，请检查定位增强开关和 API Key 是否正确。")
+                            .setPositiveButton("知道了", null).show()
+                    } else {
+                        locName = name
+                        AlertDialog.Builder(ctx).setTitle("记录位置")
+                            .setMessage("📍 $name")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("使用该位置") { _, _ -> stepSuccess() }
+                            .show()
+                    }
+                }
+            }
+            return
+        }
         if (c.locPoints.isEmpty()) { stepSuccess(); return }
         // 找到最近的点与距离
         var nearestName = c.locPoints[0].name; var nearestDist = Double.MAX_VALUE; var within = false
@@ -776,6 +804,13 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                     audioRecorder.start(File(ctx.filesDir, "checkin_voices/${item?.id ?: 0}"), c.voiceMaxSeconds)
                     recording = true; btn.text = "停止并使用"
                     main.postDelayed({ if (recording) btn.performClick() }, c.voiceMaxSeconds * 1000L)
+                    // v1.3.4：最后 5 秒每秒振动提示（类似微信语音最后几秒）
+                    try {
+                        val vib = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                        for (s in (c.voiceMaxSeconds - 5).coerceAtLeast(1) until c.voiceMaxSeconds) {
+                            main.postDelayed({ if (recording) vib.vibrate(android.os.VibrationEffect.createOneShot(80, 255)) }, s * 1000L)
+                        }
+                    } catch (_: Exception) {}
                 } catch (e: Exception) { toast("录音启动失败：${e.message}") }
             } else {
                 recording = false

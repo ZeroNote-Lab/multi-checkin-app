@@ -30,12 +30,30 @@ object NetGeo {
     /** 在线可用：两级开关都开且 Key 非空 */
     fun enabled(ctx: Context): Boolean = isGeoEnabled(ctx) && apiKey(ctx).isNotBlank()
 
+    // v1.3.4：内存缓存，避免同一位置短时间内重复请求高德 API
+    // key = 经纬度四舍五入到小数点后 4 位（约 11 米精度），TTL 5 分钟
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, CacheEntry>()
+    private class CacheEntry(val name: String, val ts: Long)
+    private const val CACHE_TTL_MS = 5 * 60 * 1000L
+
     /**
      * 逆地理编码：高德 regeo，把经纬度翻译成真实地名。
      * 必须在子线程调用；任何失败返回 null（调用方降级经纬度显示）。
+     * 同一位置（4 位小数）5 分钟内复用缓存结果，不重复请求。
      */
     fun regeo(ctx: Context, lat: Double, lng: Double): String? {
         if (!enabled(ctx)) return null
+        val key = "%.4f,%.4f".format(lat, lng)
+        val now = System.currentTimeMillis()
+        cache[key]?.let { e ->
+            if (now - e.ts < CACHE_TTL_MS) return e.name
+        }
+        val name = doRegeo(ctx, lat, lng)
+        if (name != null) cache[key] = CacheEntry(name, now)
+        return name
+    }
+
+    private fun doRegeo(ctx: Context, lat: Double, lng: Double): String? {
         val key = apiKey(ctx)
         if (key.isBlank()) return null
         var conn: java.net.HttpURLConnection? = null

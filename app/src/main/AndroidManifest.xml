@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.BODY_SENSORS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <!-- v1.3.0：仅联网增强（位置地名翻译）使用，默认关闭不发起任何请求 -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -43,6 +44,9 @@
         <activity android:name=".ui.detail.ItemCheckinActivity" android:exported="false" android:launchMode="singleTop" />
         <activity android:name=".ui.settings.ExportActivity" android:exported="false" />
         <activity android:name=".ui.scan.ScanActivity" android:exported="false" android:screenOrientation="portrait" />
+        <!-- v1.3.5 应用内相机已回退为系统相机，暂不注册（保留 CameraActivity 代码备用）
+        <activity android:name=".ui.camera.CameraActivity" android:exported="false" android:screenOrientation="portrait" />
+        -->
 
         <provider
             android:name="androidx.core.content.FileProvider"
