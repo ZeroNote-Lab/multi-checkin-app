@@ -104,52 +104,6 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
-            <!-- v1.3.0 日记 tab 内容：记录类型单选 + 心情折线图开关 -->
-            <LinearLayout
-                android:id="@+id/journal_panel"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
-                android:orientation="vertical"
-                android:visibility="gone">
-
-                <TextView style="@style/SectionTitle" android:text="记录类型" />
-                <RadioGroup
-                    android:id="@+id/rg_journal_type"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/bg_card"
-                    android:orientation="vertical"
-                    android:padding="14dp">
-                    <RadioButton
-                        android:id="@+id/rb_journal_suixinsui"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:text="📔 随心记（文字 / 拍照 / 位置 / 语音）"
-                        android:textColor="@color/text_primary"
-                        android:textSize="13sp" />
-                    <RadioButton
-                        android:id="@+id/rb_journal_mood"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="😊 心情日记（5 档心情 + 可选文字）"
-                        android:textColor="@color/text_primary"
-                        android:textSize="13sp" />
-                </RadioGroup>
-
-                <CheckBox
-                    android:id="@+id/cb_mood_chart"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:text="心情折线图（当日多条心情时在备注栏画趋势线，随时可改）"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp"
-                    android:visibility="gone" />
-            </LinearLayout>
 
             <!-- 名称 -->
             <TextView style="@style/SectionTitle" android:layout_marginTop="18dp" android:text="打卡名称" />
@@ -179,6 +133,53 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal" />
             </HorizontalScrollView>
+
+            <!-- v1.3.0 日记 tab 内容：记录类型单选 + 心情折线图开关 -->
+            <LinearLayout
+                android:id="@+id/journal_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView style="@style/SectionTitle" android:text="记录类型" />
+                <RadioGroup
+                    android:id="@+id/rg_journal_type"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+                    <RadioButton
+                        android:id="@+id/rb_journal_suixinsui"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:text="📔 随心记（文字 / 拍照 / 语音）"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+                    <RadioButton
+                        android:id="@+id/rb_journal_mood"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="😊 心情日记（5 档心情 + 可选文字）"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+                </RadioGroup>
+
+                <CheckBox
+                    android:id="@+id/cb_mood_chart"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="心情折线图（当日多条心情时在备注栏画趋势线，随时可改）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+            </LinearLayout>
 
             <!-- v1.3.0 打卡类型双 tab：普通打卡 / 日记打卡（已上移至顶部，见上方） -->
 

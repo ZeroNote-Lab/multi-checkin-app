@@ -227,10 +227,11 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.tv_policy_title).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.policy_card).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.journal_panel).visibility = if (journal) View.VISIBLE else View.GONE
-        // 方式行：普通=全部显示；心情日记=全隐藏（无方式开关）；随心记=只留 PHOTO/TEXT/LOCATION/VOICE
-        val forbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key)
+        // 方式行：普通=全部显示（MOOD 除外，它是日记记录类型）；心情日记=全隐藏；随心记=只留 PHOTO/TEXT/VOICE
+        val forbidden = setOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key, Method.LOCATION.key)
         rows.forEach { (k, row) ->
             row.card.visibility = when {
+                k == Method.MOOD.key -> View.GONE
                 !journal -> View.VISIBLE
                 moodMode -> View.GONE
                 k in forbidden -> View.GONE
@@ -268,13 +269,15 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<RadioButton>(R.id.rb_journal_mood).setOnClickListener { setMoodMode(true) }
         // v1.3.0：折线图开关默认跟随 cfg.moodChart（默认开启），避免新建时 UI 与配置不一致
         findViewById<CheckBox>(R.id.cb_mood_chart).isChecked = cfg.moodChart
+        // v1.3.2：新建时也要刷一次方式行可见性（隐藏 MOOD 方式行等）
+        refreshJournalVisibility()
     }
 
     private fun setJournalMode(on: Boolean) {
         if (journalMode == on) return
         if (on) {
             // 切到日记：自动移除不允许的方式（NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE）
-            val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key)
+            val forbidden = listOf(Method.NORMAL.key, Method.AUTO.key, Method.NFC.key, Method.STEPS.key, Method.TIMER.key, Method.QRCODE.key, Method.LOCATION.key, Method.MOOD.key)
             forbidden.forEach { k ->
                 if (k in cfg.methods) {
                     cfg.methods.remove(k)
