@@ -23,6 +23,8 @@ data class OffsetCfg(
 class ItemConfig {
     val methods: MutableSet<String> = linkedSetOf("NORMAL")
     var dailyLimit: Int = 1                 // 每日次数，-1 不限
+    // v1.4.0：每日 N 次需全部完成才算成功（不足显示部分完成；仅单方式且 dailyLimit>=2 生效）
+    var dailyAllRequired: Boolean = false
     var negative: Boolean = false           // 负打卡：状态反转（操作=失败，无操作=成功）
     var customNeg: Boolean = false          // 已废弃 v1.1.8（仅兼容老数据解析，不再参与任何逻辑）
     var t1: String = "05:00"                // 已废弃 v1.1.8
@@ -71,6 +73,7 @@ class ItemConfig {
         val o = JSONObject()
         o.put("methods", JSONArray(methods.toList()))
         o.put("dailyLimit", dailyLimit)
+        o.put("dailyAllRequired", dailyAllRequired)
         o.put("negative", negative)
         o.put("customNeg", customNeg)
         o.put("t1", t1); o.put("t2", t2)
@@ -126,6 +129,7 @@ class ItemConfig {
                     o.optString("type", "NORMAL").takeIf { it.isNotBlank() }?.let { c.methods.add(it) }
                 }
                 c.dailyLimit = o.optInt("dailyLimit", 1)
+                c.dailyAllRequired = o.optBoolean("dailyAllRequired", false)
                 c.negative = o.optBoolean("negative", false)
                 c.customNeg = o.optBoolean("customNeg", false)
                 c.t1 = o.optString("t1", "05:00"); c.t2 = o.optString("t2", "15:00")

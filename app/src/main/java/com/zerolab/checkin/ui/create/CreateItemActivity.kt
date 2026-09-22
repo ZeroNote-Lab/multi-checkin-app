@@ -830,13 +830,22 @@ class CreateItemActivity : AppCompatActivity() {
         weekDayChips.values.forEach { it.isEnabled = !locked; it.alpha = if (ruleGrey) 0.4f else 1f }
         bigChip.isEnabled = !locked; bigChip.alpha = if (ruleGrey) 0.4f else 1f
         smallChip.isEnabled = !locked; smallChip.alpha = if (ruleGrey) 0.4f else 1f
+        // v1.4.0：每日"全部完成"开关可用性：单方式 + 每日次数>=2 + 非负打卡 + 非自动打卡 + 非日记
+        val canAllReq = !journalMode && !moodMode && Method.AUTO.key !in cfg.methods &&
+            cfg.methods.count { it != Method.AUTO.key } <= 1 && dailyLimit >= 2 && !negOn
+        findViewById<CheckBox>(R.id.cb_all_required).isEnabled = !locked && canAllReq
+        findViewById<CheckBox>(R.id.cb_all_required).alpha = if (canAllReq) 1f else 0.4f
+        if (!canAllReq) findViewById<CheckBox>(R.id.cb_all_required).isChecked = false
         refreshComboNRow()
     }
 
     // ---------- 频率与规则 ----------
     private fun bindRuleControls() {
         val tvLimit = findViewById<TextView>(R.id.tv_limit)
-        fun renderLimit() { tvLimit.text = if (dailyLimit < 0) "不限" else dailyLimit.toString() }
+        fun renderLimit() {
+            tvLimit.text = if (dailyLimit < 0) "不限" else dailyLimit.toString()
+            refreshConflicts()   // v1.4.0：次数变化后刷新"全部完成"开关可用性
+        }
         btnLimitMinus = findViewById(R.id.btn_limit_minus)
         btnLimitPlus = findViewById(R.id.btn_limit_plus)
         btnLimitMinus!!.setOnClickListener {
@@ -1028,6 +1037,7 @@ class CreateItemActivity : AppCompatActivity() {
         // 拷贝到工作 cfg
         cfg.methods.clear(); cfg.methods.addAll(loaded.methods)
         cfg.dailyLimit = loaded.dailyLimit; cfg.negative = loaded.negative
+        cfg.dailyAllRequired = loaded.dailyAllRequired // v1.4.0：编辑回显"全部完成"开关
         cfg.offsetBackfill = loaded.offsetBackfill
         cfg.timeWindowEnabled = loaded.timeWindowEnabled; cfg.twStart = loaded.twStart; cfg.twEnd = loaded.twEnd
         cfg.photoFromCamera = loaded.photoFromCamera; cfg.photoFromAlbum = loaded.photoFromAlbum
@@ -1065,6 +1075,7 @@ class CreateItemActivity : AppCompatActivity() {
         selectedTheme = it.theme
         dailyLimit = cfg.dailyLimit
         findViewById<TextView>(R.id.tv_limit).text = if (dailyLimit < 0) "不限" else dailyLimit.toString()
+        findViewById<CheckBox>(R.id.cb_all_required).isChecked = cfg.dailyAllRequired   // v1.4.0：每日全部完成开关回显
         findViewById<CompoundButton>(R.id.cb_negative).isChecked = cfg.negative
         findViewById<CompoundButton>(R.id.cb_time_window).isChecked = cfg.timeWindowEnabled
         findViewById<View>(R.id.tw_panel).visibility = if (cfg.timeWindowEnabled) View.VISIBLE else View.GONE
@@ -1188,6 +1199,10 @@ class CreateItemActivity : AppCompatActivity() {
 
     private fun collectConfigFromUi() {
         cfg.dailyLimit = dailyLimit
+        // v1.4.0：每日全部完成开关（仅在单方式 + 次数>=2 + 非负打卡 + 非自动打卡时有效）
+        cfg.dailyAllRequired = findViewById<CheckBox>(R.id.cb_all_required).isChecked &&
+            dailyLimit >= 2 && !findViewById<CompoundButton>(R.id.cb_negative).isChecked &&
+            Method.AUTO.key !in cfg.methods && cfg.methods.count { it != Method.AUTO.key } <= 1
         cfg.negative = findViewById<CompoundButton>(R.id.cb_negative).isChecked
         cfg.timeWindowEnabled = findViewById<CompoundButton>(R.id.cb_time_window).isChecked
         cfg.twStart = findViewById<Button>(R.id.btn_tw_start).text.toString()
