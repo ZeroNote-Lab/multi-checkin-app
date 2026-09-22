@@ -91,6 +91,15 @@ object CheckinEngine {
                     !neg && methods.size > 1 -> if (comboAll) DayState.SUCCESS else DayState.PARTIAL // v1.1.6：组合未全完成=部分完成（黄色）
                     // v1.2.0：时间打卡暂停未完成——今天=黄色部分完成；昨天（无 SUCCESS）=走下方 FAIL 红（次日缺卡）
                     !neg && paused && !success && date == today -> DayState.PARTIAL
+                    // v1.4.0：单方式每日 N 次 + 需全部完成：打满 N 次才绿，不足=部分完成（黄色）
+                    !neg && methods.size <= 1 && c.dailyAllRequired && c.dailyLimit >= 1 -> {
+                        val sc = records.count { it.status == "SUCCESS" }
+                        when {
+                            sc >= c.dailyLimit -> DayState.SUCCESS
+                            sc > 0 -> DayState.PARTIAL
+                            else -> DayState.FAIL
+                        }
+                    }
                     neg -> DayState.FAIL            // 负打卡：有操作=破戒失败
                     success -> DayState.SUCCESS
                     else -> DayState.FAIL
