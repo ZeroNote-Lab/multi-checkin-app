@@ -108,6 +108,15 @@ class QuickCheckinFragment : Fragment() {
         NfcHub.unregister(this)
     }
 
+    override fun onStop() {
+        super.onStop()
+        // v1.3.6：时间打卡强制模式——离开前台（屏幕仍亮）本次计时作废；熄屏（isInteractive=false）不算
+        try {
+            val pm = requireActivity().getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+            if (pm?.isInteractive == true && ::flow.isInitialized) flow.onTimerScreenLost()
+        } catch (_: Exception) {}
+    }
+
     fun refresh() {
         if (!isAdded || !::contentView.isInitialized) return
         val now = Calendar.getInstance()

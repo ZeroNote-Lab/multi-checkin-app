@@ -24,6 +24,18 @@ class CheckinRepository(private val db: AppDatabase) {
 
     fun updateItem(item: CheckinItem) = itemDao.update(item.copy(updatedAt = System.currentTimeMillis()))
 
+    /**
+     * v1.3.6：一次性迁移工具——把所有 LOCKED 打卡项改为 FLEX（可修改）。
+     * 仅用于旧版本（1.1.5 时代）创建的锁定项解锁，由设置页隐藏入口触发；返回迁移数量。
+     */
+    fun migrateLockedToFlex(): Int {
+        val targets = itemDao.getAllSorted().filter { it.editPolicy == "LOCKED" }
+        targets.forEach {
+            itemDao.update(it.copy(editPolicy = "FLEX", editInterval = null, lastEditDate = null))
+        }
+        return targets.size
+    }
+
     fun deleteItem(id: Long) {
         val quick = quickDao.get()
         if (quick?.itemId == id) {
