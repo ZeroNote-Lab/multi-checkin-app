@@ -88,6 +88,8 @@ class CreateItemActivity : AppCompatActivity() {
     private var rbTimerCountdown: RadioButton? = null
     private var rbTimerCountup: RadioButton? = null
     private var cbTimerPausable: CheckBox? = null
+    // v1.3.6 时间打卡强制模式：离开本页（非熄屏）本次计时作废
+    private var cbTimerForce: CheckBox? = null
     // v1.2.0 扫码绑定现有二维码
     private val qrBindLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         if (res.resultCode == RESULT_OK) {
@@ -708,9 +710,22 @@ class CreateItemActivity : AppCompatActivity() {
                 panel.addView(cbTimerPausable)
                 // v1.2.1：仅正计时支持暂停保存；倒计时不显示该勾选项
                 cbTimerPausable?.visibility = View.GONE
+                // v1.3.6：强制模式（类似番茄钟）——计时期间离开本页（非熄屏）本次计时作废，与暂停保存互斥
+                cbTimerForce = CheckBox(this).apply {
+                    text = "强制模式：计时期间离开本页（非熄屏）本次计时作废，需重新开始（类似番茄钟）"; isChecked = false; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+                }
+                cbTimerForce?.setOnCheckedChangeListener { _, on ->
+                    if (on) {
+                        cbTimerPausable?.isChecked = false
+                        cbTimerPausable?.visibility = View.GONE
+                    } else {
+                        cbTimerPausable?.visibility = if (rbTimerCountup?.isChecked == true) View.VISIBLE else View.GONE
+                    }
+                }
+                panel.addView(cbTimerForce)
                 rg.setOnCheckedChangeListener { _, checkedId ->
                     val countUp = checkedId == rbTimerCountup?.id
-                    cbTimerPausable?.visibility = if (countUp) View.VISIBLE else View.GONE
+                    cbTimerPausable?.visibility = if (countUp && cbTimerForce?.isChecked != true) View.VISIBLE else View.GONE
                     if (!countUp) cbTimerPausable?.isChecked = false
                 }
             }
@@ -1068,6 +1083,12 @@ class CreateItemActivity : AppCompatActivity() {
             rbTimerCountup?.isChecked = false
         }
         cbTimerPausable?.isChecked = loaded.timerPausable
+        // v1.3.6：强制模式回显；开启时隐藏暂停保存（互斥）
+        cbTimerForce?.isChecked = loaded.timerForce
+        if (loaded.timerForce) {
+            cbTimerPausable?.isChecked = false
+            cbTimerPausable?.visibility = View.GONE
+        }
         // 负打卡开启时隐藏正计时/暂停选项（保持原倒计时）
         if (loaded.negative) hideTimerAdvancedOptions()
 
@@ -1183,6 +1204,7 @@ class CreateItemActivity : AppCompatActivity() {
         rbTimerCountdown?.isEnabled = false
         rbTimerCountup?.isEnabled = false
         cbTimerPausable?.isEnabled = false
+        cbTimerForce?.isEnabled = false
         qrBindBtn?.isEnabled = false
     }
 
@@ -1238,6 +1260,9 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.timerMode = if (rbTimerCountup?.isChecked == true) "COUNTUP" else "COUNTDOWN"
         // v1.2.1：仅正计时支持暂停保存，倒计时一律 false（防脏配置）
         cfg.timerPausable = if (rbTimerCountup?.isChecked == true) (cbTimerPausable?.isChecked ?: false) else false
+        // v1.3.6：强制模式；与暂停保存互斥（开启强制一律关闭暂停，防脏配置）
+        cfg.timerForce = cbTimerForce?.isChecked ?: false
+        if (cfg.timerForce) cfg.timerPausable = false
     }
 
     /** 生成二维码位图（ZXing，600x600） */
@@ -1314,7 +1339,10 @@ class CreateItemActivity : AppCompatActivity() {
         val intervalN = findViewById<EditText>(R.id.et_interval).text.toString().toIntOrNull()
         // v1.3.0：日记项不设修改策略（FLEX=可随时修改）
         val isDiary = cfg.journalMode || cfg.moodMode
-        val editPolicy = if (isDiary) "FLEX" else if (policyInterval) "INTERVAL_N" else "LOCKED"
+        // v1.3.6：迁移解锁的旧项（非日记 FLEX）编辑保存后保持 FLEX，避免被写回 LOCKED
+        val editPolicy = if (isDiary) "FLEX"
+            else if (editing?.editPolicy == "FLEX") "FLEX"
+            else if (policyInterval) "INTERVAL_N" else "LOCKED"
         val editInterval = if (!isDiary && policyInterval) (intervalN ?: 7) else null
         val now = System.currentTimeMillis()
         thread {

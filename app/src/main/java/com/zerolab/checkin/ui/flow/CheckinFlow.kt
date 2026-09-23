@@ -59,6 +59,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private var item: CheckinItem? = null
     private var cfg: ItemConfig? = null
     private val queue = ArrayDeque<String>()
+    // v1.3.6：时间打卡强制模式——计时弹窗显示期间离开前台（非熄屏）本次计时作废
+    private var timerForceOn = false
 
     // 组合打卡状态
     private var comboMethods: List<String>? = null
@@ -147,6 +149,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         this.item = item; this.cfg = cfg
         photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
         timerExtra = null; moodValue = null; locName = null
+        timerForceOn = false
         doneMethods.clear(); queue.clear()
         val interactive = cfg.methods.filter { it != Method.AUTO.key }
         // 组合（多方式）：弹出方式卡片，逐个完成
@@ -600,12 +603,13 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             if (!gotEvent) tv.text = "尚无计步数据，请走动几步后再看\n（此设备静止时不统计步数，走动即开始计数）"
         }, 5000)
     }
-    // ---------- 时间打卡（v1.2.0：倒计时 / 正计时 / 暂停保存续时） ----------
+    // ---------- 时间打卡（v1.2.0：倒计时 / 正计时 / 暂停保存续时；v1.3.6：强制模式离屏作废） ----------
     private fun doTimer() {
         val c = cfg ?: return
         val it = item ?: return
         val countUp = c.timerMode == "COUNTUP"
         val pausable = c.timerPausable && countUp // v1.2.1：仅正计时支持暂停保存，倒计时按旧UI
+        timerForceOn = c.timerForce  // v1.3.6：强制模式（暂停保存已在创建页互斥隐藏）
         val totalSec = (c.timerMinutes * 60).coerceAtLeast(60)
         val today = DateUtils.today()
         // v1.2.0：读取当天最新 PAUSED 进度续时（倒计时续剩余 / 正计时续已走）
@@ -719,6 +723,19 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
 
     private var timerDialogRef: AlertDialog? = null
     private fun dlgSafeDismiss() { try { timerDialogRef?.dismiss() } catch (_: Exception) {} }
+
+    /**
+     * v1.3.6：强制模式——计时弹窗显示期间离开前台（屏幕仍亮，由页面 onStop 回调触发）。
+     * 本次计时作废（等同点「放弃」，不写任何记录），之后可重新开始；熄屏不算（页面侧已用 PowerManager 区分）。
+     */
+    fun onTimerScreenLost() {
+        if (!timerForceOn) return
+        val dlg = timerDialogRef ?: return
+        if (!dlg.isShowing) return
+        try { dlg.dismiss() } catch (_: Exception) {}
+        timerDialogRef = null
+        toast("已离开页面，本次计时已取消，请重新开始 ⏳")
+    }
 
     // ---------- 扫码（真实相机扫码，匹配才打卡） ----------
     private val scanLauncher =

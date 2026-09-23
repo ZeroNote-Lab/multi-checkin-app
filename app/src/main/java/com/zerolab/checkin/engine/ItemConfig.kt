@@ -56,6 +56,8 @@ class ItemConfig {
     var timerMode: String = "COUNTDOWN"
     // v1.2.0 时间打卡：允许暂停保存、下次续时
     var timerPausable: Boolean = false
+    // v1.3.6 时间打卡强制模式：计时期间离开本页（非熄屏）本次计时作废（等同放弃），需重新开始
+    var timerForce: Boolean = false
 
     // v1.3.0 心情日记（日记 tab 记录类型单选：随心记 / 心情日记；moodMode=true 隐含日记语义）
     var moodMode: Boolean = false
@@ -102,6 +104,7 @@ class ItemConfig {
         o.put("comboRequired", comboRequired)
         o.put("timerMode", timerMode)
         o.put("timerPausable", timerPausable)
+        o.put("timerForce", timerForce)
         o.put("scheduleMode", scheduleMode)
         o.put("weekDays", JSONArray(weekDays.toList()))
         o.put("bigSmallStart", bigSmallStart)
@@ -161,6 +164,7 @@ class ItemConfig {
                 c.comboRequired = o.optInt("comboRequired", 0)
                 c.timerMode = o.optString("timerMode", "COUNTDOWN")
                 c.timerPausable = o.optBoolean("timerPausable", false)
+                c.timerForce = o.optBoolean("timerForce", false)
                 c.scheduleMode = o.optString("scheduleMode", "DAILY")
                 o.optJSONArray("weekDays")?.let { wd ->
                     c.weekDays.clear()
