@@ -43,6 +43,9 @@ object JsonImporter {
         val quickId = if (root.isNull("quickCheckinItemId")) null else root.optLong("quickCheckinItemId")
 
         val locals = repo.getItems()
+        // 记录导入前的快捷状态：导入过程中 insertItem 的 ensureQuickAfterCreate 可能在空库时自动建快捷，
+        // 因此"本机已有快捷"应以导入前为准。
+        val hadQuickBefore = repo.getQuickId() != null
         // 匹配索引：联合键 (createdAt, name) 优先；name / createdAt 单独兜底仅在本机唯一时生效。
         // 注意：只索引导入前的既有项，本次新建的项不加入索引——同文件内同 createdAt 的项互不匹配，永远分别新建。
         val byCreatedName = HashMap<Pair<Long, String>, CheckinItem>()
@@ -169,7 +172,8 @@ object JsonImporter {
         }
 
         var quickSet = false
-        if (quickTarget != null) {
+        if (quickTarget != null && !hadQuickBefore) {
+            // 快捷项：导入前本机已有快捷时不覆盖；仅本机无快捷时按导入文件设置（恢复新设备场景）
             repo.setQuick(quickTarget)
             quickSet = true
         }
