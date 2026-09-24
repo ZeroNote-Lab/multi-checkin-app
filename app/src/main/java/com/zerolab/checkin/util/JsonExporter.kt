@@ -10,15 +10,20 @@ import java.util.Locale
 
 object JsonExporter {
 
-    fun build(repo: CheckinRepository): JSONObject {
+    /** 按选中打卡项构建导出 JSON（ids 为空 = 全部项）。
+     *  v1.4：素材路径统一改写为 ZIP 内相对路径（photos/{itemId}/{文件名} / voices/{itemId}/{文件名}），
+     *  exportVersion 升 1.1；仅记录模式同样输出相对路径，导入侧对不存在的素材文件跳过即可。 */
+    fun build(repo: CheckinRepository, ids: Collection<Long>? = null): JSONObject {
         val root = JSONObject()
-        root.put("exportVersion", "1.0")
+        root.put("exportVersion", "1.2")
         root.put("exportTime", System.currentTimeMillis())
         root.put("appName", "打卡APP")
         root.put("appVersion", "6.0.0")
-        root.put("quickCheckinItemId", repo.getQuickId() ?: JSONObject.NULL)
+        val items = if (ids == null) repo.getItems()
+            else repo.getItems().filter { it.id in ids }
+        val quickId = repo.getQuickId()
+        root.put("quickCheckinItemId", if (quickId != null && quickId in items.map { it.id }) quickId else JSONObject.NULL)
 
-        val items = repo.getItems()
         val arr = JSONArray()
         for (it in items) {
             arr.put(JSONObject()
@@ -32,7 +37,8 @@ object JsonExporter {
                 .put("isActive", it.isActive == 1)
                 .put("editPolicy", it.editPolicy)
                 .put("editInterval", it.editInterval ?: JSONObject.NULL)
-                .put("createdAt", it.createdAt))
+                .put("createdAt", it.createdAt)
+                .put("updatedAt", it.updatedAt))
         }
         root.put("checkinItems", arr)
 
@@ -41,9 +47,9 @@ object JsonExporter {
             recs.put(JSONObject()
                 .put("id", r.id).put("itemId", r.itemId).put("checkinDate", r.checkinDate)
                 .put("checkinTime", r.checkinTime).put("status", r.status).put("isAuto", r.isAuto)
-                .put("photoPath", r.photoPath ?: JSONObject.NULL)
+                .put("photoPath", r.photoPath?.let { relMediaPath(it, "photos", r.itemId) } ?: JSONObject.NULL)
                 .put("textContent", r.textContent ?: JSONObject.NULL)
-                .put("voicePath", r.voicePath ?: JSONObject.NULL)
+                .put("voicePath", r.voicePath?.let { relMediaPath(it, "voices", r.itemId) } ?: JSONObject.NULL)
                 .put("latitude", r.latitude ?: JSONObject.NULL)
                 .put("longitude", r.longitude ?: JSONObject.NULL)
                 .put("extraJson", r.extraJson ?: JSONObject.NULL))
@@ -60,6 +66,14 @@ object JsonExporter {
         return root
     }
 
+    /** 绝对路径 → ZIP 内相对路径；空路径返回 null */
+    private fun relMediaPath(abs: String?, kind: String, itemId: Long): String? {
+        if (abs.isNullOrBlank()) return null
+        val name = abs.substringAfterLast('/')
+        if (name.isBlank()) return null
+        return "$kind/$itemId/$name"
+    }
+
     fun fileName(): String {
         val f = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
         return "checkin_export_${f.format(Date())}.json"
@@ -69,6 +83,13 @@ object JsonExporter {
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, fileName())
         f.writeText(build(repo).toString(2), Charsets.UTF_8)
+        return f
+    }
+
+    fun writeToCache(repo: CheckinRepository, dir: File, ids: Collection<Long>): File {
+        if (!dir.exists()) dir.mkdirs()
+        val f = File(dir, fileName())
+        f.writeText(build(repo, ids).toString(2), Charsets.UTF_8)
         return f
     }
 }
