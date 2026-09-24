@@ -360,7 +360,8 @@ class QuickCheckinFragment : Fragment() {
                 neg -> "✅ 已打卡（当天无操作）"
                 else -> "❌ 未打卡（缺卡）"
             }
-            offerManualBackfill(it, date, neg)
+            // v1.3.7：负打卡无操作日=成功日，不提供补签；正常模式缺卡日提供手动补签
+            if (!neg) offerManualBackfill(it, date, neg)
             return
         }
         // v1.3.0：心情折线图置于记录区第一行（当天 ≥2 条带心情记录且开关开启）
@@ -461,6 +462,10 @@ class QuickCheckinFragment : Fragment() {
             if (mediaRow.childCount > 0) row.addView(mediaRow)
             recordsBox.addView(row)
         }
+        // v1.3.7：负打卡破戒日（过去 + 有 FAIL 且未补签）提供手动补签（蓝色圆圈 ↩）
+        if (neg && date < DateUtils.today() && recs.any { it.status == "FAIL" } && recs.none { it.status == "OFFSET" }) {
+            offerManualBackfill(it, date, neg)
+        }
     }
 
     /** 图片缩略图，点击弹大图 */
@@ -516,16 +521,16 @@ class QuickCheckinFragment : Fragment() {
         return btn
     }
 
-    /** 过去缺卡日且有抵消机会时，提供手动补签 */
+    /** 过去缺卡/破戒日且有抵消机会时，提供手动补签（v1.3.7：负打卡破戒日也可补签） */
     private fun offerManualBackfill(it: CheckinItem, date: String, neg: Boolean) {
-        if (neg) return
         if (date >= DateUtils.today()) return
         if (!cfg.offset.enabled) return
         val avail = repo.availableCredits(it.id)
         if (avail <= 0) return
+        val what = if (neg) "破戒" else "缺卡"
         AlertDialog.Builder(requireContext())
             .setTitle("补签 $date")
-            .setMessage("该日缺卡。消耗 1 次抵消机会（当前剩余 $avail 次）补签？")
+            .setMessage("该日$what。消耗 1 次抵消机会（当前剩余 $avail 次）补签？")
             .setNegativeButton("取消", null)
             .setPositiveButton("补签") { _, _ ->
                 if (CheckinEngine.offsetBackfill(it, repo, date)) {

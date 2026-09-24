@@ -223,9 +223,8 @@ object CheckinEngine {
     }
 
     // ---------- 抵消机制发放 ----------
-    private fun grantOffsetAfterCheckin(item: CheckinItem, repo: CheckinRepository) {
-        val c = cfg(item)
-        val off = c.offset
+    /** 发放主体（幂等结算）：按当前里程碑连续天数把可用机会补发到应得数量。普通打卡在打卡成功时调用；负打卡由页面结算调用。 */
+    private fun settleOffset(item: CheckinItem, repo: CheckinRepository, c: ItemConfig, off: OffsetCfg) {
         if (!off.enabled) return
         if (c.journalMode || c.moodMode) return // v1.2.0 随心记 / v1.3.0 心情日记不参与抵消机制
         // 参数保护：nDays/k 必须为正，否则不发放（防导入/异常配置除零崩溃）
@@ -261,6 +260,21 @@ object CheckinEngine {
         }
     }
 
+    private fun grantOffsetAfterCheckin(item: CheckinItem, repo: CheckinRepository) {
+        val c = cfg(item)
+        settleOffset(item, repo, c, c.offset)
+    }
+
+    /** v1.3.7：负打卡机会结算——负打卡无「成功打卡动作」（操作=破戒 FAIL），机会发放改为页面结算（幂等补发）。
+     *  只在页面加载/刷新时调用；普通打卡仍走「打卡即发放」，不受影响。 */
+    fun settleNegativeOffsets(repo: CheckinRepository) {
+        repo.getItems().filter { it.isActive == 1 }.forEach { item ->
+            val c = cfg(item)
+            if (!isNegative(c)) return@forEach
+            settleOffset(item, repo, c, c.offset)
+        }
+    }
+
     /** 自动模式：漏签时自动/手动消耗一次抵消补签；返回是否补签 */
     fun offsetBackfill(item: CheckinItem, repo: CheckinRepository, date: String): Boolean {
         val c = cfg(item)
@@ -275,8 +289,10 @@ object CheckinEngine {
         val consumed = repo.consumeOne(item.id, date, rid)
 
         // v1.1.3：补签当天（今天）若无记录且为需打卡日，自动完成当天打卡（补签=处理昨日遗漏+完成今日）
+        // v1.3.7：负打卡跳过此步——负打卡今天无操作才是成功，插 SUCCESS 记录会把今天变成破戒（FAIL）
         val today = DateUtils.today()
         if (consumed && today != date && isScheduledDay(item, today)
+            && !isNegative(c)
             && repo.recordsOfDay(item.id, today).isEmpty()) {
             repo.insertRecord(CheckinRecord(
                 itemId = item.id, checkinDate = today, checkinTime = now,
