@@ -91,6 +91,11 @@ class CheckinRepository(private val db: AppDatabase) {
     fun countOfDay(itemId: Long, date: String) = recordDao.countOfDay(itemId, date)
     fun insertRecord(r: CheckinRecord): Long = recordDao.insert(r)
 
+    // v1.3.8：一键修复工具用——删除单条记录 / 改状态 / 还回盾牌
+    fun deleteRecord(id: Long) = recordDao.deleteById(id)
+    fun updateRecordStatus(id: Long, status: String) = recordDao.updateStatus(id, status)
+    fun returnCreditByDate(itemId: Long, date: String): Int = creditDao.returnUsedByDate(itemId, date)
+
     // ---------- 抵消 ----------
     fun creditsOf(itemId: Long) = creditDao.ofItem(itemId)
     fun availableCredits(itemId: Long): Int = creditDao.availableCount(itemId)

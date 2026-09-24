@@ -22,4 +22,11 @@ interface RecordDao {
 
     @Query("DELETE FROM checkin_record WHERE itemId = :itemId")
     fun deleteByItem(itemId: Long)
+
+    // v1.3.8：一键修复工具用——删除单条记录 / 改单条记录状态
+    @Query("DELETE FROM checkin_record WHERE id = :id")
+    fun deleteById(id: Long)
+
+    @Query("UPDATE checkin_record SET status = :status WHERE id = :id")
+    fun updateStatus(id: Long, status: String)
 }
