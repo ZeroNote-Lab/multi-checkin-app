@@ -88,6 +88,8 @@ class MainActivity : AppCompatActivity() {
         thread {
             val repo = (application as CheckinApp).repository
             val done = CheckinEngine.tryAutoAll(repo)
+            // v1.3.7：负打卡机会结算（幂等补发破戒机会；负打卡无成功打卡动作，发放只能在页面结算）
+            try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
             if (done.isNotEmpty()) {
                 runOnUiThread {
                     Toast.makeText(this, "⚡ ${done.joinToString("、")} 已自动完成", Toast.LENGTH_SHORT).show()
