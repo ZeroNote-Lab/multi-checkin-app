@@ -131,6 +131,8 @@ class QuickCheckinFragment : Fragment() {
         }
         contentView.visibility = View.VISIBLE; emptyView.visibility = View.GONE
         cfg = ItemConfig.parse(q.configJson)
+        // v1.3.8：负打卡机会结算（页面同步跑，保证点击记录时盾牌已到位，避免与 onResume 异步线程竞态）
+        try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
         autoBackfillMissing()
         val theme = ThemeManager.of(q.theme)
         calendar.themeColor = theme.primary
@@ -274,8 +276,20 @@ class QuickCheckinFragment : Fragment() {
                 btnCheckin.text = "打卡（按当前时段判定）"
             }
             neg -> {
-                statusView.text = if (cnt == 0) "状态：坚持中（无操作=成功）" else "状态：今日已记录 $cnt 次破戒"
-                btnCheckin.text = if (cnt == 0) "记录一次（破戒）" else "再记录一次（$cnt）"
+                // v1.3.8：破戒次数只数 FAIL；有盾牌抵消（OFFSET）时显示补卡状态，不算破戒
+                val fails = todayRecs.count { it.status == "FAIL" }
+                val shielded = todayRecs.any { it.status == "OFFSET" }
+                statusView.text = when {
+                    shielded && fails == 0 -> "状态：今日已补卡（破戒被盾牌抵消）"
+                    shielded -> "状态：今日已补卡 + $fails 次破戒"
+                    fails == 0 -> "状态：坚持中（无操作=成功）"
+                    else -> "状态：今日已记录 $fails 次破戒"
+                }
+                btnCheckin.text = when {
+                    fails == 0 && !shielded -> "记录一次（破戒）"
+                    fails == 0 -> "再记录一次（破戒）"
+                    else -> "再记录一次（$fails）"
+                }
             }
             // v1.2.0：时间打卡暂停进行中——按钮继续计时（续 PAUSED 进度）
             todayRecs.any { it.status == "PAUSED" } && todayRecs.none { it.status == "SUCCESS" } && !isAuto -> {
@@ -340,9 +354,13 @@ class QuickCheckinFragment : Fragment() {
             body.text = "🟠 该日无需打卡，自动视为完成，不中断连续天数"
             return
         }
-        // 标题带状态符号（美化备注栏）；v1.3.0：心情日记次数只计带心情的记录
+        // 标题带状态符号（美化备注栏）；v1.3.0：心情日记次数只计带心情的记录；v1.3.8：负打卡补卡不算在次数里（只数破戒 FAIL）
         val neg = CheckinEngine.isNegative(cfg)
-        val shownCount = if (cfg.moodMode) recs.count { moodOf(it) != null } else recs.size
+        val shownCount = when {
+            cfg.moodMode -> recs.count { moodOf(it) != null }
+            neg -> recs.count { it.status == "FAIL" }
+            else -> recs.size
+        }
         val statePrefix = when {
             recs.any { it.status == "OFFSET" } -> "↩"
             recs.any { it.isAuto == 1 } -> "⚡"
@@ -350,7 +368,8 @@ class QuickCheckinFragment : Fragment() {
             recs.any { it.status == "PAUSED" } -> "⏸"
             else -> "✅"
         }
-        title.text = "$statePrefix $date  共 $shownCount 条记录"
+        title.text = if (neg) "$statePrefix $date  破戒 $shownCount 次"
+            else "$statePrefix $date  共 $shownCount 条记录"
         if (recs.isEmpty()) {
             body.text = when {
                 // v1.2.0：随心记 / v1.3.0：心情日记无记录日不显示缺卡文案（不染色）
@@ -544,6 +563,8 @@ class QuickCheckinFragment : Fragment() {
     private fun autoBackfillMissing() {
         val it = item ?: return
         if (!cfg.offset.enabled || !cfg.offset.autoConsume) return
+        // v1.3.8：负打卡不自动补历史破戒日——破戒当天由盾牌直接抵消（蓝卡），历史破戒只支持手动补签
+        if (CheckinEngine.isNegative(cfg)) return
         val created = DateUtils.dateOf(it.createdAt)
         var d = DateUtils.addDays(DateUtils.today(), -1)
         var guard = 0

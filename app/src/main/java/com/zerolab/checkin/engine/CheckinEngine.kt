@@ -198,7 +198,16 @@ object CheckinEngine {
 
         // 归属日期与状态（v1.1.8：移除双时间自定义负打卡，统一按自然日归属）
         val date = DateUtils.dateOf(now)
-        val status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
+        // v1.3.8：负打卡破戒豁免——点击记录时若有可用盾牌，先消耗 1 次盾牌把本次破戒抵消为补卡（蓝色、不算破戒次数）；
+        // 盾牌用完后再点，才真正记为破戒（FAIL）。
+        var status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
+        var shieldUsed = false
+        if (status == "FAIL" && c.offset.enabled && !c.journalMode && !c.moodMode) {
+            if (repo.availableCredits(item.id) > 0) {
+                status = "OFFSET"
+                shieldUsed = true
+            }
+        }
 
         // 无需打卡日：不允许打卡（v1.2.0 随心记排期失效，恒允许；v1.3.0 心情日记同）
         if (!c.journalMode && !c.moodMode && !isScheduledDay(item, date)) return CheckinResult.Blocked("今日无需打卡")
@@ -216,6 +225,9 @@ object CheckinEngine {
             voicePath = voicePath, latitude = lat, longitude = lng, extraJson = extra
         )
         val rid = repo.insertRecord(rec)
+
+        // v1.3.8：盾牌抵消——负打卡点击记录被豁免为补卡时，消耗 1 次盾牌（关联本条 OFFSET 记录）
+        if (shieldUsed) repo.consumeOne(item.id, date, rid)
 
         // 正常模式成功后处理抵消发放
         if (status == "SUCCESS") grantOffsetAfterCheckin(item, repo)
@@ -273,6 +285,46 @@ object CheckinEngine {
             if (!isNegative(c)) return@forEach
             settleOffset(item, repo, c, c.offset)
         }
+    }
+
+    /** v1.3.8：一键修复负打卡数据（设置页隐藏入口触发，幂等）。
+     *  1) 撤销 v1.3.7 自动消耗补签产生的 OFFSET（与 FAIL 同日的 OFFSET 视为自动补签痕迹，删记录 + 还回盾牌 + 锚点还原）；
+     *  2) 今天存在破戒（FAIL）且还有可用盾牌时，用盾牌抵消今天第一条破戒（变补卡）。
+     *  返回修复动作描述；无痕迹可修时返回空说明。 */
+    fun repairNegativeData(repo: CheckinRepository): String {
+        val today = DateUtils.today()
+        val done = mutableListOf<String>()
+        repo.getItems().filter { it.isActive == 1 }.forEach { item ->
+            val c = cfg(item)
+            if (!isNegative(c)) return@forEach
+            if (!c.offset.enabled) return@forEach
+            var changed = false
+            // 1) 撤销自动补签：v1.3.7 的 autoBackfillMissing 只会在 FAIL 日补签，因此与 FAIL 同日的 OFFSET 即为其痕迹
+            repo.allRecords(item.id).filter { it.status == "OFFSET" }.forEach { off ->
+                val sameDay = repo.recordsOfDay(item.id, off.checkinDate)
+                if (sameDay.any { it.status == "FAIL" }) {
+                    repo.deleteRecord(off.id)
+                    repo.returnCreditByDate(item.id, off.checkinDate)
+                    changed = true
+                }
+            }
+            if (changed) {
+                if (c.offset.anchorDate.isNotBlank()) {
+                    c.offset.anchorDate = ""
+                    saveCfg(item, repo, c)
+                }
+                done.add("${item.name}：撤销自动补签")
+            }
+            // 2) 今天破戒抵消：今天有 FAIL 且可用盾牌 > 0 → 第一条 FAIL 抵消为补卡（蓝圈、不算破戒次数）
+            val todayRecs = repo.recordsOfDay(item.id, today)
+            val firstFail = todayRecs.firstOrNull { it.status == "FAIL" }
+            if (firstFail != null && repo.availableCredits(item.id) > 0) {
+                repo.updateRecordStatus(firstFail.id, "OFFSET")
+                repo.consumeOne(item.id, today, firstFail.id)
+                done.add("${item.name}：今日破戒已抵消为补卡（🛡️-1）")
+            }
+        }
+        return done.joinToString("；").ifEmpty { "未发现需要修复的数据" }
     }
 
     /** 自动模式：漏签时自动/手动消耗一次抵消补签；返回是否补签 */

@@ -82,7 +82,7 @@ class SettingsFragment : Fragment() {
         etKey.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) refresh() }
     }
 
-    // ---------- v1.3.6 一次性迁移工具（隐藏入口：版本号连点 5 次） ----------
+    // ---------- v1.3.6 / v1.3.8 开发者工具（隐藏入口：版本号连点 5 次） ----------
     private var versionTapCount = 0
     private var lastVersionTap = 0L
 
@@ -93,8 +93,30 @@ class SettingsFragment : Fragment() {
         versionTapCount++
         if (versionTapCount >= 5) {
             versionTapCount = 0
-            offerLockMigration()
+            showDevTools()
         }
+    }
+
+    /** v1.3.8：开发者工具菜单（迁移 LOCKED 项 / 修复负打卡数据） */
+    private fun showDevTools() {
+        val options = arrayOf("迁移 LOCKED 旧项为可修改", "修复负打卡数据（撤销自动补签 + 今日破戒抵消）")
+        AlertDialog.Builder(requireContext())
+            .setTitle("开发者工具")
+            .setItems(options) { _, i ->
+                when (i) {
+                    0 -> offerLockMigration()
+                    1 -> offerNegRepair()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** v1.3.8：一键修复负打卡数据（撤销 v1.3.7 自动消耗补签、把今日破戒用盾牌抵消为补卡） */
+    private fun offerNegRepair() {
+        val repo = (requireActivity().application as com.zerolab.checkin.CheckinApp).repository
+        val result = com.zerolab.checkin.engine.CheckinEngine.repairNegativeData(repo)
+        Toast.makeText(requireContext(), result, Toast.LENGTH_LONG).show()
     }
 
     /** 把所有 LOCKED 旧打卡项一次性迁移为可修改（FLEX）；只执行一次，之后入口提示已迁移 */
