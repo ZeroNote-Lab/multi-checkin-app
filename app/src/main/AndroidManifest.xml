@@ -43,6 +43,7 @@
         <activity android:name=".ui.detail.ItemDetailActivity" android:exported="false" />
         <activity android:name=".ui.detail.ItemCheckinActivity" android:exported="false" android:launchMode="singleTop" />
         <activity android:name=".ui.settings.ExportActivity" android:exported="false" />
+        <activity android:name=".ui.settings.ImportActivity" android:exported="false" />
         <activity android:name=".ui.scan.ScanActivity" android:exported="false" android:screenOrientation="portrait" />
         <!-- v1.3.5 应用内相机已回退为系统相机，暂不注册（保留 CameraActivity 代码备用）
         <activity android:name=".ui.camera.CameraActivity" android:exported="false" android:screenOrientation="portrait" />

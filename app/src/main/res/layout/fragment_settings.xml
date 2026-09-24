@@ -174,8 +174,8 @@
             android:padding="18dp">
             <TextView android:layout_width="40dp" android:layout_height="40dp" android:gravity="center" android:text="📥" android:textSize="22sp" />
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="数据导入（即将推出）" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="从 JSON 文件恢复数据" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="数据导入" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="从 JSON / ZIP 文件恢复数据" android:textColor="@color/text_secondary" android:textSize="12sp"/>
             </LinearLayout>
         </LinearLayout>
 

@@ -7,45 +7,90 @@
 
     <include android:id="@+id/topbar" layout="@layout/view_topbar" />
 
+    <TextView
+        android:id="@+id/tv_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="12dp"
+        android:text="选择要导出的打卡项（可只选部分，未选中的项及其记录不会导出）"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
     <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btn_select_all"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="1"
+            android:text="全选" />
+
+        <Button
+            android:id="@+id/btn_select_none"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="1"
+            android:text="全不选" />
+    </LinearLayout>
+
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="8dp">
+
+        <LinearLayout
+            android:id="@+id/ll_items"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <RadioGroup
+        android:id="@+id/rg_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="12dp"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/rb_json"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="仅打卡记录（JSON）" />
+
+        <RadioButton
+            android:id="@+id/rb_zip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="打卡记录 + 素材（ZIP，含照片 / 语音）" />
+    </RadioGroup>
+
+    <TextView
+        android:id="@+id/tv_result"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginTop="10dp"
         android:gravity="center"
-        android:orientation="vertical"
-        android:padding="28dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="📤"
-            android:textSize="64sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:gravity="center"
-            android:lineSpacingExtra="6dp"
-            android:text="导出全部打卡项、打卡记录与抵消机会为 JSON 文件。\n文件可保存到本地或发送到其他设备，便于 PC 端查看。"
-            android:textColor="@color/text_secondary"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/tv_result"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center"
-            android:textColor="@color/brand_dark"
-            android:textSize="13sp" />
-    </LinearLayout>
+        android:textColor="@color/brand_dark"
+        android:textSize="13sp" />
 
     <Button
         android:id="@+id/btn_export"
         style="@style/PrimaryButton"
         android:layout_width="match_parent"
         android:layout_marginHorizontal="24dp"
+        android:layout_marginTop="12dp"
         android:layout_marginBottom="28dp"
         android:text="导出并分享" />
 </LinearLayout>

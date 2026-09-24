@@ -25,10 +25,13 @@ class SettingsFragment : Fragment() {
         view.findViewById<View>(R.id.item_export).setOnClickListener {
             startActivity(Intent(requireContext(), ExportActivity::class.java))
         }
+        view.findViewById<View>(R.id.item_import).setOnClickListener {
+            startActivity(Intent(requireContext(), ImportActivity::class.java))
+        }
         // v1.3.0 联网增强三级开关（联网总开关 → 定位增强 → API Key）
         bindNetGeo(view)
         val soon = View.OnClickListener { v ->
-            val name = when (v.id) { R.id.item_import -> "数据导入"; R.id.item_theme -> "主题管理"; else -> "关于" }
+            val name = when (v.id) { R.id.item_theme -> "主题管理"; else -> "关于" }
             if (v.id == R.id.item_about) {
                 val ver = try {
                     requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName ?: "?"
@@ -38,7 +41,6 @@ class SettingsFragment : Fragment() {
                     .setPositiveButton("知道了", null).show()
             } else Toast.makeText(requireContext(), "$name 即将推出", Toast.LENGTH_SHORT).show()
         }
-        view.findViewById<View>(R.id.item_import).setOnClickListener(soon)
         view.findViewById<View>(R.id.item_theme).setOnClickListener(soon)
         view.findViewById<View>(R.id.item_about).setOnClickListener(soon)
     }
