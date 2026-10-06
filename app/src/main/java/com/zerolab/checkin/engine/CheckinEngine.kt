@@ -188,6 +188,9 @@ object CheckinEngine {
         val c = cfg(item)
         val now = System.currentTimeMillis()
 
+        // v1.3.13 打卡组：不可手动打卡，完成组内全部子项后自动记组成功
+        if (c.groupMode) return CheckinResult.Blocked("打卡组无需手动打卡，完成组内子项自动成功")
+
         // v1.1.6 固定时间段打卡：仅窗口内可打卡成功（与负打卡/自动互斥，UI 层已保证）
         if (c.timeWindowEnabled && !isAuto && !inTimeWindow(c)) {
             val a = DateUtils.parseHHmm(c.twStart); val b = DateUtils.parseHHmm(c.twEnd)
@@ -231,7 +234,28 @@ object CheckinEngine {
 
         // 正常模式成功后处理抵消发放
         if (status == "SUCCESS") grantOffsetAfterCheckin(item, repo)
+        // v1.3.13 打卡组：子项打卡成功（或盾牌补卡）后，若组内全部子项当日完成则自动记组成功
+        if (status == "SUCCESS" || status == "OFFSET") maybeAutoGroup(item, repo, date)
         return CheckinResult.Ok(date, status, rid)
+    }
+
+    // ---------- v1.3.13 打卡组自动完成 ----------
+    /** 子项打卡后检查所属组：组内全部成员在归属日已完成 → 组自动记录 SUCCESS（幂等） */
+    private fun maybeAutoGroup(item: CheckinItem, repo: CheckinRepository, date: String) {
+        val gid = item.groupTag?.toLongOrNull() ?: return
+        val group = repo.getItem(gid) ?: return
+        val gc = cfg(group)
+        if (!gc.groupMode || gc.groupMembers.isEmpty()) return
+        if (repo.recordsOfDay(gid, date).any { it.status == "SUCCESS" }) return   // 幂等
+        val allDone = gc.groupMembers.all { mid ->
+            if (mid == item.id) true
+            else repo.recordsOfDay(mid, date).any { r -> r.status == "SUCCESS" || r.status == "OFFSET" }
+        }
+        if (allDone) {
+            repo.insertRecord(CheckinRecord(
+                itemId = gid, checkinDate = date, checkinTime = System.currentTimeMillis(),
+                status = "SUCCESS", isAuto = 0))
+        }
     }
 
     // ---------- 抵消机制发放 ----------

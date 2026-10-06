@@ -75,6 +75,19 @@ class ItemCheckinActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // v1.3.13 打卡组：栈顶复用时不重建 onCreate，需在此切换目标打卡项（组页点子项进入）
+        val newId = intent.getLongExtra(EXTRA_ID, -1L)
+        if (newId > 0) {
+            val repo = (application as CheckinApp).repository
+            val ni = repo.getItem(newId)
+            if (ni == null) { finish(); return }
+            findViewById<TextView>(R.id.tv_title).text = "${ThemeManager.of(ni.theme).emoji} ${ni.name}"
+            findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
+                startActivity(Intent(this, ItemDetailActivity::class.java)
+                    .putExtra(ItemDetailActivity.EXTRA_ID, newId))
+            }
+            checkinFragment?.showItem(newId)
+        }
         val tag = if (android.os.Build.VERSION.SDK_INT >= 33)
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
         else
