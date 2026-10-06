@@ -11,6 +11,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 
 /**
  * 新建入口：点击 + 号后先选择打卡类型（普通打卡 / 日记打卡），再进入对应的单类型创建页。
@@ -42,18 +43,21 @@ class ChooseTypeActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
         findViewById<TextView>(R.id.tv_title).text = "选择打卡类型"
 
-        setupBlobs()
+        // v1.3.14：全局主题换肤（背景 / 图标圆底 / 文字 / 光斑全部跟随主题）
+        ThemeUi.apply(this, findViewById(android.R.id.content))
+        val theme = com.zerolab.checkin.theme.GlobalThemeManager.of(com.zerolab.checkin.theme.GlobalThemeManager.get(this))
+        setupBlobs(theme)
 
         val container = findViewById<LinearLayout>(R.id.type_container)
         typeEntries.forEachIndexed { idx, e ->
-            container.addView(typeCard(e, idx != 0))
+            container.addView(typeCard(e, idx != 0, theme))
         }
     }
 
     /** 两个角落的柔光大光斑（径向渐变，代码创建避免资源渲染差异） */
-    private fun setupBlobs() {
-        findViewById<android.view.View>(R.id.blob_pink).background = radialBlob(0xFFC2EDE7.toInt(), 0x00C2EDE7.toInt())
-        findViewById<android.view.View>(R.id.blob_purple).background = radialBlob(0xFFDCEAFB.toInt(), 0x00DCEAFB.toInt())
+    private fun setupBlobs(theme: com.zerolab.checkin.theme.GlobalTheme) {
+        findViewById<android.view.View>(R.id.blob_pink).background = radialBlob(theme.soft, 0x00FFFFFF and theme.soft)
+        findViewById<android.view.View>(R.id.blob_purple).background = radialBlob(theme.mid, 0x00FFFFFF and theme.mid)
     }
 
     private fun radialBlob(center: Int, edge: Int): GradientDrawable {
@@ -66,7 +70,7 @@ class ChooseTypeActivity : AppCompatActivity() {
     }
 
     /** 悬浮白卡：主题色圆底图标 + 名称 + 描述 + 箭头 */
-    private fun typeCard(e: TypeEntry, withTopMargin: Boolean): LinearLayout {
+    private fun typeCard(e: TypeEntry, withTopMargin: Boolean, theme: com.zerolab.checkin.theme.GlobalTheme): LinearLayout {
         val ctx = this@ChooseTypeActivity
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -89,7 +93,7 @@ class ChooseTypeActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 background = GradientDrawable().apply {
                     cornerRadius = 14.dp().toFloat()
-                    setColor(e.iconBg)
+                    setColor(theme.soft)
                 }
                 layoutParams = LinearLayout.LayoutParams(46.dp(), 46.dp())
             }
@@ -110,12 +114,12 @@ class ChooseTypeActivity : AppCompatActivity() {
                 text = e.name
                 textSize = 15.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(0xFF2A4C49.toInt())
+                setTextColor(theme.ink)
             })
             textCol.addView(TextView(ctx).apply {
                 text = e.desc
                 textSize = 11.5f
-                setTextColor(0xFF6E7F78.toInt())
+                setTextColor(theme.sub)
                 setPadding(0, 3.dp(), 0, 0)
             })
             addView(textCol)

@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.engine.ItemConfig
@@ -37,6 +38,8 @@ class ItemListFragment : Fragment() {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        // v1.3.14：全局主题换肤（根背景）
+        ThemeUi.apply(requireActivity(), view)
         recycler = view.findViewById(R.id.recycler)
         emptyView = view.findViewById(R.id.empty_view)
         recycler.layoutManager = LinearLayoutManager(requireContext())
@@ -107,6 +110,8 @@ class ItemListFragment : Fragment() {
 
     private fun methodLabel(item: CheckinItem): String {
         val c = ItemConfig.parse(item.configJson)
+        // v1.3.14：打卡组在列表显示"打卡组"标签（组本身无独立打卡方式）
+        if (c.groupMode) return "打卡组"
         val labels = c.methods.mapNotNull { Method.of(it)?.label?.removeSuffix("打卡") }
         return labels.joinToString("+").ifBlank { "普通" }
     }
@@ -179,8 +184,10 @@ class ItemListFragment : Fragment() {
     private fun showMenu(item: CheckinItem) {
         val quickId = repo.getQuickId()
         val isQuick = quickId == item.id
+        // v1.3.14：打卡组不可设为快捷打卡（组本身不可手动打卡，无独立打卡动作）
+        val isGroup = ItemConfig.parse(item.configJson).groupMode
         val options = mutableListOf<String>()
-        options += if (isQuick) "⭐ 取消快捷打卡" else "⭐ 设为快捷打卡"
+        if (!isGroup) options += if (isQuick) "⭐ 取消快捷打卡" else "⭐ 设为快捷打卡"
         options += if (item.isPinned == 1) "📌 取消置顶" else "📌 置顶"
         options += if (item.isActive == 0) "▶️ 恢复" else "⏸️ 暂停"
         options += "✏️ 编辑"
@@ -189,7 +196,9 @@ class ItemListFragment : Fragment() {
             .setTitle(item.name)
             .setItems(options.toTypedArray()) { _, which ->
                 thread {
-                    when (which) {
+                    // isGroup 时菜单少了快捷项，下标整体 +1 对齐
+                    val act = if (isGroup) which + 1 else which
+                    when (act) {
                         0 -> {
                             repo.setQuick(if (isQuick) null else item.id)
                             // 写入完成后立即通知快捷页刷新，避免切回时读到旧值（状态栏残留）

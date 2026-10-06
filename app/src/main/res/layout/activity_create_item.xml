@@ -203,6 +203,22 @@
                     android:text="严格连续：中断一天将从 0 重新累计；达成目标后仍可继续超额打卡。"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="打卡方式（可多选组合）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/ndays_method_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="vertical" />
             </LinearLayout>
 
             <!-- v1.3.13 打卡组：子项管理（相互独立，全部完成组才成功） -->
@@ -231,33 +247,24 @@
                     android:layout_marginTop="8dp"
                     android:orientation="vertical" />
 
-                <LinearLayout
+                <TextView
+                    android:id="@+id/btn_group_add_new"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:orientation="horizontal">
-                    <Button
-                        android:id="@+id/btn_group_add_ref"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:insetTop="0dp" android:insetBottom="0dp"
-                        android:text="＋ 引用已有打卡项" />
-                    <Button
-                        android:id="@+id/btn_group_add_new"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp"
-                        android:layout_weight="1"
-                        android:insetTop="0dp" android:insetBottom="0dp"
-                        android:text="＋ 新建子项" />
-                </LinearLayout>
+                    android:background="@drawable/bg_group_add"
+                    android:gravity="center"
+                    android:padding="13dp"
+                    android:text="＋ 新增打卡项"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="子项相互独立，只在组内打卡与显示；当日全部完成后自动记组成功。"
+                    android:text="每个子项相互独立，可单独设置打卡方式；当日全部完成后自动记组成功。"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
             </LinearLayout>

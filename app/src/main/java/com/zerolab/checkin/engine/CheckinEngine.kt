@@ -248,8 +248,11 @@ object CheckinEngine {
         if (!gc.groupMode || gc.groupMembers.isEmpty()) return
         if (repo.recordsOfDay(gid, date).any { it.status == "SUCCESS" }) return   // 幂等
         val allDone = gc.groupMembers.all { mid ->
-            if (mid == item.id) true
-            else repo.recordsOfDay(mid, date).any { r -> r.status == "SUCCESS" || r.status == "OFFSET" }
+            // v1.3.14 修复：以子项当日真实状态判定是否完成（组合方式需全部方式完成才算成功），
+            // 不能用"当前子项一律算完成"——否则子项只完成部分方式时组就被误标成功
+            val m = if (mid == item.id) item else repo.getItem(mid) ?: return
+            val st = dayInfo(m, date, repo.recordsOfDay(mid, date)).state
+            st == DayState.SUCCESS || st == DayState.OFFSET
         }
         if (allDone) {
             repo.insertRecord(CheckinRecord(

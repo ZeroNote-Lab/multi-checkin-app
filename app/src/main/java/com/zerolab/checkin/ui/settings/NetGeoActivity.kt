@@ -7,6 +7,7 @@ import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.util.NetGeo
 
 /**
@@ -18,6 +19,8 @@ class NetGeoActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_net_geo)
+        // v1.3.14：全局主题换肤（根背景）
+        ThemeUi.apply(this, findViewById(android.R.id.content))
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
         findViewById<TextView>(R.id.tv_title).text = "联网增强"
 

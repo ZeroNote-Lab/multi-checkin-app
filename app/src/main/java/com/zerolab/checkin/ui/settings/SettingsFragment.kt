@@ -10,12 +10,15 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 
 class SettingsFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, c: ViewGroup?, b: Bundle?): View =
         inflater.inflate(R.layout.fragment_settings, c, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        // v1.3.14：全局主题换肤（根背景）
+        ThemeUi.apply(requireActivity(), view)
         try {
             val tvVer = view.findViewById<TextView>(R.id.tv_version)
             tvVer.text = "打卡 APP v" + requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName
@@ -32,19 +35,18 @@ class SettingsFragment : Fragment() {
         view.findViewById<View>(R.id.item_net).setOnClickListener {
             startActivity(Intent(requireContext(), NetGeoActivity::class.java))
         }
-        val soon = View.OnClickListener { v ->
-            val name = when (v.id) { R.id.item_theme -> "主题管理"; else -> "关于" }
-            if (v.id == R.id.item_about) {
-                val ver = try {
-                    requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName ?: "?"
-                } catch (_: Exception) { "?" }
-                AlertDialog.Builder(requireContext()).setTitle("关于")
-                    .setMessage("打卡 APP v$ver\n纯本地运行，数据仅保存在本机；联网增强默认关闭，打开后仅用于位置地名翻译。")
-                    .setPositiveButton("知道了", null).show()
-            } else Toast.makeText(requireContext(), "$name 即将推出", Toast.LENGTH_SHORT).show()
+        // v1.3.14：外观主题入口——6 套莫兰迪全局主题选择
+        view.findViewById<View>(R.id.item_theme).setOnClickListener {
+            startActivity(Intent(requireContext(), ThemeActivity::class.java))
         }
-        view.findViewById<View>(R.id.item_theme).setOnClickListener(soon)
-        view.findViewById<View>(R.id.item_about).setOnClickListener(soon)
+        view.findViewById<View>(R.id.item_about).setOnClickListener {
+            val ver = try {
+                requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName ?: "?"
+            } catch (_: Exception) { "?" }
+            AlertDialog.Builder(requireContext()).setTitle("关于")
+                .setMessage("打卡 APP v$ver\n纯本地运行，数据仅保存在本机；联网增强默认关闭，打开后仅用于位置地名翻译。")
+                .setPositiveButton("知道了", null).show()
+        }
     }
 
     // ---------- 隐藏工具入口：版本号连点 5 次触发 LOCKED 一次性迁移 ----------
