@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/create_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_page"
@@ -75,9 +76,8 @@
                 android:id="@+id/tv_mode_hint"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:layout_marginBottom="12dp"
-                android:text="普通打卡：按规则打卡，有缺卡与连续天数。\n日记打卡：日记式记录，只记成功、可多次记录、不记缺卡、不设排期。"
+                android:visibility="gone"
+                android:text=""
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
