@@ -97,7 +97,8 @@ class CreateItemActivity : AppCompatActivity() {
     private var ndaysMode = false
     private var ndaysTarget = 21
     // v1.3.14 打卡组子项：仅支持新增（id 非空=已入库子项，编辑时更新而非新建）
-    private data class GroupSub(var id: Long?, var name: String, val methods: MutableSet<String>)
+    // v1.3.15：子项携带完整 ItemConfig（每日次数/负打卡/时间规则/抵消/方式参数/自动打卡，弹层更多区编辑）
+    private data class GroupSub(var id: Long?, var name: String, val config: ItemConfig)
     private val groupSubs = mutableListOf<GroupSub>()
     // v1.3.14 N天打卡：新建时可选打卡方式（多选组合）
     private val ndaysMethods = linkedSetOf(Method.NORMAL.key)
@@ -218,6 +219,7 @@ class CreateItemActivity : AppCompatActivity() {
         if (!groupMode && !ndaysMode) return
         findViewById<View>(R.id.journal_panel).visibility = View.GONE
         findViewById<View>(R.id.method_card).visibility = View.GONE
+        // v1.3.15：打卡组点「更多选项」展开打卡日期（schedule_card 初始收起）；N天保持隐藏
         findViewById<View>(R.id.schedule_card).visibility = View.GONE
         findViewById<View>(R.id.rule_card).visibility = View.GONE
         findViewById<View>(R.id.offset_card).visibility = View.GONE
@@ -225,6 +227,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.policy_card).visibility = View.GONE
         findViewById<View>(R.id.ndays_card).visibility = if (ndaysMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.group_card).visibility = if (groupMode) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btn_group_more).visibility = if (groupMode) View.VISIBLE else View.GONE
         if (groupMode) renderGroupMembers()
     }
 
@@ -238,6 +241,13 @@ class CreateItemActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
         }
         findViewById<View>(R.id.btn_group_add_new).setOnClickListener { showGroupSubSheet(null) }
+        // v1.3.15：打卡组「更多选项」→ 展开/收起打卡日期卡
+        findViewById<View>(R.id.btn_group_more).setOnClickListener {
+            val card = findViewById<View>(R.id.schedule_card)
+            val showing = card.visibility == View.VISIBLE
+            card.visibility = if (showing) View.GONE else View.VISIBLE
+            findViewById<TextView>(R.id.btn_group_more).text = if (showing) "更多选项（打卡日期）" else "收起选项（打卡日期）"
+        }
         buildNdaysMethods()
     }
 
@@ -248,6 +258,7 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     /** v1.3.14 子项卡片行：主题色图标底 + 名称 + 方式标签 + 删除 */
+    /** v1.3.15：点击整行返回编辑（不用删掉重新创建）；规则摘要并入标签行 */
     private fun groupMemberRow(s: GroupSub, idx: Int): View {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val theme = ThemeManager.of(selectedTheme)
@@ -259,6 +270,8 @@ class CreateItemActivity : AppCompatActivity() {
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.topMargin = 6
             layoutParams = lp
+            // v1.3.15：点击已添加子项行 → 返回修改（无需删除重建）
+            setOnClickListener { showGroupSubSheet(s) }
         }
         val iconWrap = LinearLayout(this).apply {
             gravity = Gravity.CENTER
@@ -280,7 +293,17 @@ class CreateItemActivity : AppCompatActivity() {
             setTextColor(0xFF1F2430.toInt())
         })
         col.addView(TextView(this).apply {
-            text = methodLabel(s.methods)
+            // v1.3.15：方式标签 + 规则摘要（每日次数/负打卡/时间窗口等）
+            val c = s.config
+            val base = methodLabel(c.methods)
+            val extra = mutableListOf<String>()
+            if (c.dailyLimit > 1) extra.add("每日${c.dailyLimit}次")
+            if (c.negative) extra.add("负打卡")
+            if (c.timeWindowEnabled) extra.add("时段")
+            if (c.dayCutoff >= 0) extra.add("时间分割")
+            if (c.offset.enabled) extra.add("🛡️抵消")
+            if (Method.AUTO.key in c.methods) extra.add("自动")
+            text = if (extra.isEmpty()) base else "$base   ·  ${extra.joinToString(" / ")}"
             textSize = 11f
             setTextColor(0xFF6E7F78.toInt())
             setPadding(0, dp(2), 0, 0)
@@ -300,9 +323,16 @@ class CreateItemActivity : AppCompatActivity() {
         methods.mapNotNull { Method.of(it) }.joinToString("  ") { "${it.emoji} ${it.label}" }
 
     /** v1.3.14 新增/编辑子项底部弹层：名称 + 打卡方式多选（互斥置灰） */
+    /** v1.3.15：方式区下方加「更多选项」展开普通打卡除日期外的全部功能；步数方式禁用 */
     private fun showGroupSubSheet(s: GroupSub?) {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        // v1.3.15：编辑已有子项直接操作 s.config；新建用局部 ItemConfig，确定时写入 groupSubs
+        val cfgSub = s?.config ?: ItemConfig()
+        val cur = cfgSub.methods
+        if (cur.isEmpty()) cur.add(Method.NORMAL.key)
+        // v1.3.15：弹层内容超高（更多选项展开）时需可滚动，外层套 ScrollView
+        val scroll = ScrollView(this).apply { isFillViewport = false }
         val wrap = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(18), dp(20), dp(24))
@@ -336,8 +366,6 @@ class CreateItemActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
-        val cur = (s?.methods ?: mutableSetOf(Method.NORMAL.key)).toMutableSet()
-        if (cur.isEmpty()) cur.add(Method.NORMAL.key)
         val candidates = listOf(Method.NORMAL, Method.PHOTO, Method.TEXT, Method.VOICE, Method.LOCATION, Method.STEPS, Method.TIMER, Method.QRCODE, Method.NFC)
         val chips = candidates.map { m ->
             TextView(this).apply {
@@ -350,6 +378,8 @@ class CreateItemActivity : AppCompatActivity() {
         chips.forEachIndexed { i, _ ->
             chips[i].setOnClickListener {
                 val mk = candidates[i].key
+                // v1.3.15：步数功能开发中，子项/N天/普通统一禁用
+                if (mk == Method.STEPS.key) { toast("该功能还在开发 (ง •_•)ง"); renderChips(candidates, cur, chips); return@setOnClickListener }
                 if (mk == Method.NORMAL.key) { cur.clear(); cur.add(Method.NORMAL.key) }
                 else {
                     if (Method.NORMAL.key in cur) cur.clear()
@@ -357,11 +387,33 @@ class CreateItemActivity : AppCompatActivity() {
                     if (cur.isEmpty()) cur.add(Method.NORMAL.key)
                 }
                 renderChips(candidates, cur, chips)
+                // v1.3.15：方式变化后刷新参数区
+                chipsClickListenerRefresh?.invoke()
             }
         }
         addChipsToGrid(methodBox, chips)
         renderChips(candidates, cur, chips)
         wrap.addView(methodBox)
+        // v1.3.15：更多选项入口（展开高级功能）
+        val moreBtn = TextView(this).apply {
+            text = "更多选项 ▾"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF6E7F78.toInt())
+            setPadding(0, dp(10), 0, dp(2))
+        }
+        wrap.addView(moreBtn)
+        val moreBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        buildGroupMoreSection(moreBox, cfgSub, cur)
+        wrap.addView(moreBox)
+        moreBtn.setOnClickListener {
+            val showing = moreBox.visibility == View.VISIBLE
+            moreBox.visibility = if (showing) View.GONE else View.VISIBLE
+            moreBtn.text = if (showing) "更多选项 ▾" else "收起 ▴"
+        }
         val btnRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) }
@@ -385,26 +437,279 @@ class CreateItemActivity : AppCompatActivity() {
                 val nm = et.text.toString().trim()
                 if (nm.isBlank()) { toast("子项名称不能为空"); return@setOnClickListener }
                 if (groupSubs.any { it !== s && it.name == nm }) { toast("组内已有同名子项"); return@setOnClickListener }
-                if (s == null) groupSubs.add(GroupSub(null, nm, cur)) else { s.name = nm; s.methods.clear(); s.methods.addAll(cur) }
+                if (s == null) groupSubs.add(GroupSub(null, nm, cfgSub)) else s.name = nm
                 renderGroupMembers()
                 sheet.dismiss()
             }
         })
         wrap.addView(btnRow)
-        sheet.setContentView(wrap)
+        scroll.addView(wrap)
+        sheet.setContentView(scroll)
         sheet.show()
     }
+
+    /** v1.3.15：子项弹层更多区——普通打卡除「日期选择」外的全部功能（每日次数/负打卡/时间规则/抵消/自动/方式参数） */
+    private fun buildGroupMoreSection(box: LinearLayout, c: ItemConfig, cur: MutableSet<String>) {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        fun divider() { box.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) }
+            background = getDrawable(R.color.divider)
+        }) }
+        fun sectionTitle(t: String) { box.addView(TextView(this).apply {
+            text = t; textSize = 12f; typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF6E7F78.toInt())
+            setPadding(0, dp(10), 0, dp(4))
+        }) }
+        fun toggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit): CheckBox {
+            val cb = CheckBox(this).apply {
+                text = label; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+                isChecked = checked
+                setOnCheckedChangeListener { _, on -> onChange(on) }
+            }
+            box.addView(cb)
+            return cb
+        }
+        divider()
+        // —— 频率 ——
+        sectionTitle("频率与规则")
+        val limitRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        }
+        limitRow.addView(TextView(this).apply {
+            text = "每日打卡次数"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        val tvLimit = TextView(this).apply {
+            text = "${c.dailyLimit}"; textSize = 14f; gravity = Gravity.CENTER; typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF1F2430.toInt())
+            layoutParams = LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        limitRow.addView(Button(this).apply {
+            text = "-"; textSize = 14f; setPadding(0, 0, 0, 0)
+            setOnClickListener { c.dailyLimit = (c.dailyLimit - 1).coerceAtLeast(1); tvLimit.text = "${c.dailyLimit}" }
+        })
+        limitRow.addView(tvLimit)
+        limitRow.addView(Button(this).apply {
+            text = "+"; textSize = 14f; setPadding(0, 0, 0, 0)
+            setOnClickListener { c.dailyLimit = (c.dailyLimit + 1).coerceAtMost(99); tvLimit.text = "${c.dailyLimit}" }
+        })
+        box.addView(limitRow)
+        toggleRow("需完成全部次数才算打卡成功（不足显示部分完成）", c.dailyAllRequired) { on -> c.dailyAllRequired = on }
+        divider()
+        // —— 负打卡 ——
+        toggleRow("负打卡：无操作=成功，主动记录=破戒失败", c.negative) { on ->
+            c.negative = on
+            if (on && Method.AUTO.key in c.methods) {
+                c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key)
+                toast("负打卡与自动打卡互斥，已关闭自动")
+            }
+        }
+        divider()
+        // —— 时间规则（先建两个面板与开关，再统一绑定互斥监听，避免前向引用） ——
+        sectionTitle("时间规则（二选一）")
+        val twPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            visibility = if (c.timeWindowEnabled) View.VISIBLE else View.GONE
+            setPadding(dp(12), 0, 0, 0)
+        }
+        twPanel.addView(TextView(this).apply { text = "开始 "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+        twPanel.addView(Button(this).apply {
+            text = c.twStart; textSize = 13f
+            setOnClickListener {
+                val hm = c.twStart.split(":")
+                TimePickerDialog(this@CreateItemActivity, { _, h, m ->
+                    c.twStart = "%02d:%02d".format(h, m); (this as Button).text = c.twStart
+                }, hm[0].toInt(), hm[1].toInt(), true).show()
+            }
+        })
+        twPanel.addView(TextView(this).apply { text = " 结束 "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+        twPanel.addView(Button(this).apply {
+            text = c.twEnd; textSize = 13f
+            setOnClickListener {
+                val hm = c.twEnd.split(":")
+                TimePickerDialog(this@CreateItemActivity, { _, h, m ->
+                    c.twEnd = "%02d:%02d".format(h, m); (this as Button).text = c.twEnd
+                }, hm[0].toInt(), hm[1].toInt(), true).show()
+            }
+        })
+        box.addView(twPanel)
+        val cutoffPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            visibility = if (c.dayCutoff >= 0) View.VISIBLE else View.GONE
+            setPadding(dp(12), 0, 0, 0)
+        }
+        cutoffPanel.addView(TextView(this).apply { text = "分割时间 00:00 – "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+        cutoffPanel.addView(Button(this).apply {
+            text = "%02d:%02d".format(if (c.dayCutoff >= 0) c.dayCutoff / 60 else 3, if (c.dayCutoff >= 0) c.dayCutoff % 60 else 0)
+            textSize = 13f
+            setOnClickListener {
+                val h = if (c.dayCutoff >= 0) c.dayCutoff / 60 else 3
+                val m = if (c.dayCutoff >= 0) c.dayCutoff % 60 else 0
+                TimePickerDialog(this@CreateItemActivity, { _, hh, mm ->
+                    c.dayCutoff = hh * 60 + mm; (this as Button).text = "%02d:%02d".format(hh, mm)
+                }, h, m, true).show()
+            }
+        })
+        cutoffPanel.addView(TextView(this).apply { text = " 打卡算前一天"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+        box.addView(cutoffPanel)
+        val twCb = CheckBox(this).apply {
+            text = "固定时间段打卡（仅窗口内可成功）"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+            isChecked = c.timeWindowEnabled
+        }
+        val cbCutoff = CheckBox(this).apply {
+            text = "时间分割：凌晨该时间前打卡算前一天记录"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+            isChecked = c.dayCutoff >= 0
+        }
+        box.addView(twCb); box.addView(cbCutoff)
+        twCb.setOnCheckedChangeListener { _, on ->
+            c.timeWindowEnabled = on
+            if (on) { c.dayCutoff = -1; cbCutoff.isChecked = false; cutoffPanel.visibility = View.GONE }
+            if (on && Method.AUTO.key in c.methods) {
+                c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key)
+                toast("固定时间段与自动打卡互斥，已关闭自动")
+            }
+            twPanel.visibility = if (on) View.VISIBLE else View.GONE
+        }
+        cbCutoff.setOnCheckedChangeListener { _, on ->
+            c.dayCutoff = if (on) 180 else -1
+            if (on) { c.timeWindowEnabled = false; twCb.isChecked = false; twPanel.visibility = View.GONE }
+            cutoffPanel.visibility = if (on) View.VISIBLE else View.GONE
+        }
+        divider()
+        // —— 抵消机制 ——
+        val offPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            visibility = if (c.offset.enabled) View.VISIBLE else View.GONE
+            setPadding(dp(12), 0, 0, 0)
+        }
+        val etOffN = EditText(this).apply {
+            setText("${c.offset.nDays}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            textSize = 13f; background = getDrawable(R.drawable.bg_input)
+            layoutParams = LinearLayout.LayoutParams(dp(56), LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        val etOffK = EditText(this).apply {
+            setText("${c.offset.k}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            textSize = 13f; background = getDrawable(R.drawable.bg_input)
+            layoutParams = LinearLayout.LayoutParams(dp(56), LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        offPanel.addView(TextView(this).apply { text = "连续"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+        offPanel.addView(etOffN)
+        offPanel.addView(TextView(this).apply { text = " 天得 "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+        offPanel.addView(etOffK)
+        offPanel.addView(TextView(this).apply { text = " 次（可累积）"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+        box.addView(offPanel)
+        // v1.3.15：合并为单一监听（visibility 与数字回写同在一个 onChange，避免被后设 listener 覆盖）
+        toggleRow("连续打卡抵消机制（🛡️可补漏签）", c.offset.enabled) { on ->
+            c.offset.enabled = on
+            offPanel.visibility = if (on) View.VISIBLE else View.GONE
+            if (on) {
+                val n = etOffN.text.toString().toIntOrNull() ?: 7
+                val k = etOffK.text.toString().toIntOrNull() ?: 1
+                c.offset.nDays = n; c.offset.k = k
+            } else { etOffN.clearFocus(); etOffK.clearFocus() }
+        }
+        // —— 自动打卡 ——
+        toggleRow("自动打卡（前台打开 App 自动完成）", Method.AUTO.key in c.methods) { on ->
+            if (on) {
+                if (c.negative) { toast("负打卡与自动打卡互斥，无法开启自动") }
+                else if (c.timeWindowEnabled) { toast("固定时间段与自动打卡互斥，无法开启自动") }
+                else { c.methods.add(Method.AUTO.key); cur.add(Method.AUTO.key) }
+            } else { c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key) }
+        }
+        divider()
+        // —— 方式参数（选中方式时显示） ——
+        sectionTitle("方式参数")
+        val paramBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(paramBox)
+        fun renderParams() {
+            paramBox.removeAllViews()
+            if (Method.PHOTO.key in cur) {
+                paramBox.addView(CheckBox(this).apply {
+                    text = "允许拍照"; textSize = 13f; setTextColor(0xFF1F2430.toInt()); isChecked = c.photoFromCamera
+                    setOnCheckedChangeListener { _, on -> c.photoFromCamera = on }
+                })
+                paramBox.addView(CheckBox(this).apply {
+                    text = "允许相册"; textSize = 13f; setTextColor(0xFF1F2430.toInt()); isChecked = c.photoFromAlbum
+                    setOnCheckedChangeListener { _, on -> c.photoFromAlbum = on }
+                })
+            }
+            if (Method.TEXT.key in cur) {
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                row.addView(TextView(this).apply { text = "最低字数 "; textSize = 13f; setTextColor(0xFF1F2430.toInt()) })
+                val et = EditText(this).apply {
+                    setText("${c.textMinWords}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    textSize = 13f; background = getDrawable(R.drawable.bg_input)
+                    layoutParams = LinearLayout.LayoutParams(dp(56), LinearLayout.LayoutParams.WRAP_CONTENT)
+                }
+                row.addView(et)
+                row.addView(TextView(this).apply { text = " 字"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+                paramBox.addView(row)
+                et.setOnFocusChangeListener { _, has -> if (!has) c.textMinWords = et.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: c.textMinWords }
+            }
+            if (Method.TIMER.key in cur) {
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                row.addView(TextView(this).apply { text = "计时 "; textSize = 13f; setTextColor(0xFF1F2430.toInt()) })
+                val et = EditText(this).apply {
+                    setText("${c.timerMinutes}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    textSize = 13f; background = getDrawable(R.drawable.bg_input)
+                    layoutParams = LinearLayout.LayoutParams(dp(56), LinearLayout.LayoutParams.WRAP_CONTENT)
+                }
+                row.addView(et)
+                row.addView(TextView(this).apply { text = " 分钟"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+                paramBox.addView(row)
+                et.setOnFocusChangeListener { _, has -> if (!has) c.timerMinutes = et.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: c.timerMinutes }
+            }
+            if (Method.VOICE.key in cur) {
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                row.addView(TextView(this).apply { text = "最长 "; textSize = 13f; setTextColor(0xFF1F2430.toInt()) })
+                val et = EditText(this).apply {
+                    setText("${c.voiceMaxSeconds}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    textSize = 13f; background = getDrawable(R.drawable.bg_input)
+                    layoutParams = LinearLayout.LayoutParams(dp(56), LinearLayout.LayoutParams.WRAP_CONTENT)
+                }
+                row.addView(et)
+                row.addView(TextView(this).apply { text = " 秒"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
+                paramBox.addView(row)
+                et.setOnFocusChangeListener { _, has -> if (!has) c.voiceMaxSeconds = et.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: c.voiceMaxSeconds }
+            }
+            if (Method.LOCATION.key in cur) {
+                paramBox.addView(TextView(this).apply {
+                    text = "打卡时定位当前位置（默认范围 200 米）"
+                    textSize = 12f; setTextColor(0xFF6E7F78.toInt()); setPadding(0, dp(2), 0, 0)
+                })
+            }
+            if (Method.QRCODE.key in cur) {
+                paramBox.addView(TextView(this).apply {
+                    text = if (c.qrContent.isBlank()) "扫码打卡：打卡页扫描已绑定二维码" else "已绑定二维码：${c.qrContent.take(24)}"
+                    textSize = 12f; setTextColor(0xFF6E7F78.toInt()); setPadding(0, dp(2), 0, 0)
+                })
+            }
+            if (Method.NFC.key in cur) {
+                paramBox.addView(TextView(this).apply {
+                    text = if (c.nfcTagId.isBlank()) "NFC 打卡：打卡页读取已绑定标签" else "已绑定标签：${c.nfcTagId.take(24)}"
+                    textSize = 12f; setTextColor(0xFF6E7F78.toInt()); setPadding(0, dp(2), 0, 0)
+                })
+            }
+        }
+        renderParams()
+        // 方式 chips 变化时刷新参数区
+        chipsClickListenerRefresh = { renderParams() }
+    }
+
+    /** v1.3.15：子项弹层方式点击后刷新参数区（由 buildGroupMoreSection 注入） */
+    private var chipsClickListenerRefresh: (() -> Unit)? = null
 
     private fun renderChips(candidates: List<Method>, sel: Set<String>, chips: List<TextView>) {
         candidates.forEachIndexed { i, m ->
             val selected = m.key in sel
             val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in sel
+            // v1.3.15：步数功能开发中，chip 恒置灰不可选
+            val stepDisabled = m.key == Method.STEPS.key
             val bg = GradientDrawable()
             bg.cornerRadius = 22f
-            bg.setColor(if (selected) 0xFF3A4152.toInt() else if (blocked) 0xFFF1F1F3.toInt() else 0xFFEEF1F6.toInt())
+            bg.setColor(if (selected) 0xFF3A4152.toInt() else if (stepDisabled) 0xFFE8EAEE.toInt() else if (blocked) 0xFFF1F1F3.toInt() else 0xFFEEF1F6.toInt())
             bg.setStroke(if (selected) 0 else 2, 0xFFD6DBE6.toInt())
             chips[i].background = bg
-            chips[i].setTextColor(if (selected) 0xFFFFFFFF.toInt() else if (blocked) 0xFFB9BEC9.toInt() else 0xFF4A5160.toInt())
+            chips[i].setTextColor(if (selected) 0xFFFFFFFF.toInt() else if (stepDisabled) 0xFFC2C7D1.toInt() else if (blocked) 0xFFB9BEC9.toInt() else 0xFF4A5160.toInt())
             chips[i].typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         }
     }
@@ -442,6 +747,8 @@ class CreateItemActivity : AppCompatActivity() {
         chips.forEachIndexed { i, _ ->
             chips[i].setOnClickListener {
                 val mk = candidates[i].key
+                // v1.3.15：步数功能开发中，N天页同样禁用
+                if (mk == Method.STEPS.key) { toast("该功能还在开发 (ง •_•)ง"); renderNdaysChips(candidates, chips); return@setOnClickListener }
                 if (mk == Method.NORMAL.key) { ndaysMethods.clear(); ndaysMethods.add(Method.NORMAL.key) }
                 else {
                     if (Method.NORMAL.key in ndaysMethods) ndaysMethods.clear()
@@ -459,12 +766,14 @@ class CreateItemActivity : AppCompatActivity() {
         candidates.forEachIndexed { i, m ->
             val selected = m.key in ndaysMethods
             val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in ndaysMethods
+            // v1.3.15：步数功能开发中，chip 恒置灰不可选
+            val stepDisabled = m.key == Method.STEPS.key
             val bg = GradientDrawable()
             bg.cornerRadius = 22f
-            bg.setColor(if (selected) 0xFF3A4152.toInt() else if (blocked) 0xFFF1F1F3.toInt() else 0xFFEEF1F6.toInt())
+            bg.setColor(if (selected) 0xFF3A4152.toInt() else if (stepDisabled) 0xFFE8EAEE.toInt() else if (blocked) 0xFFF1F1F3.toInt() else 0xFFEEF1F6.toInt())
             bg.setStroke(if (selected) 0 else 2, 0xFFD6DBE6.toInt())
             chips[i].background = bg
-            chips[i].setTextColor(if (selected) 0xFFFFFFFF.toInt() else if (blocked) 0xFFB9BEC9.toInt() else 0xFF4A5160.toInt())
+            chips[i].setTextColor(if (selected) 0xFFFFFFFF.toInt() else if (stepDisabled) 0xFFC2C7D1.toInt() else if (blocked) 0xFFB9BEC9.toInt() else 0xFF4A5160.toInt())
             chips[i].typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         }
     }
@@ -477,7 +786,10 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.groupMode = true
         cfg.methods.clear(); cfg.methods.add(Method.NORMAL.key)
         cfg.dailyLimit = 1
-        cfg.scheduleMode = "DAILY"
+        // v1.3.15：组可设置打卡日期（模式A每天/B每周几/C双休/D大小周），不再固定每日
+        cfg.scheduleMode = scheduleMode
+        cfg.weekDays.clear(); cfg.weekDays.addAll(weekDays)
+        cfg.bigSmallStart = bigSmallStart
         cfg.negative = false; cfg.timeWindowEnabled = false; cfg.offset.enabled = false; cfg.dayCutoff = -1
         thread {
             val gid: Long
@@ -500,20 +812,16 @@ class CreateItemActivity : AppCompatActivity() {
             val memberIds = mutableListOf<Long>()
             groupSubs.forEach { s ->
                 if (s.id != null && repo.getItem(s.id!!) != null) {
-                    // 编辑已有子项：更新名称与打卡方式
+                    // v1.3.15：编辑已有子项——全量覆盖配置（每日次数/负打卡/时间规则/抵消/方式参数/自动），不限于方式
                     val sub = repo.getItem(s.id!!)!!
-                    val subCfg = ItemConfig.parse(sub.configJson)
-                    subCfg.methods.clear(); subCfg.methods.addAll(s.methods)
+                    val subCfg = ItemConfig.parse(s.config.toJson())
                     if (subCfg.methods.isEmpty()) subCfg.methods.add(Method.NORMAL.key)
                     repo.updateItem(sub.copy(name = s.name, configJson = subCfg.toJson(), groupTag = gid.toString(), updatedAt = now))
                     memberIds.add(s.id!!)
                 } else {
-                    val subCfg = ItemConfig().apply {
-                        methods.clear()  // v1.3.14 修复：ItemConfig 默认含 NORMAL，先清再写入所选方式
-                        methods.addAll(s.methods)
-                        if (methods.isEmpty()) methods.add(Method.NORMAL.key)
-                        dailyLimit = 1
-                    }
+                    // v1.3.15：新建子项——携带弹层内完整配置（原固定 dailyLimit=1 取消，按用户设置保存）
+                    val subCfg = ItemConfig.parse(s.config.toJson())
+                    if (subCfg.methods.isEmpty()) subCfg.methods.add(Method.NORMAL.key)
                     val sub = CheckinItem(
                         name = s.name, type = "NORMAL", configJson = subCfg.toJson(),
                         icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
@@ -1524,9 +1832,10 @@ class CreateItemActivity : AppCompatActivity() {
             loaded.groupMembers.forEachIndexed { i, mid ->
                 val m = repo.getItem(mid)
                 val nm = m?.name ?: loaded.groupMemberNames.getOrNull(i) ?: "子项"
-                val ms = m?.let { ItemConfig.parse(it.configJson).methods.toMutableSet() } ?: mutableSetOf(Method.NORMAL.key)
-                if (ms.isEmpty()) ms.add(Method.NORMAL.key)
-                groupSubs.add(GroupSub(mid, nm, ms))
+                // v1.3.15：子项携带完整 ItemConfig 回显（后续点击行可直接编辑全部规则）
+                val mc = m?.let { ItemConfig.parse(it.configJson) } ?: ItemConfig()
+                if (mc.methods.isEmpty()) mc.methods.add(Method.NORMAL.key)
+                groupSubs.add(GroupSub(mid, nm, mc))
             }
             renderGroupMembers()
         }
