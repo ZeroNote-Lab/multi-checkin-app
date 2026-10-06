@@ -42,6 +42,16 @@ import kotlin.concurrent.thread
 
 class CreateItemActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_ID = "extra_item_id"
+        /** 新建入口模式：从类型选择页进入时指定，编辑已有项忽略（由配置回显） */
+        const val EXTRA_MODE = "create_mode"
+        const val MODE_NORMAL = "normal"             // ✅ 普通打卡
+        const val MODE_JOURNAL = "journal"           // 📔 日记打卡（页内选随心记 / 心情日记）
+        const val MODE_JOURNAL_FREE = "journal_free" // 兼容保留：直接进随心记
+        const val MODE_JOURNAL_MOOD = "journal_mood" // 兼容保留：直接进心情日记
+    }
+
     private val repo get() = (application as CheckinApp).repository
     private var editId: Long = -1
     private var editing: CheckinItem? = null
@@ -129,7 +139,16 @@ class CreateItemActivity : AppCompatActivity() {
         editing = if (editId > 0) repo.let { it.getItem(editId) } else null
 
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
-        findViewById<TextView>(R.id.tv_title).text = if (editing != null) "编辑打卡项" else "新建打卡项"
+        val createMode = intent.getStringExtra(EXTRA_MODE)
+        findViewById<TextView>(R.id.tv_title).text = when {
+            editing != null -> "编辑打卡项"
+            createMode == MODE_JOURNAL -> "新建日记打卡"
+            createMode == MODE_JOURNAL_FREE -> "新建随心记"
+            createMode == MODE_JOURNAL_MOOD -> "新建心情日记"
+            else -> "新建打卡项"
+        }
+        // 类型已在选择页（或编辑项配置）确定：隐藏打卡类型双 tab
+        findViewById<View>(R.id.mode_container).visibility = View.GONE
 
         buildThemeChips()
         buildModeSection()   // v1.3.0 打卡类型双 tab（普通打卡 / 日记打卡），在方式开关之前构建
@@ -143,11 +162,26 @@ class CreateItemActivity : AppCompatActivity() {
         bindPolicy()
         bindJournalPanel()   // v1.3.0 日记 tab 记录类型单选 + 心情折线图开关
 
-        if (editing != null) loadEditing() else {
-            // 默认勾选普通
-            rows[Method.NORMAL.key]?.switch?.isChecked = true
-            refreshConflicts()
+        if (editing != null) {
+            loadEditing()
+        } else {
+            // v1.3.9：新建按类型选择页传入的模式初始化（普通 / 日记）
+            when (createMode) {
+                MODE_JOURNAL, MODE_JOURNAL_FREE -> setJournalMode(true)
+                MODE_JOURNAL_MOOD -> { setJournalMode(true); setMoodMode(true) }
+                else -> {
+                    // 默认勾选普通
+                    rows[Method.NORMAL.key]?.switch?.isChecked = true
+                    refreshConflicts()
+                }
+            }
         }
+        // 记录类型单选：普通新建隐藏；日记新建 / 编辑日记项显示（编辑时锁定，见 loadEditing）
+        val showRecordType = editing != null && ItemConfig.parse(editing!!.configJson).journalMode ||
+            (editing == null && (createMode == MODE_JOURNAL || createMode == MODE_JOURNAL_FREE || createMode == MODE_JOURNAL_MOOD))
+        findViewById<View>(R.id.rb_journal_suixinsui).visibility = if (showRecordType) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.rb_journal_mood).visibility = if (showRecordType) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.tv_journal_type_label).visibility = if (showRecordType) View.VISIBLE else View.GONE
 
         findViewById<Button>(R.id.btn_save).setOnClickListener { save() }
     }
@@ -1407,5 +1441,4 @@ class CreateItemActivity : AppCompatActivity() {
         try { nfcAdapter?.disableReaderMode(this) } catch (_: Exception) {}
     }
 
-    companion object { const val EXTRA_ID = "extra_item_id" }
 }
