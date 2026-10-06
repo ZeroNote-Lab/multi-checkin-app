@@ -16,6 +16,7 @@ import androidx.fragment.app.Fragment
 import androidx.appcompat.app.AlertDialog
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.engine.DayInfo
@@ -101,6 +102,8 @@ class QuickCheckinFragment : Fragment() {
             }
         }
         btnCheckin.setOnClickListener { flow.start(item!!, cfg) }
+        // v1.3.14：全局主题换肤（根背景 / 主按钮）
+        ThemeUi.apply(requireActivity(), view, listOf(R.id.btn_checkin, R.id.btn_go_create))
         // v1.1.6：列表进入打卡页（override）时隐藏 Fragment 内部顶栏，只留 Activity 顶栏一行（避免双名称/双设置）
         if (overrideItemId != null) view.findViewById<View>(R.id.header_bar).visibility = View.GONE
     }
@@ -144,10 +147,10 @@ class QuickCheckinFragment : Fragment() {
         try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
         autoBackfillMissing()
         val theme = ThemeManager.of(q.theme)
-        calendar.themeColor = theme.primary
+        calendar.themeColor = ThemeUi.current(requireActivity()).accent
         root.findViewById<TextView>(R.id.tv_emoji).text = theme.emoji
         root.findViewById<TextView>(R.id.tv_name).text = q.name
-        btnCheckin.background?.setTint(theme.primary)
+        btnCheckin.background?.setTint(ThemeUi.current(requireActivity()).accent)
         renderMonth()
         renderToday()
         // 记录栏随快捷项/刷新重置为今日，避免残留上一项
@@ -264,35 +267,10 @@ class QuickCheckinFragment : Fragment() {
                 root.findViewById<TextView>(R.id.tv_detail_body).text = if (members.isEmpty()) "组内暂无子项" else ""
                 val box = root.findViewById<LinearLayout>(R.id.detail_records_box)
                 box.removeAllViews()
-                members.forEach { mid ->
-                    val m = repo.getItem(mid) ?: return@forEach
+                members.forEachIndexed { idx, mid ->
+                    val m = repo.getItem(mid) ?: return@forEachIndexed
                     val ok = mid in doneSet
-                    val row = LinearLayout(requireContext()).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        gravity = android.view.Gravity.CENTER_VERTICAL
-                        background = requireContext().getDrawable(R.drawable.bg_input)
-                        setPadding(14, 12, 14, 12)
-                        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                        lp.topMargin = 6
-                        layoutParams = lp
-                        setOnClickListener {
-                            startActivity(Intent(requireContext(), ItemCheckinActivity::class.java)
-                                .putExtra(ItemCheckinActivity.EXTRA_ID, m.id))
-                        }
-                    }
-                    row.addView(TextView(requireContext()).apply {
-                        text = m.name
-                        textSize = 14f
-                        setTextColor(0xFF1F2430.toInt())
-                        val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                        layoutParams = lp
-                    })
-                    row.addView(TextView(requireContext()).apply {
-                        text = if (ok) "✅ 已完成" else "⏳ 未完成"
-                        textSize = 13f
-                        setTextColor(if (ok) 0xFF2FBF71.toInt() else 0xFFF59E0B.toInt())
-                    })
-                    box.addView(row)
+                    box.addView(groupSubCard(m, ok, idx == 0))
                 }
             }
             // v1.3.13 N天打卡：严格连续，达成目标后可继续超额
@@ -409,6 +387,71 @@ class QuickCheckinFragment : Fragment() {
     }
 
     /** 点击日期：备注栏显示次数/时间/文字/缩略图/语音（v1.1.6：媒体内联到对应记录行，不再统一堆底部） */
+    /** v1.3.14 打卡组子项卡片：主题图标 + 名称 + 打卡方式 + 连续天数 + 状态徽章 */
+    private fun groupSubCard(m: CheckinItem, ok: Boolean, first: Boolean): View {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        val subTheme = ThemeManager.of(m.theme)
+        val subCfg = ItemConfig.parse(m.configJson)
+        val streak = try { CheckinEngine.streak(m, repo) } catch (_: Exception) { 0 }
+        val row = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            background = requireContext().getDrawable(R.drawable.bg_input)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            if (!first) lp.topMargin = dp(8)
+            layoutParams = lp
+            setOnClickListener {
+                startActivity(Intent(requireContext(), ItemCheckinActivity::class.java)
+                    .putExtra(ItemCheckinActivity.EXTRA_ID, m.id))
+            }
+        }
+        val iconWrap = LinearLayout(requireContext()).apply {
+            gravity = android.view.Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(subTheme.soft)
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+        }
+        iconWrap.addView(TextView(requireContext()).apply { text = subTheme.emoji; textSize = 18f })
+        row.addView(iconWrap)
+        val col = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            lp.marginStart = dp(12)
+            layoutParams = lp
+        }
+        col.addView(TextView(requireContext()).apply {
+            text = m.name
+            textSize = 14.5f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(0xFF1F2430.toInt())
+        })
+        col.addView(TextView(requireContext()).apply {
+            val labels = subCfg.methods.mapNotNull { Method.of(it) }.joinToString("  ") { "${it.emoji} ${it.label}" }
+            text = if (labels.isBlank()) "连续 $streak 天" else "$labels    · 连续 $streak 天"
+            textSize = 11.5f
+            setTextColor(0xFF6E7F78.toInt())
+            setPadding(0, dp(3), 0, 0)
+        })
+        row.addView(col)
+        val badge = TextView(requireContext()).apply {
+            text = if (ok) "✓ 已打卡" else "○ 未完成"
+            textSize = 12f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(12), dp(5), dp(12), dp(5))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(if (ok) 0xFF2FBF71.toInt() else 0xFFF59E0B.toInt())
+            }
+        }
+        row.addView(badge)
+        return row
+    }
+
     private fun showDayDetail(date: String) {
         val it = item ?: return
         // v1.3.13 打卡组：详情区常驻子项列表（由 renderToday 渲染），点击日历日期不覆盖

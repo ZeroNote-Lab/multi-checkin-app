@@ -10,6 +10,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.util.JsonExporter
 import com.zerolab.checkin.util.JsonImporter
 import com.zerolab.checkin.util.ZipImporter
@@ -25,6 +26,8 @@ class ImportActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_import)
+        // v1.3.14：全局主题换肤（根背景 / 导入按钮）
+        ThemeUi.apply(this, findViewById(android.R.id.content), listOf(R.id.btn_import))
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
         findViewById<TextView>(R.id.tv_title).text = "数据导入"
         findViewById<Button>(R.id.btn_import).setOnClickListener { pickFile() }

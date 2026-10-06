@@ -6,6 +6,7 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.Method
@@ -20,6 +21,8 @@ class ItemDetailActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_detail)
+        // v1.3.14：全局主题换肤（根背景）
+        ThemeUi.apply(this, findViewById(android.R.id.content))
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
         findViewById<TextView>(R.id.tv_title).text = "打卡项详情"
         build()

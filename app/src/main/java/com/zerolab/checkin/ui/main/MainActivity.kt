@@ -16,6 +16,8 @@ import com.zerolab.checkin.ui.list.ItemListFragment
 import com.zerolab.checkin.ui.quick.NfcHub
 import com.zerolab.checkin.ui.quick.QuickCheckinFragment
 import com.zerolab.checkin.ui.settings.SettingsFragment
+import com.zerolab.checkin.theme.GlobalThemeManager
+import com.zerolab.checkin.theme.ThemeUi
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
@@ -30,6 +32,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         nav = findViewById(R.id.bottom_nav)
+        // v1.3.14：全局主题换肤（背景 / 状态栏 / 底部导航选中色）
+        ThemeUi.applyWindow(this)
+        try { rootFind() } catch (_: Exception) {}
+        ThemeUi.tintBottomNav(nav, ThemeUi.current(this))
 
         if (savedInstanceState == null) {
             frags[R.id.nav_quick] = QuickCheckinFragment()
@@ -80,9 +86,21 @@ class MainActivity : AppCompatActivity() {
         switchTo(R.id.nav_item_list)
     }
 
-    // ---------- NFC 前台分发（打卡时读取标签） ----------
+    private fun rootFind() {
+        findViewById<android.view.View>(android.R.id.content)?.setBackgroundColor(ThemeUi.current(this).bg)
+    }
+
+    /** v1.3.14：主题切换后（ThemeActivity 返回）重建主界面以全局换肤 */
+    private var lastThemeId: String? = null
     override fun onResume() {
         super.onResume()
+        val curTheme = GlobalThemeManager.get(this)
+        if (lastThemeId != null && lastThemeId != curTheme) {
+            lastThemeId = curTheme
+            recreate()
+            return
+        }
+        lastThemeId = curTheme
         enableNfcForeground()
         // 前台触发自动打卡（冷启动 / 回前台）
         thread {

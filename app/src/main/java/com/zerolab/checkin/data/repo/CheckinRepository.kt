@@ -73,11 +73,21 @@ class CheckinRepository(private val db: AppDatabase) {
     }
     fun getQuickId(): Long? = quickDao.get()?.itemId
 
-    fun setQuick(id: Long?) = quickDao.upsert(QuickConfig(1, id))
+    fun setQuick(id: Long?) {
+        // v1.3.14：打卡组不可作为快捷打卡，任何路径（含导入）都跳过组
+        if (id != null) {
+            val it = itemDao.getById(id) ?: return
+            if (com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode) return
+        }
+        quickDao.upsert(QuickConfig(1, id))
+    }
 
     private fun ensureQuickAfterCreate(newId: Long) {
         val cfg = quickDao.get()
         if (cfg == null || cfg.itemId == null) {
+            // v1.3.14：打卡组不可作为快捷打卡（组本身无独立打卡动作），空库首个组不自动设快捷
+            val it = itemDao.getById(newId) ?: return
+            if (com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode) return
             quickDao.upsert(QuickConfig(1, newId))
         }
     }

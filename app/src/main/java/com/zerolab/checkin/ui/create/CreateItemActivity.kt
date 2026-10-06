@@ -25,6 +25,7 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.LocatePoint
@@ -95,9 +96,11 @@ class CreateItemActivity : AppCompatActivity() {
     private var groupMode = false
     private var ndaysMode = false
     private var ndaysTarget = 21
-    private val groupRefIds = mutableListOf<Long>()      // 引用已有子项 id
-    private val groupNewNames = mutableListOf<String>()  // 新建子项名称（保存时落库）
-    private val groupRemoved = mutableListOf<Long>()     // 编辑时移除的成员 id（保存时解除 groupTag）
+    // v1.3.14 打卡组子项：仅支持新增（id 非空=已入库子项，编辑时更新而非新建）
+    private data class GroupSub(var id: Long?, var name: String, val methods: MutableSet<String>)
+    private val groupSubs = mutableListOf<GroupSub>()
+    // v1.3.14 N天打卡：新建时可选打卡方式（多选组合）
+    private val ndaysMethods = linkedSetOf(Method.NORMAL.key)
     private var modeHint: TextView? = null
     private var comboNRow: LinearLayout? = null
     private var comboNLabel: TextView? = null
@@ -206,6 +209,8 @@ class CreateItemActivity : AppCompatActivity() {
         }
         bindSpecialModeControls()
         findViewById<Button>(R.id.btn_save).setOnClickListener { save() }
+        // v1.3.14：全局主题换肤（根背景 / 保存按钮）
+        ThemeUi.apply(this, findViewById(R.id.create_root), listOf(R.id.btn_save))
     }
 
     // ---------- v1.3.13 打卡组 / N天打卡 ----------
@@ -232,81 +237,82 @@ class CreateItemActivity : AppCompatActivity() {
             ndaysTarget = (ndaysTarget + 1).coerceAtMost(999)
             findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
         }
-        findViewById<Button>(R.id.btn_group_add_ref).setOnClickListener { pickGroupRef() }
-        findViewById<Button>(R.id.btn_group_add_new).setOnClickListener { addGroupNew() }
+        findViewById<View>(R.id.btn_group_add_new).setOnClickListener { showGroupSubSheet(null) }
+        buildNdaysMethods()
     }
 
     private fun renderGroupMembers() {
         val list = findViewById<LinearLayout>(R.id.group_member_list)
         list.removeAllViews()
-        val removed = groupRemoved.toSet()
-        groupRefIds.forEach { id ->
-            val m = repo.getItem(id) ?: return@forEach
-            if (id in removed) return@forEach
-            list.addView(groupMemberRow(m.name, "引用", id, null))
-        }
-        groupNewNames.forEachIndexed { i, nm -> list.addView(groupMemberRow(nm, "新建", null, i)) }
+        groupSubs.forEachIndexed { i, s -> list.addView(groupMemberRow(s, i)) }
     }
 
-    private fun groupMemberRow(name: String, tag: String, refId: Long?, newIdx: Int?): View {
+    /** v1.3.14 子项卡片行：主题色图标底 + 名称 + 方式标签 + 删除 */
+    private fun groupMemberRow(s: GroupSub, idx: Int): View {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        val theme = ThemeManager.of(selectedTheme)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             background = getDrawable(R.drawable.bg_input)
-            setPadding(14, 10, 10, 10)
+            setPadding(10, 10, 8, 10)
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.topMargin = 6
             layoutParams = lp
         }
-        row.addView(TextView(this).apply {
-            text = "· $name"
-            textSize = 14f
-            setTextColor(0xFF1F2430.toInt())
+        val iconWrap = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(theme.soft) }
+            layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
+        }
+        iconWrap.addView(TextView(this).apply { text = theme.emoji; textSize = 17f })
+        row.addView(iconWrap)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            lp.marginStart = dp(10)
             layoutParams = lp
+        }
+        col.addView(TextView(this).apply {
+            text = s.name
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF1F2430.toInt())
         })
-        row.addView(TextView(this).apply {
-            text = tag
+        col.addView(TextView(this).apply {
+            text = methodLabel(s.methods)
             textSize = 11f
             setTextColor(0xFF6E7F78.toInt())
+            setPadding(0, dp(2), 0, 0)
         })
+        row.addView(col)
         row.addView(TextView(this).apply {
             text = " ✕"
             textSize = 14f
             setTextColor(0xFFB0534C.toInt())
             setPadding(16, 0, 6, 0)
-            setOnClickListener {
-                if (refId != null) { groupRemoved.add(refId); groupRefIds.remove(refId) }
-                if (newIdx != null) {
-                    groupNewNames.removeAt(newIdx.coerceAtMost(groupNewNames.size - 1))
-                }
-                renderGroupMembers()
-            }
+            setOnClickListener { groupSubs.removeAt(idx); renderGroupMembers() }
         })
         return row
     }
 
-    private fun pickGroupRef() {
-        val exclude = (editing?.id ?: -1L)
-        val candidates = repo.getItems().filter { it.groupTag == null && it.id != exclude }
-        if (candidates.isEmpty()) {
-            toast("暂无可引用的打卡项（已在组中的项不会重复列出）")
-            return
-        }
-        val names = candidates.map { it.name }.toTypedArray()
-        val checked = BooleanArray(names.size)
-        android.app.AlertDialog.Builder(this)
-            .setTitle("选择要加入组的打卡项")
-            .setMultiChoiceItems(names, checked) { _, i, on -> checked[i] = on }
-            .setPositiveButton("添加") { _, _ ->
-                candidates.forEachIndexed { i, it -> if (checked[i] && it.id !in groupRefIds) groupRefIds.add(it.id) }
-                renderGroupMembers()
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
+    private fun methodLabel(methods: Set<String>): String =
+        methods.mapNotNull { Method.of(it) }.joinToString("  ") { "${it.emoji} ${it.label}" }
 
-    private fun addGroupNew() {
+    /** v1.3.14 新增/编辑子项底部弹层：名称 + 打卡方式多选（互斥置灰） */
+    private fun showGroupSubSheet(s: GroupSub?) {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(24))
+        }
+        wrap.addView(TextView(this).apply {
+            text = if (s == null) "新增打卡项" else "编辑打卡项"
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF1F2430.toInt())
+        })
         val et = EditText(this).apply {
             hint = "子项名称，如：喝水"
             textSize = 14f
@@ -314,27 +320,159 @@ class CreateItemActivity : AppCompatActivity() {
             background = getDrawable(R.drawable.bg_input)
             setTextColor(0xFF1F2430.toInt())
             filters = arrayOf(android.text.InputFilter.LengthFilter(12))
+            if (s != null) setText(s.name)
         }
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(52, 4, 52, 0) }
-        box.addView(et)
-        android.app.AlertDialog.Builder(this)
-            .setTitle("新建子项（普通打卡）")
-            .setView(box)
-            .setPositiveButton("添加") { _, _ ->
-                val nm = et.text.toString().trim()
-                if (nm.isBlank()) { toast("子项名称不能为空"); return@setPositiveButton }
-                if (nm in groupNewNames) { toast("组内已有同名子项"); return@setPositiveButton }
-                groupNewNames.add(nm)
-                renderGroupMembers()
+        et.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        (et.layoutParams as LinearLayout.LayoutParams).topMargin = dp(12)
+        wrap.addView(et)
+        wrap.addView(TextView(this).apply {
+            text = "打卡方式（可多选组合）"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF6E7F78.toInt())
+            setPadding(0, dp(14), 0, dp(8))
+        })
+        val methodBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        val cur = (s?.methods ?: mutableSetOf(Method.NORMAL.key)).toMutableSet()
+        if (cur.isEmpty()) cur.add(Method.NORMAL.key)
+        val candidates = listOf(Method.NORMAL, Method.PHOTO, Method.TEXT, Method.VOICE, Method.LOCATION, Method.STEPS, Method.TIMER, Method.QRCODE, Method.NFC)
+        val chips = candidates.map { m ->
+            TextView(this).apply {
+                text = " ${m.emoji} ${m.label} "
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(0, dp(12), 0, dp(12))
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }
+        chips.forEachIndexed { i, _ ->
+            chips[i].setOnClickListener {
+                val mk = candidates[i].key
+                if (mk == Method.NORMAL.key) { cur.clear(); cur.add(Method.NORMAL.key) }
+                else {
+                    if (Method.NORMAL.key in cur) cur.clear()
+                    if (mk in cur) cur.remove(mk) else cur.add(mk)
+                    if (cur.isEmpty()) cur.add(Method.NORMAL.key)
+                }
+                renderChips(candidates, cur, chips)
+            }
+        }
+        addChipsToGrid(methodBox, chips)
+        renderChips(candidates, cur, chips)
+        wrap.addView(methodBox)
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) }
+        }
+        btnRow.addView(TextView(this).apply {
+            text = "取消"
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { sheet.dismiss() }
+        })
+        btnRow.addView(TextView(this).apply {
+            text = "确定"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                val nm = et.text.toString().trim()
+                if (nm.isBlank()) { toast("子项名称不能为空"); return@setOnClickListener }
+                if (groupSubs.any { it !== s && it.name == nm }) { toast("组内已有同名子项"); return@setOnClickListener }
+                if (s == null) groupSubs.add(GroupSub(null, nm, cur)) else { s.name = nm; s.methods.clear(); s.methods.addAll(cur) }
+                renderGroupMembers()
+                sheet.dismiss()
+            }
+        })
+        wrap.addView(btnRow)
+        sheet.setContentView(wrap)
+        sheet.show()
+    }
+
+    private fun renderChips(candidates: List<Method>, sel: Set<String>, chips: List<TextView>) {
+        candidates.forEachIndexed { i, m ->
+            val selected = m.key in sel
+            val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in sel
+            val bg = GradientDrawable()
+            bg.cornerRadius = 22f
+            bg.setColor(if (selected) 0xFF3A4152.toInt() else if (blocked) 0xFFF1F1F3.toInt() else 0xFFEEF1F6.toInt())
+            bg.setStroke(if (selected) 0 else 2, 0xFFD6DBE6.toInt())
+            chips[i].background = bg
+            chips[i].setTextColor(if (selected) 0xFFFFFFFF.toInt() else if (blocked) 0xFFB9BEC9.toInt() else 0xFF4A5160.toInt())
+            chips[i].typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        }
+    }
+
+    /** 将 chips 按每行 3 个放入网格容器 */
+    private fun addChipsToGrid(container: LinearLayout, chips: List<TextView>) {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        var row: LinearLayout? = null
+        chips.forEachIndexed { i, c ->
+            if (i % 3 == 0) {
+                row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                }
+                container.addView(row)
+            }
+            row!!.addView(c, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6); bottomMargin = dp(6) })
+        }
+    }
+
+    /** v1.3.14 N天打卡方式 chips（排除 MOOD/AUTO） */
+    private fun buildNdaysMethods() {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        val container = findViewById<LinearLayout>(R.id.ndays_method_container)
+        container.removeAllViews()
+        val candidates = listOf(Method.NORMAL, Method.PHOTO, Method.TEXT, Method.VOICE, Method.LOCATION, Method.STEPS, Method.TIMER, Method.QRCODE, Method.NFC)
+        val chips = candidates.map { m ->
+            TextView(this).apply {
+                text = " ${m.emoji} ${m.label} "
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(0, dp(12), 0, dp(12))
+            }
+        }
+        chips.forEachIndexed { i, _ ->
+            chips[i].setOnClickListener {
+                val mk = candidates[i].key
+                if (mk == Method.NORMAL.key) { ndaysMethods.clear(); ndaysMethods.add(Method.NORMAL.key) }
+                else {
+                    if (Method.NORMAL.key in ndaysMethods) ndaysMethods.clear()
+                    if (mk in ndaysMethods) ndaysMethods.remove(mk) else ndaysMethods.add(mk)
+                    if (ndaysMethods.isEmpty()) ndaysMethods.add(Method.NORMAL.key)
+                }
+                renderNdaysChips(candidates, chips)
+            }
+        }
+        addChipsToGrid(container, chips)
+        renderNdaysChips(candidates, chips)
+    }
+
+    private fun renderNdaysChips(candidates: List<Method>, chips: List<TextView>) {
+        candidates.forEachIndexed { i, m ->
+            val selected = m.key in ndaysMethods
+            val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in ndaysMethods
+            val bg = GradientDrawable()
+            bg.cornerRadius = 22f
+            bg.setColor(if (selected) 0xFF3A4152.toInt() else if (blocked) 0xFFF1F1F3.toInt() else 0xFFEEF1F6.toInt())
+            bg.setStroke(if (selected) 0 else 2, 0xFFD6DBE6.toInt())
+            chips[i].background = bg
+            chips[i].setTextColor(if (selected) 0xFFFFFFFF.toInt() else if (blocked) 0xFFB9BEC9.toInt() else 0xFF4A5160.toInt())
+            chips[i].typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        }
     }
 
     private fun saveGroup() {
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
         if (name.isBlank()) { toast("请填写打卡组名称"); return }
-        if (groupRefIds.isEmpty() && groupNewNames.isEmpty()) { toast("请至少添加一个子项"); return }
+        if (groupSubs.isEmpty()) { toast("请至少添加一个子项"); return }
         val now = System.currentTimeMillis()
         cfg.groupMode = true
         cfg.methods.clear(); cfg.methods.add(Method.NORMAL.key)
@@ -345,8 +483,11 @@ class CreateItemActivity : AppCompatActivity() {
             val gid: Long
             if (editing != null) {
                 gid = editing!!.id
-                groupRefIds.forEach { id -> repo.getItem(id)?.let { repo.updateItem(it.copy(groupTag = gid.toString())) } }
-                groupRemoved.forEach { id -> repo.getItem(id)?.let { repo.updateItem(it.copy(groupTag = null)) } }
+                // v1.3.14：编辑时不再保留的旧成员解除 groupTag，恢复为独立普通打卡项
+                val keepIds = groupSubs.mapNotNull { it.id }.toSet()
+                cfg.groupMembers.filter { it !in keepIds }.forEach { mid ->
+                    repo.getItem(mid)?.let { repo.updateItem(it.copy(groupTag = null, updatedAt = now)) }
+                }
             } else {
                 val group = CheckinItem(
                     name = name, type = "GROUP", configJson = cfg.toJson(),
@@ -355,22 +496,35 @@ class CreateItemActivity : AppCompatActivity() {
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                 )
                 gid = repo.insertItem(group)
-                groupRefIds.forEach { id -> repo.getItem(id)?.let { repo.updateItem(it.copy(groupTag = gid.toString())) } }
             }
             val memberIds = mutableListOf<Long>()
-            groupRefIds.filter { it !in groupRemoved }.forEach { memberIds.add(it) }
-            groupNewNames.forEach { nm ->
-                val subCfg = ItemConfig().apply { methods.add(Method.NORMAL.key); dailyLimit = 1 }
-                val sub = CheckinItem(
-                    name = nm, type = "NORMAL", configJson = subCfg.toJson(),
-                    icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
-                    groupTag = gid.toString(), editPolicy = "LOCKED",
-                    lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
-                )
-                memberIds.add(repo.insertItem(sub))
+            groupSubs.forEach { s ->
+                if (s.id != null && repo.getItem(s.id!!) != null) {
+                    // 编辑已有子项：更新名称与打卡方式
+                    val sub = repo.getItem(s.id!!)!!
+                    val subCfg = ItemConfig.parse(sub.configJson)
+                    subCfg.methods.clear(); subCfg.methods.addAll(s.methods)
+                    if (subCfg.methods.isEmpty()) subCfg.methods.add(Method.NORMAL.key)
+                    repo.updateItem(sub.copy(name = s.name, configJson = subCfg.toJson(), groupTag = gid.toString(), updatedAt = now))
+                    memberIds.add(s.id!!)
+                } else {
+                    val subCfg = ItemConfig().apply {
+                        methods.clear()  // v1.3.14 修复：ItemConfig 默认含 NORMAL，先清再写入所选方式
+                        methods.addAll(s.methods)
+                        if (methods.isEmpty()) methods.add(Method.NORMAL.key)
+                        dailyLimit = 1
+                    }
+                    val sub = CheckinItem(
+                        name = s.name, type = "NORMAL", configJson = subCfg.toJson(),
+                        icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
+                        groupTag = gid.toString(), editPolicy = "LOCKED",
+                        lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
+                    )
+                    memberIds.add(repo.insertItem(sub))
+                }
             }
             cfg.groupMembers.clear(); cfg.groupMembers.addAll(memberIds)
-            cfg.groupMemberNames.clear(); cfg.groupMemberNames.addAll(groupNewNames)
+            cfg.groupMemberNames.clear(); cfg.groupMemberNames.addAll(groupSubs.map { it.name })
             if (editing != null) {
                 repo.updateItem(editing!!.copy(name = name, theme = selectedTheme, configJson = cfg.toJson(), updatedAt = now))
             } else {
@@ -1366,8 +1520,14 @@ class CreateItemActivity : AppCompatActivity() {
         if (loaded.groupMode) {
             groupMode = true
             applySpecialModeVisibility()
-            groupRefIds.clear(); groupRefIds.addAll(loaded.groupMembers)
-            groupNewNames.clear(); groupRemoved.clear()
+            groupSubs.clear()
+            loaded.groupMembers.forEachIndexed { i, mid ->
+                val m = repo.getItem(mid)
+                val nm = m?.name ?: loaded.groupMemberNames.getOrNull(i) ?: "子项"
+                val ms = m?.let { ItemConfig.parse(it.configJson).methods.toMutableSet() } ?: mutableSetOf(Method.NORMAL.key)
+                if (ms.isEmpty()) ms.add(Method.NORMAL.key)
+                groupSubs.add(GroupSub(mid, nm, ms))
+            }
             renderGroupMembers()
         }
         if (loaded.ndaysMode) {
@@ -1375,6 +1535,11 @@ class CreateItemActivity : AppCompatActivity() {
             applySpecialModeVisibility()
             ndaysTarget = loaded.ndaysTarget.coerceAtLeast(1)
             findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
+            ndaysMethods.clear()
+            val nms = loaded.methods.filter { it != Method.MOOD.key && it != Method.AUTO.key }.toMutableList()
+            if (nms.isEmpty()) nms.add(Method.NORMAL.key)
+            ndaysMethods.addAll(nms)
+            buildNdaysMethods()
         }
         dailyLimit = cfg.dailyLimit
         findViewById<TextView>(R.id.tv_limit).text = if (dailyLimit < 0) "不限" else dailyLimit.toString()
@@ -1592,11 +1757,10 @@ class CreateItemActivity : AppCompatActivity() {
         if (groupMode) { saveGroup(); return }
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
         if (name.isBlank()) { toast("请填写打卡名称"); return }
-        // v1.3.13 N天打卡强制规则：普通打卡、每日 1 次、每天排期，不参与负打卡/时间段/时间分割/抵消
+        // v1.3.14 N天打卡强制规则：每日 1 次、每天排期，不参与负打卡/时间段/时间分割/抵消；打卡方式由 ndays 区选择
         if (ndaysMode) {
             cfg.ndaysMode = true
             cfg.ndaysTarget = ndaysTarget
-            cfg.methods.clear(); cfg.methods.add(Method.NORMAL.key)
             cfg.dailyLimit = 1
             cfg.scheduleMode = "DAILY"
             cfg.negative = false
@@ -1607,6 +1771,11 @@ class CreateItemActivity : AppCompatActivity() {
         if (!journalMode && scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
         // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）
         collectConfigFromUi()
+        // v1.3.14：N天打卡方式以 ndays 区选择为准（collectConfigFromUi 读的是普通方式行，此处覆盖）
+        if (ndaysMode) {
+            if (ndaysMethods.isEmpty()) ndaysMethods.add(Method.NORMAL.key)
+            cfg.methods.clear(); cfg.methods.addAll(ndaysMethods)
+        }
         // v1.3.0：心情日记强制规则（只保留 MOOD，隐含日记语义）
         if (cfg.moodMode) {
             cfg.methods.clear(); cfg.methods.add(Method.MOOD.key)

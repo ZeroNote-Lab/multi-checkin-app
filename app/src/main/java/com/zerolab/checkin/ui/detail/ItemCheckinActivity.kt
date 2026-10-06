@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.theme.ThemeManager
 import com.zerolab.checkin.ui.quick.NfcHub
 import com.zerolab.checkin.ui.quick.QuickCheckinFragment
@@ -27,6 +28,8 @@ class ItemCheckinActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_item_checkin)
+        // v1.3.14：全局主题换肤（根背景）
+        ThemeUi.apply(this, findViewById(android.R.id.content))
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         val repo = (application as CheckinApp).repository
         val item = repo.getItem(id)

@@ -8,6 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.util.JsonExporter
 import com.zerolab.checkin.util.ZipExporter
@@ -23,6 +24,8 @@ class ExportActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_export)
+        // v1.3.14：全局主题换肤（根背景 / 导出按钮）
+        ThemeUi.apply(this, findViewById(android.R.id.content), listOf(R.id.btn_export))
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
         findViewById<TextView>(R.id.tv_title).text = "数据导出"
 
