@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,7 +59,7 @@ class CreateItemActivity : AppCompatActivity() {
     private val cfg = ItemConfig()
     private var selectedTheme = "sakura"
 
-    private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout)
+    private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout, var built: Boolean = false)
     private val rows = LinkedHashMap<String, MethodRow>()
     // v1.3.3：日记 tab 把 PHOTO/TEXT/VOICE 的 card 动态移到记录类型之间，记录它们在普通 method_container 里的原 index
     private val journalMethodOrigIndex = HashMap<String, Int>()
@@ -150,7 +151,15 @@ class CreateItemActivity : AppCompatActivity() {
         // 类型已在选择页（或编辑项配置）确定：隐藏打卡类型双 tab
         findViewById<View>(R.id.mode_container).visibility = View.GONE
 
+        // 记录类型单选：普通新建隐藏；日记新建 / 编辑日记项显示（编辑时锁定，见 loadEditing）
+        val showRecordType = editing != null && ItemConfig.parse(editing!!.configJson).journalMode ||
+            (editing == null && (createMode == MODE_JOURNAL || createMode == MODE_JOURNAL_FREE || createMode == MODE_JOURNAL_MOOD))
+        findViewById<View>(R.id.rb_journal_suixinsui).visibility = if (showRecordType) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.rb_journal_mood).visibility = if (showRecordType) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.tv_journal_type_label).visibility = if (showRecordType) View.VISIBLE else View.GONE
+
         buildThemeChips()
+        // v1.3.11：同步构建；方式行外壳轻量构建 + 参数面板懒加载，保证页面快速且一次性完整出现
         buildModeSection()   // v1.3.0 打卡类型双 tab（普通打卡 / 日记打卡），在方式开关之前构建
         buildMethodRows()
         // v1.3.3：记录日记方式在普通列表里的原 index
@@ -176,13 +185,6 @@ class CreateItemActivity : AppCompatActivity() {
                 }
             }
         }
-        // 记录类型单选：普通新建隐藏；日记新建 / 编辑日记项显示（编辑时锁定，见 loadEditing）
-        val showRecordType = editing != null && ItemConfig.parse(editing!!.configJson).journalMode ||
-            (editing == null && (createMode == MODE_JOURNAL || createMode == MODE_JOURNAL_FREE || createMode == MODE_JOURNAL_MOOD))
-        findViewById<View>(R.id.rb_journal_suixinsui).visibility = if (showRecordType) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.rb_journal_mood).visibility = if (showRecordType) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.tv_journal_type_label).visibility = if (showRecordType) View.VISIBLE else View.GONE
-
         findViewById<Button>(R.id.btn_save).setOnClickListener { save() }
     }
 
@@ -456,6 +458,7 @@ class CreateItemActivity : AppCompatActivity() {
         val container = findViewById<LinearLayout>(R.id.method_container)
         buildComboNRow()   // v1.2.0 组合完成数选择行（多选时显示）
         Method.values().forEach { m ->
+            // v1.3.11：外壳代码构建（轻量）；二级参数面板懒加载（首次开启该方式时构建，见 ensurePanel）
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 background = getDrawable(R.drawable.bg_card)
@@ -469,7 +472,6 @@ class CreateItemActivity : AppCompatActivity() {
             val sw = SwitchCompat(this)
             head.addView(label); head.addView(sw)
             val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
-            buildMethodParam(m, panel)
             card.addView(head); card.addView(panel)
             sw.setOnCheckedChangeListener { _, on ->
                 // v1.2.1：随心记禁用 NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE，其余方式可正常开启
@@ -519,13 +521,22 @@ class CreateItemActivity : AppCompatActivity() {
                     return@setOnCheckedChangeListener
                 }
                 // v1.3.4：随心记模式下只显示一级开关，二级 panel 全部隐藏
-                panel.visibility = if (on && !journalMode) View.VISIBLE else View.GONE
+                // v1.3.11：首次开启时懒加载构建参数面板
+                if (on && !journalMode) { ensurePanel(m); panel.visibility = View.VISIBLE } else panel.visibility = View.GONE
                 if (on) cfg.methods.add(m.key) else cfg.methods.remove(m.key)
                 refreshConflicts()
             }
             container.addView(card)
             rows[m.key] = MethodRow(sw, panel, card)
         }
+    }
+
+    /** v1.3.11：懒加载构建某方式的二级参数面板（switch 首次开启 / 编辑回显时调用） */
+    private fun ensurePanel(m: Method) {
+        val row = rows[m.key] ?: return
+        if (row.built) return
+        buildMethodParam(m, row.panel)
+        row.built = true
     }
 
     private fun sectionLabel(text: String): TextView = TextView(this).apply {
@@ -1154,6 +1165,8 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<RadioButton>(R.id.rb_interval).isEnabled = false
         findViewById<EditText>(R.id.et_interval).setText((it.editInterval ?: 7).toString())
 
+        // v1.3.11：编辑回显前先懒加载构建所有已开启方式的参数面板
+        cfg.methods.forEach { k -> Method.of(k)?.let { ensurePanel(it) } }
         // 方式开关回显
         rows.forEach { (key, row) ->
             val on = key in cfg.methods

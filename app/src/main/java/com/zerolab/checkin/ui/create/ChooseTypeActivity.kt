@@ -26,9 +26,9 @@ class ChooseTypeActivity : AppCompatActivity() {
     )
 
     private val typeEntries = listOf(
-        TypeEntry(R.drawable.ic_type_check, 0xFFFFE9F2.toInt(), "普通打卡",
+        TypeEntry(R.drawable.ic_type_check, 0xFFD5F2EE.toInt(), "普通打卡",
             "按规则打卡，有缺卡与连续天数", CreateItemActivity.MODE_NORMAL),
-        TypeEntry(R.drawable.ic_type_note, 0xFFEDE5FF.toInt(), "日记打卡",
+        TypeEntry(R.drawable.ic_type_note, 0xFFD5F2EE.toInt(), "日记打卡",
             "日记式记录，页内选随心记 / 心情日记", CreateItemActivity.MODE_JOURNAL)
     )
 
@@ -48,8 +48,8 @@ class ChooseTypeActivity : AppCompatActivity() {
 
     /** 两个角落的柔光大光斑（径向渐变，代码创建避免资源渲染差异） */
     private fun setupBlobs() {
-        findViewById<android.view.View>(R.id.blob_pink).background = radialBlob(0xFFFFD9E9.toInt(), 0x00FFD9E9.toInt())
-        findViewById<android.view.View>(R.id.blob_purple).background = radialBlob(0xFFE6DCFF.toInt(), 0x00E6DCFF.toInt())
+        findViewById<android.view.View>(R.id.blob_pink).background = radialBlob(0xFFC2EDE7.toInt(), 0x00C2EDE7.toInt())
+        findViewById<android.view.View>(R.id.blob_purple).background = radialBlob(0xFFDCEAFB.toInt(), 0x00DCEAFB.toInt())
     }
 
     private fun radialBlob(center: Int, edge: Int): GradientDrawable {
@@ -68,7 +68,6 @@ class ChooseTypeActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = getDrawable(R.drawable.bg_type_card)
-            elevation = 14.dp().toFloat()
             setPadding(18.dp(), 16.dp(), 18.dp(), 16.dp())
             isClickable = true
             isFocusable = true
@@ -107,12 +106,12 @@ class ChooseTypeActivity : AppCompatActivity() {
                 text = e.name
                 textSize = 15.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(0xFF2A2430.toInt())
+                setTextColor(0xFF2A4C49.toInt())
             })
             textCol.addView(TextView(ctx).apply {
                 text = e.desc
                 textSize = 11.5f
-                setTextColor(0xFF6E6878.toInt())
+                setTextColor(0xFF6E7F78.toInt())
                 setPadding(0, 3.dp(), 0, 0)
             })
             addView(textCol)
