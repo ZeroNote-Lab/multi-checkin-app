@@ -305,13 +305,35 @@
 
                 <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginVertical="6dp" android:background="@color/divider" />
 
+                <!-- v1.3.12b：负打卡独立分区（与时间类规则不再互斥） -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="负打卡"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
                 <RadioButton
                     android:id="@+id/cb_negative"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="负打卡（状态反转：无操作=成功，主动记录=破戒失败）"
+                    android:text="状态反转：无操作=成功，主动记录=破戒失败"
                     android:textColor="@color/text_primary"
                     android:textSize="13sp" />
+
+                <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginVertical="6dp" android:background="@color/divider" />
+
+                <!-- v1.3.12b：时间类规则二选一（固定时间段 / 时间分割互斥单选） -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="时间规则（二选一）"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
 
                 <RadioButton
                     android:id="@+id/cb_time_window"
@@ -348,6 +370,30 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp"
                         android:text="仅在所选时间段内可打卡成功；不支持跨天（如 23:00–01:00）；开启后将无法选择自动打卡。" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginVertical="6dp" android:background="@color/divider" />
+
+                <!-- v1.3.12 时间分割：凌晨该时间前打卡归属前一天 -->
+                <RadioButton
+                    android:id="@+id/cb_day_cutoff"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="时间分割：凌晨该时间之前打卡算前一天的记录（熬夜党友好）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:id="@+id/cutoff_panel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp"
+                    android:visibility="gone">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="分割时间  00:00 – " android:textColor="@color/text_secondary"/>
+                    <Button android:id="@+id/btn_day_cutoff" android:layout_width="wrap_content" android:layout_height="wrap_content" android:insetTop="0dp" android:insetBottom="0dp" android:text="03:00" android:textColor="@color/brand_dark"/>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="  打卡算前一天的记录" android:textColor="@color/text_secondary"/>
                 </LinearLayout>
 
             </LinearLayout>

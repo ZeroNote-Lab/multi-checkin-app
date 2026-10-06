@@ -196,8 +196,8 @@ object CheckinEngine {
             return CheckinResult.Blocked(reason)
         }
 
-        // 归属日期与状态（v1.1.8：移除双时间自定义负打卡，统一按自然日归属）
-        val date = DateUtils.dateOf(now)
+        // 归属日期与状态（v1.3.12：时间分割——凌晨分割点之前打卡归属前一天）
+        val date = DateUtils.belongDate(now, c.dayCutoff)
         // v1.3.8：负打卡破戒豁免——点击记录时若有可用盾牌，先消耗 1 次盾牌把本次破戒抵消为补卡（蓝色、不算破戒次数）；
         // 盾牌用完后再点，才真正记为破戒（FAIL）。
         var status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"

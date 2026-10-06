@@ -943,7 +943,6 @@ class CreateItemActivity : AppCompatActivity() {
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
-                cbTw.isChecked = false
                 hideTimerAdvancedOptions()   // v1.2.0：负打卡开启时隐藏正计时/暂停选项（保持原倒计时）
             } else {
                 showTimerAdvancedOptions()   // v1.2.1：取消负打卡后恢复正计时/暂停选项
@@ -970,7 +969,7 @@ class CreateItemActivity : AppCompatActivity() {
                 refreshConflicts()
                 return@setOnCheckedChangeListener
             }
-            if (on) { cbNeg.isChecked = false }
+            if (on) { findViewById<CompoundButton>(R.id.cb_day_cutoff).isChecked = false }  // v1.3.12b：与时间分割互斥单选
             findViewById<View>(R.id.tw_panel).visibility = if (on) View.VISIBLE else View.GONE
             refreshConflicts()
         }
@@ -987,6 +986,20 @@ class CreateItemActivity : AppCompatActivity() {
                 toast("温馨提示：随心记暂不支持抵消机制哦 (｡•́︿•̀｡)")
             }
         }
+        // v1.3.12 时间分割：凌晨该时间前打卡归属前一天
+        val cbCutoff = findViewById<CompoundButton>(R.id.cb_day_cutoff)
+        val btnCutoff = findViewById<Button>(R.id.btn_day_cutoff)
+        var cutoffJustToggled = false
+        cbCutoff.setOnCheckedChangeListener { _, on ->
+            cutoffJustToggled = true
+            findViewById<View>(R.id.cutoff_panel).visibility = if (on) View.VISIBLE else View.GONE
+            if (on) { findViewById<CompoundButton>(R.id.cb_time_window).isChecked = false }  // v1.3.12b：与固定时间段互斥单选
+        }
+        cbCutoff.setOnClickListener {
+            if (cbCutoff.isChecked && !cutoffJustToggled) cbCutoff.isChecked = false
+            cutoffJustToggled = false
+        }
+        btnCutoff.setOnClickListener { pickCutoffTime() }
     }
 
     /** v1.2.0：负打卡开启时，时间打卡只保留倒计时（隐藏正计时/暂停选项） */
@@ -1012,6 +1025,16 @@ class CreateItemActivity : AppCompatActivity() {
             btn.text = "%02d:%02d".format(hour, minute)
         }, h, mi, true).show()
     }
+    /** v1.3.12 时间分割时间选择（凌晨分割点） */
+    private fun pickCutoffTime() {
+        val cur = findViewById<Button>(R.id.btn_day_cutoff).text.toString().split(":")
+        val h = cur[0].toIntOrNull() ?: 3
+        val mi = cur[1].toIntOrNull() ?: 0
+        TimePickerDialog(this, { _, hh, mm ->
+            findViewById<Button>(R.id.btn_day_cutoff).text = "%02d:%02d".format(hh, mm)
+        }, h, mi, true).show()
+    }
+
     // ---------- 抵消 ----------
     private fun bindOffset() {
         val cb = findViewById<CheckBox>(R.id.cb_offset)
@@ -1137,6 +1160,12 @@ class CreateItemActivity : AppCompatActivity() {
         // 负打卡开启时隐藏正计时/暂停选项（保持原倒计时）
         if (loaded.negative) hideTimerAdvancedOptions()
 
+        // v1.3.12 时间分割回显
+        findViewById<CompoundButton>(R.id.cb_day_cutoff).isChecked = loaded.dayCutoff > 0
+        findViewById<View>(R.id.cutoff_panel).visibility = if (loaded.dayCutoff > 0) View.VISIBLE else View.GONE
+        if (loaded.dayCutoff > 0) {
+            findViewById<Button>(R.id.btn_day_cutoff).text = "%02d:%02d".format(loaded.dayCutoff / 60, loaded.dayCutoff % 60)
+        }
         findViewById<EditText>(R.id.et_name).setText(it.name)
         selectedTheme = it.theme
         dailyLimit = cfg.dailyLimit
@@ -1221,6 +1250,8 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_tw_start).isEnabled = false
         findViewById<Button>(R.id.btn_tw_end).isEnabled = false
         findViewById<CheckBox>(R.id.cb_offset).isEnabled = false
+        findViewById<CompoundButton>(R.id.cb_day_cutoff).isEnabled = false
+        findViewById<Button>(R.id.btn_day_cutoff).isEnabled = false
         findViewById<Button>(R.id.btn_limit_minus).isEnabled = false
         findViewById<Button>(R.id.btn_limit_plus).isEnabled = false
         findViewById<RadioButton>(R.id.rb_mode_a).isEnabled = false
@@ -1292,6 +1323,9 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.offset.nDays = findViewById<EditText>(R.id.et_offset_n).text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 3
         cfg.offset.k = findViewById<EditText>(R.id.et_offset_k).text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 1
         cfg.offset.autoConsume = findViewById<CheckBox>(R.id.cb_offset_auto).isChecked
+        // v1.3.12 时间分割收集
+        cfg.dayCutoff = if (findViewById<CompoundButton>(R.id.cb_day_cutoff).isChecked)
+            DateUtils.parseHHmm(findViewById<Button>(R.id.btn_day_cutoff).text.toString()).coerceAtLeast(1) else -1
         // v6.1.0 日期配置收集
         cfg.scheduleMode = scheduleMode
         cfg.weekDays.clear(); cfg.weekDays.addAll(weekDays)
