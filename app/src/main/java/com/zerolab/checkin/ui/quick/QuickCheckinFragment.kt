@@ -276,10 +276,9 @@ class QuickCheckinFragment : Fragment() {
                 val scheduled = CheckinEngine.isScheduledDay(it, today)
                 val doneSet = if (members.isEmpty() || !scheduled) emptySet()
                     else members.filter { mid ->
-                        // v1.3.15：以子项当日真实状态判定完成（组合需全部方式完成；不足=部分完成不算完成）
+                        // v1.3.16：统一 subDayDone——子项须当日全部完成（组合全部方式/单方式次数打满）才算完成
                         val m = repo.getItem(mid) ?: return@filter false
-                        val st = CheckinEngine.dayInfo(m, today, repo.recordsOfDay(mid, today)).state
-                        st == DayState.SUCCESS || st == DayState.OFFSET
+                        CheckinEngine.subDayDone(m, today, repo)
                     }.toSet()
                 when {
                     members.isEmpty() -> {
@@ -297,7 +296,7 @@ class QuickCheckinFragment : Fragment() {
                         btnCheckin.isEnabled = false; grayBtn()
                     }
                 }
-                groupTitle.text = "打卡组子项（点击进入打卡）"
+                groupTitle.text = "打卡组子项"
                 groupBox.removeAllViews()
                 members.forEachIndexed { idx, mid ->
                     val m = repo.getItem(mid) ?: return@forEachIndexed
@@ -309,7 +308,7 @@ class QuickCheckinFragment : Fragment() {
             cfg.ndaysMode -> {
                 val streak = CheckinEngine.streak(it, repo)
                 val target = cfg.ndaysTarget
-                streakView.text = "🎯 ${target} 天挑战 · 已连续 $streak 天（严格连续，中断清零）"
+                streakView.text = "🎯 ${target} 天挑战 · 已连续 $streak 天（中断清零）"
                 if (streak >= target) {
                     statusView.text = "状态：目标 $target 天已达成 ✓"
                     btnCheckin.text = if (cnt == 0) "超额打卡" else "今日已打卡 ✓"
@@ -344,7 +343,7 @@ class QuickCheckinFragment : Fragment() {
                 btnCheckin.text = if (passed) "已过打卡时间" else "未到打卡时间"
                 btnCheckin.isEnabled = false; grayBtn()
             }
-            isAuto -> { statusView.text = "状态：自动打卡（前台自动完成）"; btnCheckin.text = "⚡ 自动打卡，无需操作"; btnCheckin.isEnabled = false; grayBtn() }
+            isAuto -> { statusView.text = "状态：自动打卡"; btnCheckin.text = "⚡ 自动打卡，无需操作"; btnCheckin.isEnabled = false; grayBtn() }
             cfg.customNeg -> {
                 val hasFail = todayRecs.any { it.status == "FAIL" }
                 val hasSucc = todayRecs.any { it.status == "SUCCESS" }
@@ -421,6 +420,7 @@ class QuickCheckinFragment : Fragment() {
     /** 点击日期：备注栏显示次数/时间/文字/缩略图/语音（v1.1.6：媒体内联到对应记录行，不再统一堆底部） */
     /** v1.3.14 打卡组子项卡片：主题图标 + 名称 + 打卡方式 + 连续天数 + 状态徽章 */
     /** v1.3.15 去掉 box 背景框，排版参考打卡管理列表页（左右/上下间距） */
+    /** v1.3.16 分布对齐第0级卡片：48dp 圆形图标底 + 16sp 名称 + 灰底方式小标签 + 连续天数 + 右侧状态徽章 */
     private fun groupSubCard(m: CheckinItem, ok: Boolean, first: Boolean): View {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val subTheme = ThemeManager.of(m.theme)
@@ -429,25 +429,24 @@ class QuickCheckinFragment : Fragment() {
         val row = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, 0)
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            if (!first) lp.topMargin = dp(8)
+            if (!first) lp.topMargin = dp(10)
             layoutParams = lp
             setOnClickListener {
                 startActivity(Intent(requireContext(), ItemCheckinActivity::class.java)
                     .putExtra(ItemCheckinActivity.EXTRA_ID, m.id))
             }
         }
+        // 左侧：48dp 圆形图标底（主题软色，与第0级卡片同分布）
         val iconWrap = LinearLayout(requireContext()).apply {
             gravity = android.view.Gravity.CENTER
-            // v1.3.15：圆形图标底（与打卡管理列表页一致）
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
                 setColor(subTheme.soft)
             }
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
         }
-        iconWrap.addView(TextView(requireContext()).apply { text = subTheme.emoji; textSize = 18f })
+        iconWrap.addView(TextView(requireContext()).apply { text = subTheme.emoji; textSize = 22f })
         row.addView(iconWrap)
         val col = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
@@ -457,18 +456,37 @@ class QuickCheckinFragment : Fragment() {
         }
         col.addView(TextView(requireContext()).apply {
             text = m.name
-            textSize = 14.5f
+            textSize = 16f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(0xFF1F2430.toInt())
         })
-        col.addView(TextView(requireContext()).apply {
-            val labels = subCfg.methods.mapNotNull { Method.of(it) }.joinToString("  ") { "${it.emoji} ${it.label}" }
-            text = if (labels.isBlank()) "连续 $streak 天" else "$labels    · 连续 $streak 天"
-            textSize = 11.5f
+        // 第二行：灰底方式小标签 + 连续天数（同第0级卡片：bg_tag 小字标签 + 🔥 X 天）
+        val metaRow = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(5), 0, 0)
+        }
+        val typeTv = TextView(requireContext()).apply {
+            val labels = subCfg.methods.mapNotNull { Method.of(it)?.label?.removeSuffix("打卡") }
+            text = labels.joinToString("+").ifBlank { "普通" }
+            textSize = 11f
             setTextColor(0xFF6E7F78.toInt())
-            setPadding(0, dp(3), 0, 0)
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(0xFFF1F3F7.toInt())
+            }
+        }
+        metaRow.addView(typeTv)
+        metaRow.addView(TextView(requireContext()).apply {
+            text = "🔥 $streak 天"
+            textSize = 12f
+            setTextColor(0xFFEF5350.toInt())
+            setPadding(dp(8), 0, 0, 0)
         })
+        col.addView(metaRow)
         row.addView(col)
+        // 右侧：状态徽章（✓ 已打卡 绿 / ○ 未完成 橙）
         val badge = TextView(requireContext()).apply {
             text = if (ok) "✓ 已打卡" else "○ 未完成"
             textSize = 12f

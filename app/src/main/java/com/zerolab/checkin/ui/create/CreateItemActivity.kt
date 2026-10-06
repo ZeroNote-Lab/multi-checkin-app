@@ -241,12 +241,12 @@ class CreateItemActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
         }
         findViewById<View>(R.id.btn_group_add_new).setOnClickListener { showGroupSubSheet(null) }
-        // v1.3.15：打卡组「更多选项」→ 展开/收起打卡日期卡
+        // v1.3.16：更多选项（卡片外左下角链接）→ 展开/收起打卡日期卡
         findViewById<View>(R.id.btn_group_more).setOnClickListener {
             val card = findViewById<View>(R.id.schedule_card)
             val showing = card.visibility == View.VISIBLE
             card.visibility = if (showing) View.GONE else View.VISIBLE
-            findViewById<TextView>(R.id.btn_group_more).text = if (showing) "更多选项（打卡日期）" else "收起选项（打卡日期）"
+            findViewById<TextView>(R.id.btn_group_more).text = if (showing) "更多选项" else "收起选项"
         }
         buildNdaysMethods()
     }
@@ -327,6 +327,12 @@ class CreateItemActivity : AppCompatActivity() {
     private fun showGroupSubSheet(s: GroupSub?) {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        // v1.3.16：禁 BottomSheet 拖拽手势，滚动完全交给内部 ScrollView（修复拉到底再回拉顶部空白消失）
+        try {
+            sheet.behavior.isDraggable = false
+            sheet.behavior.skipCollapsed = true
+            sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        } catch (_: Exception) {}
         // v1.3.15：编辑已有子项直接操作 s.config；新建用局部 ItemConfig，确定时写入 groupSubs
         val cfgSub = s?.config ?: ItemConfig()
         val cur = cfgSub.methods
@@ -356,7 +362,7 @@ class CreateItemActivity : AppCompatActivity() {
         (et.layoutParams as LinearLayout.LayoutParams).topMargin = dp(12)
         wrap.addView(et)
         wrap.addView(TextView(this).apply {
-            text = "打卡方式（可多选组合）"
+            text = "打卡方式"
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(0xFF6E7F78.toInt())
@@ -379,7 +385,7 @@ class CreateItemActivity : AppCompatActivity() {
             chips[i].setOnClickListener {
                 val mk = candidates[i].key
                 // v1.3.15：步数功能开发中，子项/N天/普通统一禁用
-                if (mk == Method.STEPS.key) { toast("该功能还在开发 (ง •_•)ง"); renderChips(candidates, cur, chips); return@setOnClickListener }
+                if (mk == Method.STEPS.key) { toast("该功能开发中"); renderChips(candidates, cur, chips); return@setOnClickListener }
                 if (mk == Method.NORMAL.key) { cur.clear(); cur.add(Method.NORMAL.key) }
                 else {
                     if (Method.NORMAL.key in cur) cur.clear()
@@ -451,6 +457,8 @@ class CreateItemActivity : AppCompatActivity() {
     /** v1.3.15：子项弹层更多区——普通打卡除「日期选择」外的全部功能（每日次数/负打卡/时间规则/抵消/自动/方式参数） */
     private fun buildGroupMoreSection(box: LinearLayout, c: ItemConfig, cur: MutableSet<String>) {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        // v1.3.16：更多区可用性刷新（对齐普通打卡页：负打卡/自动打卡锁次数，次数<2 禁用全部完成）
+        var refreshMoreConflicts: () -> Unit = {}
         fun divider() { box.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) }
             background = getDrawable(R.color.divider)
@@ -483,17 +491,26 @@ class CreateItemActivity : AppCompatActivity() {
             setTextColor(0xFF1F2430.toInt())
             layoutParams = LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.WRAP_CONTENT)
         }
-        limitRow.addView(Button(this).apply {
+        val btnLimitMinus = Button(this).apply {
             text = "-"; textSize = 14f; setPadding(0, 0, 0, 0)
-            setOnClickListener { c.dailyLimit = (c.dailyLimit - 1).coerceAtLeast(1); tvLimit.text = "${c.dailyLimit}" }
-        })
+            setOnClickListener { c.dailyLimit = (c.dailyLimit - 1).coerceAtLeast(1); tvLimit.text = "${c.dailyLimit}"; refreshMoreConflicts() }
+        }
+        limitRow.addView(btnLimitMinus)
         limitRow.addView(tvLimit)
-        limitRow.addView(Button(this).apply {
+        val btnLimitPlus = Button(this).apply {
             text = "+"; textSize = 14f; setPadding(0, 0, 0, 0)
-            setOnClickListener { c.dailyLimit = (c.dailyLimit + 1).coerceAtMost(99); tvLimit.text = "${c.dailyLimit}" }
-        })
+            setOnClickListener { c.dailyLimit = (c.dailyLimit + 1).coerceAtMost(99); tvLimit.text = "${c.dailyLimit}"; refreshMoreConflicts() }
+        }
+        limitRow.addView(btnLimitPlus)
         box.addView(limitRow)
-        toggleRow("需完成全部次数才算打卡成功（不足显示部分完成）", c.dailyAllRequired) { on -> c.dailyAllRequired = on }
+        // v1.3.16：全部完成开关——对齐普通打卡页可用性（次数>=2 且 单方式 且 非负打卡 且 非自动打卡），否则整行置灰
+        val cbAll = CheckBox(this).apply {
+            text = "需完成全部次数才算打卡成功"
+            textSize = 13f; setTextColor(0xFF1F2430.toInt())
+            isChecked = c.dailyAllRequired
+            setOnCheckedChangeListener { _, on -> c.dailyAllRequired = on }
+        }
+        box.addView(cbAll)
         divider()
         // —— 负打卡 ——
         toggleRow("负打卡：无操作=成功，主动记录=破戒失败", c.negative) { on ->
@@ -502,6 +519,7 @@ class CreateItemActivity : AppCompatActivity() {
                 c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key)
                 toast("负打卡与自动打卡互斥，已关闭自动")
             }
+            refreshMoreConflicts()
         }
         divider()
         // —— 时间规则（先建两个面板与开关，再统一绑定互斥监听，避免前向引用） ——
@@ -552,11 +570,11 @@ class CreateItemActivity : AppCompatActivity() {
         cutoffPanel.addView(TextView(this).apply { text = " 打卡算前一天"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
         box.addView(cutoffPanel)
         val twCb = CheckBox(this).apply {
-            text = "固定时间段打卡（仅窗口内可成功）"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+            text = "固定时间段打卡"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
             isChecked = c.timeWindowEnabled
         }
         val cbCutoff = CheckBox(this).apply {
-            text = "时间分割：凌晨该时间前打卡算前一天记录"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
+            text = "时间分割：该时间前打卡算前一天"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
             isChecked = c.dayCutoff >= 0
         }
         box.addView(twCb); box.addView(cbCutoff)
@@ -614,6 +632,7 @@ class CreateItemActivity : AppCompatActivity() {
                 else if (c.timeWindowEnabled) { toast("固定时间段与自动打卡互斥，无法开启自动") }
                 else { c.methods.add(Method.AUTO.key); cur.add(Method.AUTO.key) }
             } else { c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key) }
+            refreshMoreConflicts()
         }
         divider()
         // —— 方式参数（选中方式时显示） ——
@@ -691,8 +710,22 @@ class CreateItemActivity : AppCompatActivity() {
             }
         }
         renderParams()
+        // v1.3.16：可用性刷新实现（负打卡/自动打卡 → 次数锁定；次数<2/多方式/负/自动 → 全部完成禁用）
+        refreshMoreConflicts = {
+            val negOn = c.negative
+            val autoOn = Method.AUTO.key in c.methods
+            val limitLocked = negOn || autoOn
+            btnLimitMinus.isEnabled = !limitLocked; btnLimitPlus.isEnabled = !limitLocked
+            btnLimitMinus.alpha = if (limitLocked) 0.4f else 1f; btnLimitPlus.alpha = if (limitLocked) 0.4f else 1f
+            val singleMethod = c.methods.count { it != Method.AUTO.key } <= 1
+            val canAllReq = !negOn && !autoOn && singleMethod && c.dailyLimit >= 2
+            cbAll.isEnabled = canAllReq
+            cbAll.alpha = if (canAllReq) 1f else 0.4f
+            if (!canAllReq) { cbAll.isChecked = false; c.dailyAllRequired = false }
+        }
+        refreshMoreConflicts()
         // 方式 chips 变化时刷新参数区
-        chipsClickListenerRefresh = { renderParams() }
+        chipsClickListenerRefresh = { renderParams(); refreshMoreConflicts() }
     }
 
     /** v1.3.15：子项弹层方式点击后刷新参数区（由 buildGroupMoreSection 注入） */
@@ -748,7 +781,7 @@ class CreateItemActivity : AppCompatActivity() {
             chips[i].setOnClickListener {
                 val mk = candidates[i].key
                 // v1.3.15：步数功能开发中，N天页同样禁用
-                if (mk == Method.STEPS.key) { toast("该功能还在开发 (ง •_•)ง"); renderNdaysChips(candidates, chips); return@setOnClickListener }
+                if (mk == Method.STEPS.key) { toast("该功能开发中"); renderNdaysChips(candidates, chips); return@setOnClickListener }
                 if (mk == Method.NORMAL.key) { ndaysMethods.clear(); ndaysMethods.add(Method.NORMAL.key) }
                 else {
                     if (Method.NORMAL.key in ndaysMethods) ndaysMethods.clear()
@@ -905,7 +938,7 @@ class CreateItemActivity : AppCompatActivity() {
         journalTv.typeface = if (journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 
         modeHint?.text = if (journalMode)
-            "📔 日记打卡：日记式记录，只记成功、可多次记录，不记缺卡、不设排期 ο(=•ω＜=)ρ⌒☆"
+            "📔 日记打卡：日记式记录，只记成功、可多次记录，不记缺卡、不设排期"
             else "✅ 普通打卡：按规则打卡，有缺卡与连续天数。"
     }
 
@@ -1136,7 +1169,7 @@ class CreateItemActivity : AppCompatActivity() {
                     sw.isChecked = false
                     panel.visibility = View.GONE
                     cfg.methods.remove(m.key)
-                    toast("温馨提示：随心记暂不支持「${m.label}」哦 (｡•́︿•̀｡)")
+                    toast("随心记暂不支持「${m.label}」")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
@@ -1145,7 +1178,7 @@ class CreateItemActivity : AppCompatActivity() {
                     sw.isChecked = false
                     panel.visibility = View.GONE
                     cfg.methods.remove(m.key)
-                    toast("温馨提示：负打卡与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                    toast("负打卡与自动打卡互斥，无法同时开启")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
@@ -1154,7 +1187,7 @@ class CreateItemActivity : AppCompatActivity() {
                     sw.isChecked = false
                     panel.visibility = View.GONE
                     cfg.methods.remove(m.key)
-                    toast("该功能还在开发 (ง •_•)ง")
+                    toast("该功能开发中")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
@@ -1163,7 +1196,7 @@ class CreateItemActivity : AppCompatActivity() {
                     sw.isChecked = false
                     panel.visibility = View.GONE
                     cfg.methods.remove(m.key)
-                    toast("温馨提示：固定时间段与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                    toast("固定时间段与自动打卡互斥，无法同时开启")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
@@ -1172,7 +1205,7 @@ class CreateItemActivity : AppCompatActivity() {
                     sw.isChecked = false
                     panel.visibility = View.GONE
                     cfg.methods.remove(m.key)
-                    toast("温馨提示：该方式与已选方式互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                    toast("该方式与已选方式互斥，无法同时开启")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
@@ -1215,7 +1248,7 @@ class CreateItemActivity : AppCompatActivity() {
             setOnClickListener {
                 // v1.2.0：随心记不设排期，点击弹提示
                 if (journalMode) {
-                    toast("温馨提示：随心记不设排期，暂不支持调整打卡日期哦 (｡•́︿•̀｡)")
+                    toast("随心记不设排期，暂不支持调整打卡日期")
                     return@setOnClickListener
                 }
                 onClick()
@@ -1274,7 +1307,7 @@ class CreateItemActivity : AppCompatActivity() {
                 setOnClickListener {
                     // v1.2.0：随心记不设排期
                     if (journalMode) {
-                        toast("温馨提示：随心记不设排期，暂不支持选择星期哦 (｡•́︿•̀｡)")
+                        toast("随心记不设排期，暂不支持选择星期")
                         return@setOnClickListener
                     }
                     if (day in weekDays) weekDays.remove(day) else weekDays.add(day)
@@ -1566,14 +1599,14 @@ class CreateItemActivity : AppCompatActivity() {
         btnLimitPlus = findViewById(R.id.btn_limit_plus)
         btnLimitMinus!!.setOnClickListener {
             // v1.2.0：随心记每日次数固定"不限"
-            if (journalMode) { toast("温馨提示：随心记每日不限次数，无需设置哦 (｡•́︿•̀｡)"); return@setOnClickListener }
+            if (journalMode) { toast("随心记每日不限次数，无需设置"); return@setOnClickListener }
             // v1.2.2：自动打卡每日固定 1 次
-            if (Method.AUTO.key in cfg.methods) { toast("温馨提示：自动打卡每日固定 1 次，无需设置哦"); return@setOnClickListener }
+            if (Method.AUTO.key in cfg.methods) { toast("自动打卡每日固定 1 次，无需设置"); return@setOnClickListener }
             dailyLimit = when { dailyLimit == -1 -> 1; dailyLimit <= 1 -> -1; else -> dailyLimit - 1 }; renderLimit()
         }
         btnLimitPlus!!.setOnClickListener {
-            if (journalMode) { toast("温馨提示：随心记每日不限次数，无需设置哦 (｡•́︿•̀｡)"); return@setOnClickListener }
-            if (Method.AUTO.key in cfg.methods) { toast("温馨提示：自动打卡每日固定 1 次，无需设置哦"); return@setOnClickListener }
+            if (journalMode) { toast("随心记每日不限次数，无需设置"); return@setOnClickListener }
+            if (Method.AUTO.key in cfg.methods) { toast("自动打卡每日固定 1 次，无需设置"); return@setOnClickListener }
             dailyLimit = if (dailyLimit == -1) 1 else dailyLimit + 1; renderLimit()
         }
         val cbNeg = findViewById<CompoundButton>(R.id.cb_negative)
@@ -1589,13 +1622,13 @@ class CreateItemActivity : AppCompatActivity() {
             if (on) {
                 if (journalMode) {  // v1.2.0：随心记不支持负打卡
                     cbNeg.isChecked = false
-                    toast("温馨提示：随心记不记录失败，暂不支持负打卡哦 (｡•́︿•̀｡)")
+                    toast("随心记不记录失败，暂不支持负打卡")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
                 if (Method.AUTO.key in cfg.methods) {  // v1.2.1：负打卡与自动打卡互斥
                     cbNeg.isChecked = false
-                    toast("温馨提示：负打卡与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                    toast("负打卡与自动打卡互斥，无法同时开启")
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
@@ -1614,14 +1647,14 @@ class CreateItemActivity : AppCompatActivity() {
             twJustToggled = true
             if (on && journalMode) {  // v1.2.0：随心记不支持固定时间段
                 cbTw.isChecked = false
-                toast("温馨提示：随心记不设排期，暂不支持固定时间段哦 (｡•́︿•̀｡)")
+                toast("随心记不设排期，暂不支持固定时间段")
                 refreshConflicts()
                 return@setOnCheckedChangeListener
             }
             if (on && Method.AUTO.key in cfg.methods) {
                 // v1.1.7：自动打卡已开启时点固定时间段 → 互斥提示
                 cbTw.isChecked = false
-                toast("温馨提示：固定时间段与自动打卡互斥，无法同时开启 ο(=•ω＜=)ρ⌒☆")
+                toast("固定时间段与自动打卡互斥，无法同时开启")
                 refreshConflicts()
                 return@setOnCheckedChangeListener
             }
@@ -1639,7 +1672,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<CheckBox>(R.id.cb_offset).setOnClickListener {  // v1.2.0：随心记不支持抵消机制
             if (journalMode && findViewById<CheckBox>(R.id.cb_offset).isChecked) {
                 findViewById<CheckBox>(R.id.cb_offset).isChecked = false
-                toast("温馨提示：随心记暂不支持抵消机制哦 (｡•́︿•̀｡)")
+                toast("随心记暂不支持抵消机制")
             }
         }
         // v1.3.12 时间分割：凌晨该时间前打卡归属前一天
