@@ -16,6 +16,18 @@ object DateUtils {
 
     fun dateOf(ts: Long): String = dayFmt.format(Date(ts))
 
+    /** v1.3.12 时间分割归属日期：cutoffMinutes>0 时，本地时刻处于 00:00~cutoff 之间则归属前一天；否则自然日 */
+    fun belongDate(ts: Long, cutoffMinutes: Int): String {
+        if (cutoffMinutes <= 0) return dateOf(ts)
+        val c = Calendar.getInstance().apply { timeInMillis = ts }
+        val nowMin = c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
+        if (nowMin < cutoffMinutes) {
+            c.add(Calendar.DAY_OF_YEAR, -1)
+            return dayFmt.format(c.time)
+        }
+        return dateOf(ts)
+    }
+
     fun fileNameTs(): String = fileFmt.format(Date())
 
     fun monthTitle(year: Int, month0: Int): String {

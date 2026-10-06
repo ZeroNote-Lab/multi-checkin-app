@@ -69,6 +69,9 @@ class ItemConfig {
     val weekDays: MutableSet<Int> = linkedSetOf()   // 1=周一 … 7=周日（WEEKDAYS 模式使用）
     var bigSmallStart: String = "BIG"               // BIG=创建当周为大周 / SMALL=创建当周为小周
 
+    // v1.3.12 时间分割：凌晨该时间点之前打卡归属前一天（分钟数，如 180=03:00；-1=不开启，00:00 分界）
+    var dayCutoff: Int = -1
+
     var offset: OffsetCfg = OffsetCfg()
 
     fun toJson(): String {
@@ -108,6 +111,7 @@ class ItemConfig {
         o.put("scheduleMode", scheduleMode)
         o.put("weekDays", JSONArray(weekDays.toList()))
         o.put("bigSmallStart", bigSmallStart)
+        o.put("dayCutoff", dayCutoff)
         o.put("offset", JSONObject()
             .put("enabled", offset.enabled)
             .put("mode", offset.mode)
@@ -171,6 +175,7 @@ class ItemConfig {
                     for (i in 0 until wd.length()) c.weekDays.add(wd.getInt(i))
                 }
                 c.bigSmallStart = o.optString("bigSmallStart", "BIG")
+                c.dayCutoff = o.optInt("dayCutoff", -1)
                 o.optJSONObject("offset")?.let { off ->
                     c.offset = OffsetCfg(
                         off.optBoolean("enabled", false),
