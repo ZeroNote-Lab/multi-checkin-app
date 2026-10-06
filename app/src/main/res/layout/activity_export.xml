@@ -13,7 +13,7 @@
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="20dp"
         android:layout_marginTop="12dp"
-        android:text="选择要导出的打卡项（可只选部分，未选中的项及其记录不会导出）"
+        android:text="选择要导出的打卡项（未选中的项不会导出）"
         android:textColor="@color/text_secondary"
         android:textSize="13sp" />
 

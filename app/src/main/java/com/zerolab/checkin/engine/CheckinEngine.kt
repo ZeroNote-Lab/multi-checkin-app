@@ -246,6 +246,26 @@ object CheckinEngine {
         return CheckinResult.Ok(date, status, rid)
     }
 
+    /** v1.3.16：组子项「当日全部完成」判定（组完成 = 全部子项都达到此标准）：
+     *  组合方式=全部方式完成；单方式=当日成功次数 >= 每日次数（不限次=有成功即算）；
+     *  负打卡=当日无破戒记录；非排期日=自动视为完成；日记类=当日有成功记录 */
+    fun subDayDone(item: CheckinItem, date: String, repo: CheckinRepository): Boolean {
+        val c = cfg(item)
+        if (date < DateUtils.dateOf(item.createdAt) || date > DateUtils.today()) return false
+        val recs = repo.recordsOfDay(item.id, date)
+        if (c.journalMode || c.moodMode) return recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }
+        if (isNegative(c)) return !recs.any { it.status == "FAIL" }
+        if (!isScheduledDay(item, date)) return true
+        val methods = c.methods.filter { it != Method.AUTO.key }
+        if (methods.size > 1) {
+            val req = if (c.comboRequired in 1..methods.size) c.comboRequired else methods.size
+            val done = methods.count { m -> recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true } }
+            return done >= req
+        }
+        return if (c.dailyLimit < 0) recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }
+        else recs.count { it.status == "SUCCESS" } >= c.dailyLimit
+    }
+
     // ---------- v1.3.13 打卡组自动完成 ----------
     /** 子项打卡后检查所属组：组内全部成员在归属日已完成 → 组自动记录 SUCCESS（幂等） */
     private fun maybeAutoGroup(item: CheckinItem, repo: CheckinRepository, date: String) {
@@ -257,11 +277,9 @@ object CheckinEngine {
         // v1.3.15：组非排期日不自动记组成功（组可设置打卡日期）
         if (!isScheduledDay(group, date)) return
         val allDone = gc.groupMembers.all { mid ->
-            // v1.3.14 修复：以子项当日真实状态判定是否完成（组合方式需全部方式完成才算成功），
-            // 不能用"当前子项一律算完成"——否则子项只完成部分方式时组就被误标成功
+            // v1.3.16：统一用 subDayDone——子项必须「当日全部完成」（组合全部方式/单方式次数打满）才算组完成
             val m = if (mid == item.id) item else repo.getItem(mid) ?: return
-            val st = dayInfo(m, date, repo.recordsOfDay(mid, date)).state
-            st == DayState.SUCCESS || st == DayState.OFFSET
+            subDayDone(m, date, repo)
         }
         if (allDone) {
             repo.insertRecord(CheckinRecord(
@@ -282,11 +300,10 @@ object CheckinEngine {
         if (recs.any { it.status == "SUCCESS" || it.status == "OFFSET" })
             return DayInfo(date, DayState.SUCCESS, recs.size, auto, recs)
         if (!isScheduledDay(group, date)) return DayInfo(date, DayState.UNCHECKED, recs.size, auto, recs)
-        // 部分打卡：至少一个子项当日完成但组未完成
+        // 部分打卡：至少一个子项当日完成但组未完成（v1.3.16 统一用 subDayDone）
         val anyMemberDone = c.groupMembers.any { mid ->
             val m = repo.getItem(mid) ?: return@any false
-            val st = dayInfo(m, date, repo.recordsOfDay(mid, date)).state
-            st == DayState.SUCCESS || st == DayState.OFFSET
+            subDayDone(m, date, repo)
         }
         return DayInfo(date, if (anyMemberDone) DayState.PARTIAL else DayState.UNCHECKED, recs.size, auto, recs)
     }

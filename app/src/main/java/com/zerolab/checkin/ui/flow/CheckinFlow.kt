@@ -302,7 +302,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val s = et.text.toString().trim()
-                if (s.length < c.textMinWords) { toast("字数不足哦 (｡•́︿•̀｡)"); return@setOnClickListener }
+                if (s.length < c.textMinWords) { toast("字数不足"); return@setOnClickListener }
                 if (c.textNoRepeat) {
                     val last = repo.allRecords(item!!.id).firstOrNull { !it.textContent.isNullOrBlank() }?.textContent
                     if (last == s) { toast("内容不可与上次重复哦"); return@setOnClickListener }
@@ -364,7 +364,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                if (selected == 0) { toast("请先选择一个心情 (｡•́︿•̀｡)"); return@setOnClickListener }
+                if (selected == 0) { toast("请先选择一个心情"); return@setOnClickListener }
                 moodValue = selected
                 val s = et.text.toString().trim()
                 textContent = s.ifBlank { null }
@@ -647,7 +647,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             // v1.2.0 正计时：未达目标点击 → 提示失败、计时继续（弹窗不关闭）
             if (countUp && elapsedSec < totalSec) {
                 val need = totalSec - elapsedSec
-                toast("未到目标时长（还需 %02d:%02d），计时继续 ~".format(need / 60, need % 60))
+                toast("还差 %02d:%02d 到目标时长，计时继续".format(need / 60, need % 60))
             } else {
                 finishTimer(countUp, totalSec, elapsedSec)
             }
@@ -661,7 +661,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             pb.setOnClickListener {
                 if (countUp && elapsedSec < totalSec) {
                     val need = totalSec - elapsedSec
-                    toast("未到目标时长（还需 %02d:%02d），计时继续 ~".format(need / 60, need % 60))
+                    toast("还差 %02d:%02d 到目标时长，计时继续".format(need / 60, need % 60))
                 } else {
                     finishTimer(countUp, totalSec, elapsedSec)
                     dlg.dismiss()
