@@ -23,6 +23,7 @@ import com.zerolab.checkin.engine.DayState
 import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
+import com.zerolab.checkin.ui.detail.ItemCheckinActivity
 import com.zerolab.checkin.ui.detail.ItemDetailActivity
 import com.zerolab.checkin.ui.flow.CheckinFlow
 import com.zerolab.checkin.util.DateUtils
@@ -55,6 +56,15 @@ class QuickCheckinFragment : Fragment() {
     /** MainActivity 读到 NFC 标签后转发给打卡流程 */
     fun notifyNfc(tagId: String) {
         if (::flow.isInitialized) flow.nfcDetected(tagId)
+    }
+
+    /** v1.3.13 打卡组：组页点子项/其它场景切换当前显示的打卡项（支持同 Activity 栈顶复用） */
+    fun showItem(id: Long) {
+        overrideItemId = id
+        item = repo.getItem(id)
+        if (item == null) return
+        cfg = ItemConfig.parse(item!!.configJson)
+        refresh()
     }
 
     companion object {
@@ -239,6 +249,67 @@ class QuickCheckinFragment : Fragment() {
         btnCheckin.background?.setTint(ThemeManager.of(it.theme).primary)
         btnCheckin.isEnabled = true
         when {
+            // v1.3.13 打卡组：展示子项进度（点击子项进入打卡页），完成全部子项后自动记组成功
+            cfg.groupMode -> {
+                val members = cfg.groupMembers
+                val doneSet = members.filter { mid ->
+                    if (mid == it.id) true
+                    else repo.recordsOfDay(mid, today).any { r -> r.status == "SUCCESS" || r.status == "OFFSET" }
+                }.toSet()
+                val allDone = members.isNotEmpty() && doneSet.size == members.size
+                statusView.text = if (allDone) "状态：打卡组今日已完成 ✓" else "状态：子项 ${doneSet.size}/${members.size} 已完成"
+                btnCheckin.text = if (allDone) "今日已完成 ✓" else "完成全部子项后自动成功"
+                btnCheckin.isEnabled = false; grayBtn()
+                root.findViewById<TextView>(R.id.tv_detail_title).text = "打卡组子项（点击进入打卡）"
+                root.findViewById<TextView>(R.id.tv_detail_body).text = if (members.isEmpty()) "组内暂无子项" else ""
+                val box = root.findViewById<LinearLayout>(R.id.detail_records_box)
+                box.removeAllViews()
+                members.forEach { mid ->
+                    val m = repo.getItem(mid) ?: return@forEach
+                    val ok = mid in doneSet
+                    val row = LinearLayout(requireContext()).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        background = requireContext().getDrawable(R.drawable.bg_input)
+                        setPadding(14, 12, 14, 12)
+                        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        lp.topMargin = 6
+                        layoutParams = lp
+                        setOnClickListener {
+                            startActivity(Intent(requireContext(), ItemCheckinActivity::class.java)
+                                .putExtra(ItemCheckinActivity.EXTRA_ID, m.id))
+                        }
+                    }
+                    row.addView(TextView(requireContext()).apply {
+                        text = m.name
+                        textSize = 14f
+                        setTextColor(0xFF1F2430.toInt())
+                        val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                        layoutParams = lp
+                    })
+                    row.addView(TextView(requireContext()).apply {
+                        text = if (ok) "✅ 已完成" else "⏳ 未完成"
+                        textSize = 13f
+                        setTextColor(if (ok) 0xFF2FBF71.toInt() else 0xFFF59E0B.toInt())
+                    })
+                    box.addView(row)
+                }
+            }
+            // v1.3.13 N天打卡：严格连续，达成目标后可继续超额
+            cfg.ndaysMode -> {
+                val streak = CheckinEngine.streak(it, repo)
+                val target = cfg.ndaysTarget
+                streakView.text = "🎯 ${target} 天挑战 · 已连续 $streak 天（严格连续，中断清零）"
+                if (streak >= target) {
+                    statusView.text = "状态：目标 $target 天已达成 ✓"
+                    btnCheckin.text = if (cnt == 0) "超额打卡" else "今日已打卡 ✓"
+                    btnCheckin.isEnabled = cnt == 0
+                } else {
+                    statusView.text = "状态：连续 $streak/$target 天"
+                    btnCheckin.text = if (cnt == 0) "打卡" else "今日已打卡 ✓"
+                    btnCheckin.isEnabled = cnt == 0
+                }
+            }
             paused -> { statusView.text = "状态：已暂停"; btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn() }
             // v1.2.0 随心记 / v1.3.0 心情日记：记录 / 继续记录（一天可多次，只记成功）
             journal || mood -> {
@@ -340,6 +411,8 @@ class QuickCheckinFragment : Fragment() {
     /** 点击日期：备注栏显示次数/时间/文字/缩略图/语音（v1.1.6：媒体内联到对应记录行，不再统一堆底部） */
     private fun showDayDetail(date: String) {
         val it = item ?: return
+        // v1.3.13 打卡组：详情区常驻子项列表（由 renderToday 渲染），点击日历日期不覆盖
+        if (ItemConfig.parse(it.configJson).groupMode) return
         val recs = repo.recordsOfDay(it.id, date)
         val title = root.findViewById<TextView>(R.id.tv_detail_title)
         val body = root.findViewById<TextView>(R.id.tv_detail_body)

@@ -72,6 +72,15 @@ class ItemConfig {
     // v1.3.12 时间分割：凌晨该时间点之前打卡归属前一天（分钟数，如 180=03:00；-1=不开启，00:00 分界）
     var dayCutoff: Int = -1
 
+    // v1.3.13 打卡组：组内子项引用（独立打卡项 id 列表）+ 名称快照（导入导出跨设备重映射用）
+    var groupMode: Boolean = false
+    val groupMembers: MutableList<Long> = mutableListOf()
+    val groupMemberNames: MutableList<String> = mutableListOf()
+
+    // v1.3.13 n天打卡：目标天数（严格连续，达到后完成；可继续超额）
+    var ndaysMode: Boolean = false
+    var ndaysTarget: Int = 21
+
     var offset: OffsetCfg = OffsetCfg()
 
     fun toJson(): String {
@@ -112,6 +121,11 @@ class ItemConfig {
         o.put("weekDays", JSONArray(weekDays.toList()))
         o.put("bigSmallStart", bigSmallStart)
         o.put("dayCutoff", dayCutoff)
+        o.put("groupMode", groupMode)
+        o.put("groupMembers", JSONArray(groupMembers.toList()))
+        o.put("groupMemberNames", JSONArray(groupMemberNames.toList()))
+        o.put("ndaysMode", ndaysMode)
+        o.put("ndaysTarget", ndaysTarget)
         o.put("offset", JSONObject()
             .put("enabled", offset.enabled)
             .put("mode", offset.mode)
@@ -176,6 +190,17 @@ class ItemConfig {
                 }
                 c.bigSmallStart = o.optString("bigSmallStart", "BIG")
                 c.dayCutoff = o.optInt("dayCutoff", -1)
+                c.groupMode = o.optBoolean("groupMode", false)
+                o.optJSONArray("groupMembers")?.let { a ->
+                    c.groupMembers.clear()
+                    for (i in 0 until a.length()) c.groupMembers.add(a.getLong(i))
+                }
+                o.optJSONArray("groupMemberNames")?.let { a ->
+                    c.groupMemberNames.clear()
+                    for (i in 0 until a.length()) c.groupMemberNames.add(a.getString(i))
+                }
+                c.ndaysMode = o.optBoolean("ndaysMode", false)
+                c.ndaysTarget = o.optInt("ndaysTarget", 21)
                 o.optJSONObject("offset")?.let { off ->
                     c.offset = OffsetCfg(
                         off.optBoolean("enabled", false),

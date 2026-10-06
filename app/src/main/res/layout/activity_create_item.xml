@@ -139,6 +139,129 @@
                 </HorizontalScrollView>
             </LinearLayout>
 
+            <!-- v1.3.13 N天打卡：目标天数（严格连续） -->
+            <LinearLayout
+                android:id="@+id/ndays_card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="目标天数（连续打卡）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="连续打卡多少天"
+                        android:textColor="@color/text_primary" />
+                    <Button
+                        android:id="@+id/btn_ndays_minus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:insetTop="0dp" android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text="-"
+                        android:textColor="@color/text_primary" />
+                    <TextView
+                        android:id="@+id/tv_ndays_target"
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:text="21 天"
+                        android:textColor="@color/text_primary"
+                        android:textStyle="bold" />
+                    <Button
+                        android:id="@+id/btn_ndays_plus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:insetTop="0dp" android:insetBottom="0dp"
+                        android:padding="0dp"
+                        android:text="+"
+                        android:textColor="@color/text_primary" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="严格连续：中断一天将从 0 重新累计；达成目标后仍可继续超额打卡。"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- v1.3.13 打卡组：子项管理（相互独立，全部完成组才成功） -->
+            <LinearLayout
+                android:id="@+id/group_card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="打卡组子项（全部完成组才成功）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/group_member_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+                    <Button
+                        android:id="@+id/btn_group_add_ref"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:insetTop="0dp" android:insetBottom="0dp"
+                        android:text="＋ 引用已有打卡项" />
+                    <Button
+                        android:id="@+id/btn_group_add_new"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp" android:insetBottom="0dp"
+                        android:text="＋ 新建子项" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="子项相互独立，只在组内打卡与显示；当日全部完成后自动记组成功。"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
             <!-- v1.3.0 日记 tab：记录类型单选 + 心情折线图开关 -->
             <LinearLayout
                 android:id="@+id/journal_panel"

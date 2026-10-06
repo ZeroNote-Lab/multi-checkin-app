@@ -49,6 +49,8 @@ class CreateItemActivity : AppCompatActivity() {
         const val EXTRA_MODE = "create_mode"
         const val MODE_NORMAL = "normal"             // ✅ 普通打卡
         const val MODE_JOURNAL = "journal"           // 📔 日记打卡（页内选随心记 / 心情日记）
+        const val MODE_GROUP = "group"               // 👥 打卡组（v1.3.13）
+        const val MODE_NDAYS = "ndays"               // 🏁 N天打卡（v1.3.13）
         const val MODE_JOURNAL_FREE = "journal_free" // 兼容保留：直接进随心记
         const val MODE_JOURNAL_MOOD = "journal_mood" // 兼容保留：直接进心情日记
     }
@@ -89,6 +91,13 @@ class CreateItemActivity : AppCompatActivity() {
     private var journalMode = false
     // v1.3.0 心情日记（日记 tab 内记录类型：false=随心记 true=心情日记）
     private var moodMode = false
+    // v1.3.13 打卡组 / N天打卡 模式状态
+    private var groupMode = false
+    private var ndaysMode = false
+    private var ndaysTarget = 21
+    private val groupRefIds = mutableListOf<Long>()      // 引用已有子项 id
+    private val groupNewNames = mutableListOf<String>()  // 新建子项名称（保存时落库）
+    private val groupRemoved = mutableListOf<Long>()     // 编辑时移除的成员 id（保存时解除 groupTag）
     private var modeHint: TextView? = null
     private var comboNRow: LinearLayout? = null
     private var comboNLabel: TextView? = null
@@ -146,6 +155,8 @@ class CreateItemActivity : AppCompatActivity() {
             createMode == MODE_JOURNAL -> "新建日记打卡"
             createMode == MODE_JOURNAL_FREE -> "新建随心记"
             createMode == MODE_JOURNAL_MOOD -> "新建心情日记"
+            createMode == MODE_GROUP -> "新建打卡组"
+            createMode == MODE_NDAYS -> "新建N天打卡"
             else -> "新建打卡项"
         }
         // 类型已在选择页（或编辑项配置）确定：隐藏打卡类型双 tab
@@ -178,6 +189,14 @@ class CreateItemActivity : AppCompatActivity() {
             when (createMode) {
                 MODE_JOURNAL, MODE_JOURNAL_FREE -> setJournalMode(true)
                 MODE_JOURNAL_MOOD -> { setJournalMode(true); setMoodMode(true) }
+                MODE_GROUP -> {
+                    groupMode = true
+                    applySpecialModeVisibility()
+                }
+                MODE_NDAYS -> {
+                    ndaysMode = true
+                    applySpecialModeVisibility()
+                }
                 else -> {
                     // 默认勾选普通
                     rows[Method.NORMAL.key]?.switch?.isChecked = true
@@ -185,9 +204,183 @@ class CreateItemActivity : AppCompatActivity() {
                 }
             }
         }
+        bindSpecialModeControls()
         findViewById<Button>(R.id.btn_save).setOnClickListener { save() }
     }
 
+    // ---------- v1.3.13 打卡组 / N天打卡 ----------
+    private fun applySpecialModeVisibility() {
+        if (!groupMode && !ndaysMode) return
+        findViewById<View>(R.id.journal_panel).visibility = View.GONE
+        findViewById<View>(R.id.method_card).visibility = View.GONE
+        findViewById<View>(R.id.schedule_card).visibility = View.GONE
+        findViewById<View>(R.id.rule_card).visibility = View.GONE
+        findViewById<View>(R.id.offset_card).visibility = View.GONE
+        findViewById<View>(R.id.tv_policy_title).visibility = View.GONE
+        findViewById<View>(R.id.policy_card).visibility = View.GONE
+        findViewById<View>(R.id.ndays_card).visibility = if (ndaysMode) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.group_card).visibility = if (groupMode) View.VISIBLE else View.GONE
+        if (groupMode) renderGroupMembers()
+    }
+
+    private fun bindSpecialModeControls() {
+        findViewById<Button>(R.id.btn_ndays_minus).setOnClickListener {
+            ndaysTarget = (ndaysTarget - 1).coerceAtLeast(1)
+            findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
+        }
+        findViewById<Button>(R.id.btn_ndays_plus).setOnClickListener {
+            ndaysTarget = (ndaysTarget + 1).coerceAtMost(999)
+            findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
+        }
+        findViewById<Button>(R.id.btn_group_add_ref).setOnClickListener { pickGroupRef() }
+        findViewById<Button>(R.id.btn_group_add_new).setOnClickListener { addGroupNew() }
+    }
+
+    private fun renderGroupMembers() {
+        val list = findViewById<LinearLayout>(R.id.group_member_list)
+        list.removeAllViews()
+        val removed = groupRemoved.toSet()
+        groupRefIds.forEach { id ->
+            val m = repo.getItem(id) ?: return@forEach
+            if (id in removed) return@forEach
+            list.addView(groupMemberRow(m.name, "引用", id, null))
+        }
+        groupNewNames.forEachIndexed { i, nm -> list.addView(groupMemberRow(nm, "新建", null, i)) }
+    }
+
+    private fun groupMemberRow(name: String, tag: String, refId: Long?, newIdx: Int?): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            background = getDrawable(R.drawable.bg_input)
+            setPadding(14, 10, 10, 10)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.topMargin = 6
+            layoutParams = lp
+        }
+        row.addView(TextView(this).apply {
+            text = "· $name"
+            textSize = 14f
+            setTextColor(0xFF1F2430.toInt())
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = lp
+        })
+        row.addView(TextView(this).apply {
+            text = tag
+            textSize = 11f
+            setTextColor(0xFF6E7F78.toInt())
+        })
+        row.addView(TextView(this).apply {
+            text = " ✕"
+            textSize = 14f
+            setTextColor(0xFFB0534C.toInt())
+            setPadding(16, 0, 6, 0)
+            setOnClickListener {
+                if (refId != null) { groupRemoved.add(refId); groupRefIds.remove(refId) }
+                if (newIdx != null) {
+                    groupNewNames.removeAt(newIdx.coerceAtMost(groupNewNames.size - 1))
+                }
+                renderGroupMembers()
+            }
+        })
+        return row
+    }
+
+    private fun pickGroupRef() {
+        val exclude = (editing?.id ?: -1L)
+        val candidates = repo.getItems().filter { it.groupTag == null && it.id != exclude }
+        if (candidates.isEmpty()) {
+            toast("暂无可引用的打卡项（已在组中的项不会重复列出）")
+            return
+        }
+        val names = candidates.map { it.name }.toTypedArray()
+        val checked = BooleanArray(names.size)
+        android.app.AlertDialog.Builder(this)
+            .setTitle("选择要加入组的打卡项")
+            .setMultiChoiceItems(names, checked) { _, i, on -> checked[i] = on }
+            .setPositiveButton("添加") { _, _ ->
+                candidates.forEachIndexed { i, it -> if (checked[i] && it.id !in groupRefIds) groupRefIds.add(it.id) }
+                renderGroupMembers()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun addGroupNew() {
+        val et = EditText(this).apply {
+            hint = "子项名称，如：喝水"
+            textSize = 14f
+            setPadding(24, 18, 24, 18)
+            background = getDrawable(R.drawable.bg_input)
+            setTextColor(0xFF1F2430.toInt())
+            filters = arrayOf(android.text.InputFilter.LengthFilter(12))
+        }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(52, 4, 52, 0) }
+        box.addView(et)
+        android.app.AlertDialog.Builder(this)
+            .setTitle("新建子项（普通打卡）")
+            .setView(box)
+            .setPositiveButton("添加") { _, _ ->
+                val nm = et.text.toString().trim()
+                if (nm.isBlank()) { toast("子项名称不能为空"); return@setPositiveButton }
+                if (nm in groupNewNames) { toast("组内已有同名子项"); return@setPositiveButton }
+                groupNewNames.add(nm)
+                renderGroupMembers()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun saveGroup() {
+        val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
+        if (name.isBlank()) { toast("请填写打卡组名称"); return }
+        if (groupRefIds.isEmpty() && groupNewNames.isEmpty()) { toast("请至少添加一个子项"); return }
+        val now = System.currentTimeMillis()
+        cfg.groupMode = true
+        cfg.methods.clear(); cfg.methods.add(Method.NORMAL.key)
+        cfg.dailyLimit = 1
+        cfg.scheduleMode = "DAILY"
+        cfg.negative = false; cfg.timeWindowEnabled = false; cfg.offset.enabled = false; cfg.dayCutoff = -1
+        thread {
+            val gid: Long
+            if (editing != null) {
+                gid = editing!!.id
+                groupRefIds.forEach { id -> repo.getItem(id)?.let { repo.updateItem(it.copy(groupTag = gid.toString())) } }
+                groupRemoved.forEach { id -> repo.getItem(id)?.let { repo.updateItem(it.copy(groupTag = null)) } }
+            } else {
+                val group = CheckinItem(
+                    name = name, type = "GROUP", configJson = cfg.toJson(),
+                    icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
+                    editPolicy = "FLEX", editInterval = null,
+                    lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
+                )
+                gid = repo.insertItem(group)
+                groupRefIds.forEach { id -> repo.getItem(id)?.let { repo.updateItem(it.copy(groupTag = gid.toString())) } }
+            }
+            val memberIds = mutableListOf<Long>()
+            groupRefIds.filter { it !in groupRemoved }.forEach { memberIds.add(it) }
+            groupNewNames.forEach { nm ->
+                val subCfg = ItemConfig().apply { methods.add(Method.NORMAL.key); dailyLimit = 1 }
+                val sub = CheckinItem(
+                    name = nm, type = "NORMAL", configJson = subCfg.toJson(),
+                    icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
+                    groupTag = gid.toString(), editPolicy = "LOCKED",
+                    lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
+                )
+                memberIds.add(repo.insertItem(sub))
+            }
+            cfg.groupMembers.clear(); cfg.groupMembers.addAll(memberIds)
+            cfg.groupMemberNames.clear(); cfg.groupMemberNames.addAll(groupNewNames)
+            if (editing != null) {
+                repo.updateItem(editing!!.copy(name = name, theme = selectedTheme, configJson = cfg.toJson(), updatedAt = now))
+            } else {
+                repo.getItem(gid)?.let { repo.updateItem(it.copy(configJson = cfg.toJson())) }
+            }
+            runOnUiThread { finish() }
+        }
+    }
+
+    // ---------- v1.3.13 打卡组 / N天打卡 ----------
     // ---------- 主题 ----------
     private fun buildThemeChips() {
         val container = findViewById<LinearLayout>(R.id.theme_container)
@@ -256,6 +449,7 @@ class CreateItemActivity : AppCompatActivity() {
 
     /** v1.3.0：日记 tab 下按记录类型/模式刷新区块与方式行可见性（纯视图，不改配置） */
     private fun refreshJournalVisibility() {
+        if (groupMode || ndaysMode) return
         val journal = journalMode
         findViewById<View>(R.id.tv_method_title).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.tv_method_desc).visibility = if (journal) View.GONE else View.VISIBLE
@@ -1168,6 +1362,20 @@ class CreateItemActivity : AppCompatActivity() {
         }
         findViewById<EditText>(R.id.et_name).setText(it.name)
         selectedTheme = it.theme
+        // v1.3.13 打卡组 / N天打卡 回显
+        if (loaded.groupMode) {
+            groupMode = true
+            applySpecialModeVisibility()
+            groupRefIds.clear(); groupRefIds.addAll(loaded.groupMembers)
+            groupNewNames.clear(); groupRemoved.clear()
+            renderGroupMembers()
+        }
+        if (loaded.ndaysMode) {
+            ndaysMode = true
+            applySpecialModeVisibility()
+            ndaysTarget = loaded.ndaysTarget.coerceAtLeast(1)
+            findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
+        }
         dailyLimit = cfg.dailyLimit
         findViewById<TextView>(R.id.tv_limit).text = if (dailyLimit < 0) "不限" else dailyLimit.toString()
         findViewById<CheckBox>(R.id.cb_all_required).isChecked = cfg.dailyAllRequired   // v1.4.0：每日全部完成开关回显
@@ -1380,8 +1588,22 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     private fun save() {
+        // v1.3.13 打卡组走独立保存流程
+        if (groupMode) { saveGroup(); return }
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
         if (name.isBlank()) { toast("请填写打卡名称"); return }
+        // v1.3.13 N天打卡强制规则：普通打卡、每日 1 次、每天排期，不参与负打卡/时间段/时间分割/抵消
+        if (ndaysMode) {
+            cfg.ndaysMode = true
+            cfg.ndaysTarget = ndaysTarget
+            cfg.methods.clear(); cfg.methods.add(Method.NORMAL.key)
+            cfg.dailyLimit = 1
+            cfg.scheduleMode = "DAILY"
+            cfg.negative = false
+            cfg.timeWindowEnabled = false
+            cfg.offset.enabled = false
+            cfg.dayCutoff = -1
+        }
         if (!journalMode && scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
         // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）
         collectConfigFromUi()

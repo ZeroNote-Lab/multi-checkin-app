@@ -28,6 +28,10 @@ class ChooseTypeActivity : AppCompatActivity() {
     private val typeEntries = listOf(
         TypeEntry(R.drawable.ic_type_check, 0xFFD5F2EE.toInt(), "普通打卡",
             "按规则打卡，有缺卡与连续天数", CreateItemActivity.MODE_NORMAL),
+        TypeEntry(R.drawable.ic_type_group, 0xFFD5F2EE.toInt(), "打卡组",
+            "组内多个普通打卡，全部完成才记组成功", CreateItemActivity.MODE_GROUP),
+        TypeEntry(R.drawable.ic_type_flag, 0xFFD5F2EE.toInt(), "N天打卡",
+            "设定目标天数，连续打卡达成即完成", CreateItemActivity.MODE_NDAYS),
         TypeEntry(R.drawable.ic_type_note, 0xFFD5F2EE.toInt(), "日记打卡",
             "日记式记录，页内选随心记 / 心情日记", CreateItemActivity.MODE_JOURNAL)
     )

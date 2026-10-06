@@ -84,7 +84,8 @@ class ItemListFragment : Fragment() {
     fun reload() {
         if (!isAdded || !::recycler.isInitialized) return
         thread {
-            val list = repo.getItems()
+            // v1.3.13 打卡组：子项仅在组内打卡与显示，主列表隐藏（groupTag 非空即组内子项）
+            val list = repo.getItems().filter { it.groupTag == null }
             val quickId = repo.getQuickId()
             // v1.2.0：随心记项显示"记录天数"，普通项显示"连续天数"
             val enriched = list.map {

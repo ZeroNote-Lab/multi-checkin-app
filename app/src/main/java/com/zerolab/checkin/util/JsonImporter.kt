@@ -57,6 +57,7 @@ object JsonImporter {
             byCreated.getOrPut(it.createdAt) { mutableListOf() }.add(it)
         }
         val idMap = HashMap<Long, Long>()   // 导入文件 id -> 本机 id
+        val touched = HashMap<Long, String>() // newId -> new / override / nochange（v1.3.13 组引用重映射用）
 
         var newItems = 0; var mergedItems = 0
         var newRecords = 0; var skippedRecords = 0
@@ -111,6 +112,44 @@ object JsonImporter {
             }
             idMap[impId] = newId
             if (quickId != null && impId == quickId) quickTarget = newId
+            // v1.3.13 打卡组：记录本次写入过字段的项（新建或字段被覆盖），用于后续 groupTag / 组成员重映射
+            touched[newId] = when {
+                local == null -> "new"
+                updatedAt > local.updatedAt -> "override"
+                else -> "nochange"
+            }
+        }
+
+        // ---------- v1.3.13 打卡组：跨设备引用重映射 ----------
+        // 子项 groupTag 与组的 groupMembers 存的都是导出设备的 id，本机 id 不同。
+        // 只处理本次新建或字段被覆盖的项（"nochange" 说明本机为权威，保持不动）。
+        for (item in repo.getItems()) {
+            val flag = touched[item.id] ?: continue
+            if (flag == "nochange") continue
+            // 子项 groupTag：导入文件的组 id -> 本机组 id；组未随本次导入则解绑（避免悬挂引用）
+            val gt = item.groupTag?.toLongOrNull()
+            if (gt != null) {
+                val newGid = idMap[gt] ?: -1L
+                repo.updateItem(item.copy(groupTag = if (newGid > 0) newGid.toString() else null))
+                continue
+            }
+            // 组项：重映射 configJson.groupMembers（与 groupMemberNames 索引对齐，缺失的成员一并剔除）
+            val cfgObj = try { JSONObject(item.configJson) } catch (e: Exception) { continue }
+            if (!cfgObj.optBoolean("groupMode")) continue
+            val members = cfgObj.optJSONArray("groupMembers") ?: continue
+            val names = cfgObj.optJSONArray("groupMemberNames")
+            val newMembers = JSONArray()
+            val newNames = JSONArray()
+            for (j in 0 until members.length()) {
+                val oldId = members.optLong(j, -1L)
+                val newId = idMap[oldId]
+                if (newId == null) continue
+                newMembers.put(newId)
+                if (names != null && j < names.length()) newNames.put(names.optString(j, ""))
+            }
+            cfgObj.put("groupMembers", newMembers)
+            if (names != null) cfgObj.put("groupMemberNames", newNames)
+            repo.updateItem(item.copy(configJson = cfgObj.toString()))
         }
 
         // ---------- 记录：按 (日期, 时间) 去重合并，素材恢复 ----------
