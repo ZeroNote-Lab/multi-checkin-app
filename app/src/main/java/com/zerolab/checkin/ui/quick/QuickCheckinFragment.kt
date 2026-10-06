@@ -23,7 +23,6 @@ import com.zerolab.checkin.engine.DayState
 import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
-import com.zerolab.checkin.ui.create.CreateItemActivity
 import com.zerolab.checkin.ui.detail.ItemDetailActivity
 import com.zerolab.checkin.ui.flow.CheckinFlow
 import com.zerolab.checkin.util.DateUtils

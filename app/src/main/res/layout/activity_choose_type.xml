@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_choose_type_gradient">
+
+    <!-- 柔光大光斑装饰（背景色由代码动态创建，保证渲染一致） -->
+    <View
+        android:id="@+id/blob_pink"
+        android:layout_width="250dp"
+        android:layout_height="250dp"
+        android:layout_gravity="top|right"
+        android:layout_marginTop="-40dp"
+        android:layout_marginRight="-70dp"
+        android:alpha="0.9" />
+
+    <View
+        android:id="@+id/blob_purple"
+        android:layout_width="260dp"
+        android:layout_height="260dp"
+        android:layout_gravity="bottom|left"
+        android:layout_marginBottom="-70dp"
+        android:layout_marginLeft="-80dp"
+        android:alpha="0.95" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <include android:id="@+id/topbar" layout="@layout/view_topbar" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/type_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:paddingLeft="44dp"
+                android:paddingRight="44dp"
+                android:paddingTop="18dp"
+                android:paddingBottom="34dp" />
+
+        </ScrollView>
+    </LinearLayout>
+</FrameLayout>

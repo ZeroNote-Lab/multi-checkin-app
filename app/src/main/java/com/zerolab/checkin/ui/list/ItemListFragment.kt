@@ -18,6 +18,7 @@ import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
+import com.zerolab.checkin.ui.create.ChooseTypeActivity
 import com.zerolab.checkin.ui.create.CreateItemActivity
 import com.zerolab.checkin.ui.detail.ItemDetailActivity
 import kotlin.concurrent.thread
@@ -64,7 +65,7 @@ class ItemListFragment : Fragment() {
         })
         touchHelper.attachToRecyclerView(recycler)
         view.findViewById<ImageButton>(R.id.btn_add).setOnClickListener {
-            startActivity(Intent(requireContext(), CreateItemActivity::class.java))
+            startActivity(Intent(requireContext(), ChooseTypeActivity::class.java)) // v1.3.9：+ 号先选类型
         }
     }
 

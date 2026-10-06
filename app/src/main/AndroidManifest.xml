@@ -39,6 +39,7 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".ui.create.ChooseTypeActivity" android:exported="false" />
         <activity android:name=".ui.create.CreateItemActivity" android:exported="false" />
         <activity android:name=".ui.detail.ItemDetailActivity" android:exported="false" />
         <activity android:name=".ui.detail.ItemCheckinActivity" android:exported="false" android:launchMode="singleTop" />
