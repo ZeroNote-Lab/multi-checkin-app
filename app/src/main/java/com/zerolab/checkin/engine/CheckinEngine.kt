@@ -72,6 +72,10 @@ object CheckinEngine {
             date < created -> DayInfo(date, DayState.FUTURE, 0, false, records)
             date > today -> DayInfo(date, DayState.FUTURE, records.size, auto, records)
             offset -> DayInfo(date, DayState.OFFSET, records.size, auto, records)
+            // v1.3.15：打卡组——当日有成功记录=已打卡；否则未打卡（组无负打卡/无 SKIP 染色）
+            c.groupMode -> DayInfo(date,
+                if (records.any { it.status == "SUCCESS" || it.status == "OFFSET" }) DayState.SUCCESS else DayState.UNCHECKED,
+                records.size, auto, records)
             // v1.2.0 随心记 / v1.3.0 心情日记：只记成功；无操作日无任何底色（含过去缺记），不染色
             (c.journalMode || c.moodMode) -> {
                 val success = records.any { it.status == "SUCCESS" }
@@ -129,6 +133,9 @@ object CheckinEngine {
     /** 某天是否算"成功"（用于连续天数） */
     private fun dayIsSuccess(item: CheckinItem, date: String, repo: CheckinRepository): Boolean {
         if (date < DateUtils.dateOf(item.createdAt)) return false // 创建日之前不计入连续
+        val c = cfg(item)
+        // v1.3.15：打卡组非排期日视为成功，不中断连续
+        if (c.groupMode && !isScheduledDay(item, date)) return true
         val recs = repo.recordsOfDay(item.id, date)
         val info = dayInfo(item, date, recs)
         if (info.state == DayState.SKIP) return true // 无需打卡日视为成功，不中断连续
@@ -247,6 +254,8 @@ object CheckinEngine {
         val gc = cfg(group)
         if (!gc.groupMode || gc.groupMembers.isEmpty()) return
         if (repo.recordsOfDay(gid, date).any { it.status == "SUCCESS" }) return   // 幂等
+        // v1.3.15：组非排期日不自动记组成功（组可设置打卡日期）
+        if (!isScheduledDay(group, date)) return
         val allDone = gc.groupMembers.all { mid ->
             // v1.3.14 修复：以子项当日真实状态判定是否完成（组合方式需全部方式完成才算成功），
             // 不能用"当前子项一律算完成"——否则子项只完成部分方式时组就被误标成功
@@ -259,6 +268,27 @@ object CheckinEngine {
                 itemId = gid, checkinDate = date, checkinTime = System.currentTimeMillis(),
                 status = "SUCCESS", isAuto = 0))
         }
+    }
+
+    /** v1.3.15：打卡组单日状态（组页日历专用，4 态：已打卡/部分打卡/未打卡/今日由今天外框体现）。
+     *  非排期日无记录返回 UNCHECKED（不染色，避免出现第 5 种"无需打卡"色）。 */
+    fun groupDayInfo(group: CheckinItem, date: String, repo: CheckinRepository): DayInfo {
+        val c = cfg(group)
+        val today = DateUtils.today()
+        if (date < DateUtils.dateOf(group.createdAt)) return DayInfo(date, DayState.FUTURE, 0, false, emptyList())
+        if (date > today) return DayInfo(date, DayState.FUTURE, 0, false, emptyList())
+        val recs = repo.recordsOfDay(group.id, date)
+        val auto = recs.any { it.isAuto == 1 }
+        if (recs.any { it.status == "SUCCESS" || it.status == "OFFSET" })
+            return DayInfo(date, DayState.SUCCESS, recs.size, auto, recs)
+        if (!isScheduledDay(group, date)) return DayInfo(date, DayState.UNCHECKED, recs.size, auto, recs)
+        // 部分打卡：至少一个子项当日完成但组未完成
+        val anyMemberDone = c.groupMembers.any { mid ->
+            val m = repo.getItem(mid) ?: return@any false
+            val st = dayInfo(m, date, repo.recordsOfDay(mid, date)).state
+            st == DayState.SUCCESS || st == DayState.OFFSET
+        }
+        return DayInfo(date, if (anyMemberDone) DayState.PARTIAL else DayState.UNCHECKED, recs.size, auto, recs)
     }
 
     // ---------- 抵消机制发放 ----------

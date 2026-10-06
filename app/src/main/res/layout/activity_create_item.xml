@@ -260,6 +260,19 @@
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
+                <!-- v1.3.15：打卡组更多选项（展开后显示打卡日期选择） -->
+                <TextView
+                    android:id="@+id/btn_group_more"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_group_add"
+                    android:gravity="center"
+                    android:padding="13dp"
+                    android:text="更多选项（打卡日期）"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

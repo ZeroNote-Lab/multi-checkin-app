@@ -26,6 +26,8 @@ class MonthCalendarView @JvmOverloads constructor(
     private var listener: ((String) -> Unit)? = null
     /** 负打卡模式：缺卡(FAIL)是否显示红色（负打卡=破戒记录才红；普通缺卡无底色） */
     private var negativeMode = false
+    /** v1.3.15：是否显示圆外小标记（⚡/×n；打卡组日历不显示） */
+    private var showBadges = true
 
     private val successC = 0xFF2FBF71.toInt()
     private val failC = 0xFFEF5350.toInt()
@@ -56,11 +58,12 @@ class MonthCalendarView @JvmOverloads constructor(
         } catch (_: Exception) { null }
     }
 
-    fun setData(year: Int, month0: Int, infos: Map<String, DayInfo>, negative: Boolean, onClick: (String) -> Unit) {
+    fun setData(year: Int, month0: Int, infos: Map<String, DayInfo>, negative: Boolean, onClick: (String) -> Unit, showBadges: Boolean = true) {
         this.year = year; this.month = month0
         this.grid = DateUtils.monthGrid(year, month0)
         this.infoMap = infos
         this.negativeMode = negative
+        this.showBadges = showBadges
         this.listener = onClick
         invalidate()
     }
@@ -134,17 +137,21 @@ class MonthCalendarView @JvmOverloads constructor(
                 bg != 0 -> textOnBg
                 else -> normalText
             }
-            val hasBottom = info != null && (info.isAuto || info.count > 1)
-            val ty = cy - (textPaint.descent() + textPaint.ascent()) / 2 - (if (hasBottom) rowH*0.12f else 0f)
+            // v1.3.15：日期数字不再因标记存在而上下偏移（所有日期排版统一）
+            val hasBottom = showBadges && info != null && (info.isAuto || info.count > 1)
+            val ty = cy - (textPaint.descent() + textPaint.ascent()) / 2
             canvas.drawText(day.toString(), cx, ty, textPaint)
             textPaint.isFakeBoldText = false
-            // 底部小标记：自动打卡 ⚡ 与多次打卡 ×n（位于日期下方同一位置）
+            // v1.3.15：小标记移到圆圈外右上角（原圆内下方会随有无标记导致日期数字错位）
+            // 固定深色文字避免圆外白底隐形；位置整体置于状态方块右上外侧
             if (hasBottom) {
                 val inf = info!!
                 textPaint.textSize = 9f * resources.displayMetrics.scaledDensity
-                textPaint.color = if (bg != 0) textOnBg else normalText
-                val label = (if (inf.isAuto) "⚡" else "") + (if (inf.count > 1) "${inf.count}次" else "")
-                canvas.drawText(label, cx, cy + rowH * 0.26f, textPaint)
+                textPaint.color = 0xFF3A4152.toInt()
+                textPaint.isFakeBoldText = true
+                val label = (if (inf.isAuto) "⚡" else "") + (if (inf.count > 1) "×${inf.count}" else "")
+                canvas.drawText(label, cx + radius * 1.25f, cy - radius * 0.85f, textPaint)
+                textPaint.isFakeBoldText = false
             }
         }
     }

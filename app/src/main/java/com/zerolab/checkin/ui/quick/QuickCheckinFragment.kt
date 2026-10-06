@@ -174,16 +174,26 @@ class QuickCheckinFragment : Fragment() {
         val records = repo.recordsOfMonth(it.id, start, end)
         val byDay = records.groupBy { r -> r.checkinDate }
         val map = HashMap<String, DayInfo>()
+        val groupMode = cfg.groupMode
+        // v1.3.15：打卡组用小日历（紧凑高度），普通打卡保持大日历
+        val lp = calendar.layoutParams
+        lp.height = ((if (groupMode) 188 else 300) * resources.displayMetrics.density).toInt()
+        calendar.layoutParams = lp
         // 预填本月每一天：SKIP/FAIL/SUCCESS 等状态对无记录日期同样要渲染（橙色/红色），不能只遍历有记录的天
         var d = start
         while (d <= end) {
             val list = byDay[d] ?: emptyList()
-            map[d] = CheckinEngine.dayInfo(it, d, list.sortedBy { x -> x.checkinTime })
+            // v1.3.15：打卡组走组专用状态（4 态，无 SKIP/FAIL 染色），普通/日记走 dayInfo
+            map[d] = if (groupMode) CheckinEngine.groupDayInfo(it, d, repo)
+                else CheckinEngine.dayInfo(it, d, list.sortedBy { x -> x.checkinTime })
             d = DateUtils.addDays(d, 1)
         }
-        calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg)) { date -> showDayDetail(date) }
+        // v1.3.15：组日历不显示 ⚡/×n 圆外小标记
+        calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg), { date -> showDayDetail(date) }, showBadges = !groupMode)
         // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽；v1.3.0：随心记/心情日记按实际改图例）
         val legendTv = root.findViewById<TextView>(R.id.tv_legend)
+        if (groupMode) { legendTv.visibility = View.GONE; return }   // v1.3.15：打卡组日历不需要图注
+        legendTv.visibility = View.VISIBLE
         val sb = SpannableStringBuilder()
         fun dot(color: Int, label: String) {
             val s = sb.length
@@ -225,6 +235,13 @@ class QuickCheckinFragment : Fragment() {
         val it = item ?: return
         val today = DateUtils.today()
         val todayRecs = repo.recordsOfDay(it.id, today)
+        // v1.3.15：打卡组——隐藏日期备注栏，显示组子项区（小日历 + 子项列表，无 box）
+        val isGroup = cfg.groupMode
+        root.findViewById<View>(R.id.day_detail_bar).visibility = if (isGroup) View.GONE else View.VISIBLE
+        val groupTitle = root.findViewById<TextView>(R.id.group_members_title)
+        val groupBox = root.findViewById<LinearLayout>(R.id.group_members_box)
+        groupTitle.visibility = if (isGroup) View.VISIBLE else View.GONE
+        groupBox.visibility = if (isGroup) View.VISIBLE else View.GONE
         // v1.3.0：心情日记次数只计带心情的记录（4 次心情+3 次文字 = 4）
         val journal = cfg.journalMode
         val mood = cfg.moodMode
@@ -255,22 +272,37 @@ class QuickCheckinFragment : Fragment() {
             // v1.3.13 打卡组：展示子项进度（点击子项进入打卡页），完成全部子项后自动记组成功
             cfg.groupMode -> {
                 val members = cfg.groupMembers
-                val doneSet = members.filter { mid ->
-                    if (mid == it.id) true
-                    else repo.recordsOfDay(mid, today).any { r -> r.status == "SUCCESS" || r.status == "OFFSET" }
-                }.toSet()
-                val allDone = members.isNotEmpty() && doneSet.size == members.size
-                statusView.text = if (allDone) "状态：打卡组今日已完成 ✓" else "状态：子项 ${doneSet.size}/${members.size} 已完成"
-                btnCheckin.text = if (allDone) "今日已完成 ✓" else "完成全部子项后自动成功"
-                btnCheckin.isEnabled = false; grayBtn()
-                root.findViewById<TextView>(R.id.tv_detail_title).text = "打卡组子项（点击进入打卡）"
-                root.findViewById<TextView>(R.id.tv_detail_body).text = if (members.isEmpty()) "组内暂无子项" else ""
-                val box = root.findViewById<LinearLayout>(R.id.detail_records_box)
-                box.removeAllViews()
+                // v1.3.15：组非排期日——今日无需打卡，子项列表仍展示；doneSet 提升到分支外供子项渲染复用
+                val scheduled = CheckinEngine.isScheduledDay(it, today)
+                val doneSet = if (members.isEmpty() || !scheduled) emptySet()
+                    else members.filter { mid ->
+                        // v1.3.15：以子项当日真实状态判定完成（组合需全部方式完成；不足=部分完成不算完成）
+                        val m = repo.getItem(mid) ?: return@filter false
+                        val st = CheckinEngine.dayInfo(m, today, repo.recordsOfDay(mid, today)).state
+                        st == DayState.SUCCESS || st == DayState.OFFSET
+                    }.toSet()
+                when {
+                    members.isEmpty() -> {
+                        statusView.text = "状态：组内暂无子项"
+                        btnCheckin.text = "完成全部子项后自动成功"; btnCheckin.isEnabled = false; grayBtn()
+                    }
+                    !scheduled -> {
+                        statusView.text = "状态：今日无需打卡 ✓"
+                        btnCheckin.text = "今日无需打卡"; btnCheckin.isEnabled = false; grayBtn()
+                    }
+                    else -> {
+                        val allDone = doneSet.size == members.size
+                        statusView.text = if (allDone) "状态：打卡组今日已完成 ✓" else "状态：子项 ${doneSet.size}/${members.size} 已完成"
+                        btnCheckin.text = if (allDone) "今日已完成 ✓" else "完成全部子项后自动成功"
+                        btnCheckin.isEnabled = false; grayBtn()
+                    }
+                }
+                groupTitle.text = "打卡组子项（点击进入打卡）"
+                groupBox.removeAllViews()
                 members.forEachIndexed { idx, mid ->
                     val m = repo.getItem(mid) ?: return@forEachIndexed
-                    val ok = mid in doneSet
-                    box.addView(groupSubCard(m, ok, idx == 0))
+                    val ok = if (!scheduled) true else mid in doneSet
+                    groupBox.addView(groupSubCard(m, ok, idx == 0))
                 }
             }
             // v1.3.13 N天打卡：严格连续，达成目标后可继续超额
@@ -388,6 +420,7 @@ class QuickCheckinFragment : Fragment() {
 
     /** 点击日期：备注栏显示次数/时间/文字/缩略图/语音（v1.1.6：媒体内联到对应记录行，不再统一堆底部） */
     /** v1.3.14 打卡组子项卡片：主题图标 + 名称 + 打卡方式 + 连续天数 + 状态徽章 */
+    /** v1.3.15 去掉 box 背景框，排版参考打卡管理列表页（左右/上下间距） */
     private fun groupSubCard(m: CheckinItem, ok: Boolean, first: Boolean): View {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val subTheme = ThemeManager.of(m.theme)
@@ -396,8 +429,7 @@ class QuickCheckinFragment : Fragment() {
         val row = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            background = requireContext().getDrawable(R.drawable.bg_input)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setPadding(0, 0, 0, 0)
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             if (!first) lp.topMargin = dp(8)
             layoutParams = lp
@@ -408,8 +440,9 @@ class QuickCheckinFragment : Fragment() {
         }
         val iconWrap = LinearLayout(requireContext()).apply {
             gravity = android.view.Gravity.CENTER
+            // v1.3.15：圆形图标底（与打卡管理列表页一致）
             background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(10).toFloat()
+                shape = android.graphics.drawable.GradientDrawable.OVAL
                 setColor(subTheme.soft)
             }
             layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))

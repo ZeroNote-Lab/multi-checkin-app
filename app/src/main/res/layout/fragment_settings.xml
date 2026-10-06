@@ -50,7 +50,6 @@
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="联网增强" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="位置地名翻译、定位增强、API Key" android:textColor="@color/text_secondary" android:textSize="12sp"/>
             </LinearLayout>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="›" android:textColor="@color/text_hint" android:textSize="22sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -105,7 +104,6 @@
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="外观主题" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="六套莫兰迪配色，全局界面换肤" android:textColor="@color/text_secondary" android:textSize="12sp"/>
             </LinearLayout>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="›" android:textColor="@color/text_hint" android:textSize="22sp" />
         </LinearLayout>
 
         <LinearLayout
