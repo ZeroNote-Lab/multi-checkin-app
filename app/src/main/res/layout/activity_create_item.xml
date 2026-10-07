@@ -374,6 +374,18 @@
                     android:orientation="vertical" />
             </LinearLayout>
 
+            <!-- v1.3.22：自定义打卡「更多选项」——卡片外左下角小字链接，展开/收起高级卡（频率/日期/抵消/锁定） -->
+            <TextView
+                android:id="@+id/btn_more"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_marginBottom="12dp"
+                android:padding="4dp"
+                android:text="更多选项 ▾"
+                android:textColor="@color/info_blue"
+                android:textSize="13sp" />
+
             <!-- 频率与规则卡 -->
             <LinearLayout
                 android:id="@+id/rule_card"
@@ -382,7 +394,8 @@
                 android:layout_marginBottom="12dp"
                 android:background="@drawable/bg_card"
                 android:orientation="vertical"
-                android:padding="14dp">
+                android:padding="14dp"
+                android:visibility="gone">
 
                 <TextView
                     android:id="@+id/tv_rule_title"
@@ -544,7 +557,8 @@
                 android:layout_marginBottom="12dp"
                 android:background="@drawable/bg_card"
                 android:orientation="vertical"
-                android:padding="14dp">
+                android:padding="14dp"
+                android:visibility="gone">
                 <TextView
                     android:id="@+id/tv_schedule_title"
                     android:layout_width="wrap_content"
@@ -569,7 +583,8 @@
                 android:layout_marginBottom="12dp"
                 android:background="@drawable/bg_card"
                 android:orientation="vertical"
-                android:padding="14dp">
+                android:padding="14dp"
+                android:visibility="gone">
 
                 <TextView
                     android:id="@+id/tv_offset_title"
@@ -636,7 +651,8 @@
                 android:layout_marginBottom="12dp"
                 android:background="@drawable/bg_card"
                 android:orientation="vertical"
-                android:padding="14dp">
+                android:padding="14dp"
+                android:visibility="gone">
                 <TextView
                     android:id="@+id/tv_policy_title"
                     android:layout_width="wrap_content"

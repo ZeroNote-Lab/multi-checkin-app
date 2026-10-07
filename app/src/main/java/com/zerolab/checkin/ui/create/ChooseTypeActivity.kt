@@ -27,7 +27,7 @@ class ChooseTypeActivity : AppCompatActivity() {
     )
 
     private val typeEntries = listOf(
-        TypeEntry(R.drawable.ic_type_check, 0xFFD5F2EE.toInt(), "普通打卡",
+        TypeEntry(R.drawable.ic_type_check, 0xFFD5F2EE.toInt(), "自定义打卡",
             "按规则打卡，有缺卡与连续天数", CreateItemActivity.MODE_NORMAL),
         TypeEntry(R.drawable.ic_type_group, 0xFFD5F2EE.toInt(), "打卡组",
             "组内多个普通打卡，全部完成才记组成功", CreateItemActivity.MODE_GROUP),
