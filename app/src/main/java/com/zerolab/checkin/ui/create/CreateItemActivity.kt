@@ -34,6 +34,7 @@ import com.zerolab.checkin.theme.ThemeManager
 import com.zerolab.checkin.ui.scan.ScanActivity
 import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.formatLatLng
+import com.zerolab.checkin.ui.settings.AdminMode
 import android.annotation.SuppressLint
 import android.location.Location
 import android.location.LocationManager
@@ -1926,17 +1927,18 @@ class CreateItemActivity : AppCompatActivity() {
 
         // v1.3.0：日记项不设修改策略（始终可修改），即使历史 LOCKED 也放行
         val isDiary = cfg.journalMode || cfg.moodMode
+        // v1.3.17：超级管理员模式放行所有锁定（改内容不改 editPolicy，退出后仍按原策略）
         // 不可修改策略：规则整体锁定（bug8：之前 LOCKED 仍可改，现在强制生效）
-        if (it.editPolicy == "LOCKED" && !isDiary) {
+        if (it.editPolicy == "LOCKED" && !isDiary && !AdminMode.isOn) {
             lockRules("规则已锁定（创建后不可修改），仅可修改名称/主题")
         }
         // INTERVAL_N 锁定期：仅名称/主题可改，其余规则禁用
-        if (it.editPolicy == "INTERVAL_N" && !isDiary && it.lastEditDate != null &&
+        if (it.editPolicy == "INTERVAL_N" && !isDiary && !AdminMode.isOn && it.lastEditDate != null &&
             DateUtils.daysSince(it.lastEditDate) < (it.editInterval ?: 0)) {
             lockRules("距上次修改不足 ${it.editInterval} 天，规则暂不可改")
         }
         // 自动方式核心规则锁定
-        if (Method.AUTO.key in cfg.methods) lockRules("自动打卡类型创建后核心规则不可改")
+        if (Method.AUTO.key in cfg.methods && !AdminMode.isOn) lockRules("自动打卡类型创建后核心规则不可改")
         // v6.1.0 日期区块回显
         scheduleModeChips.forEach { (k, v) -> applyScheduleChipStyle(v, k == scheduleMode) }
         renderSchedulePanels()
