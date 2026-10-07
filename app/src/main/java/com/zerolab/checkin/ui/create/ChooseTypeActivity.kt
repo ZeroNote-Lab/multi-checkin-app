@@ -26,16 +26,27 @@ class ChooseTypeActivity : AppCompatActivity() {
         val iconRes: Int, val iconBg: Int, val name: String, val desc: String, val mode: String
     )
 
+    /** v1.3.23：创建页请求码 */
+    private val REQ_CREATE = 1001
+
     private val typeEntries = listOf(
         TypeEntry(R.drawable.ic_type_check, 0xFFD5F2EE.toInt(), "自定义打卡",
             "按规则打卡，有缺卡与连续天数", CreateItemActivity.MODE_NORMAL),
         TypeEntry(R.drawable.ic_type_group, 0xFFD5F2EE.toInt(), "打卡组",
             "组内多个普通打卡，全部完成才记组成功", CreateItemActivity.MODE_GROUP),
-        TypeEntry(R.drawable.ic_type_flag, 0xFFD5F2EE.toInt(), "N天打卡",
+        TypeEntry(R.drawable.ic_type_flag, 0xFFD5F2EE.toInt(), "习惯打卡",
             "设定目标天数，连续打卡达成即完成", CreateItemActivity.MODE_NDAYS),
         TypeEntry(R.drawable.ic_type_note, 0xFFD5F2EE.toInt(), "日记打卡",
             "日记式记录，页内选随心记 / 心情日记", CreateItemActivity.MODE_JOURNAL)
     )
+
+    /** v1.3.23：新建保存成功（created 标记）后，选择页一并退出，返回直达首页打卡选择页 */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_CREATE && resultCode == RESULT_OK && data?.getBooleanExtra(CreateItemActivity.EXTRA_CREATED, false) == true) {
+            finish()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,8 +91,9 @@ class ChooseTypeActivity : AppCompatActivity() {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                startActivity(Intent(ctx, CreateItemActivity::class.java)
-                    .putExtra(CreateItemActivity.EXTRA_MODE, e.mode))
+                // v1.3.23：result 方式启动创建页，新建完成后选择页一并退出（返回直达首页打卡选择页）
+                startActivityForResult(Intent(ctx, CreateItemActivity::class.java)
+                    .putExtra(CreateItemActivity.EXTRA_MODE, e.mode), REQ_CREATE)
             }
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             if (withTopMargin) lp.topMargin = 14.dp()
