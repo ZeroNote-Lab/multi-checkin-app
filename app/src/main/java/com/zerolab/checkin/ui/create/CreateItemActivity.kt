@@ -94,6 +94,8 @@ class CreateItemActivity : AppCompatActivity() {
 
     // v1.2.0 随心记模式：普通打卡 / 随心记 chip
     private var journalMode = false
+    // v1.3.22 自定义打卡「更多选项」折叠：false=只显示 名称/图标/方式；true=展开 频率/日期/抵消/锁定
+    private var moreExpanded = false
     // v1.3.0 心情日记（日记 tab 内记录类型：false=随心记 true=心情日记）
     private var moodMode = false
     // v1.3.13 打卡组 / N天打卡 模式状态
@@ -190,6 +192,7 @@ class CreateItemActivity : AppCompatActivity() {
         bindPolicy()
         bindJournalPanel()   // v1.3.0 日记 tab 记录类型单选 + 心情折线图开关
 
+        moreExpanded = editing != null   // v1.3.22：编辑默认展开高级卡，新建默认折叠
         if (editing != null) {
             loadEditing()
         } else {
@@ -213,6 +216,7 @@ class CreateItemActivity : AppCompatActivity() {
             }
         }
         bindSpecialModeControls()
+        bindMoreButton()   // v1.3.22：自定义打卡「更多选项」折叠
         findViewById<Button>(R.id.btn_save).setOnClickListener { save() }
         // v1.3.14：全局主题换肤（根背景 / 保存按钮）
         ThemeUi.apply(this, findViewById(R.id.create_root), listOf(R.id.btn_save))
@@ -232,6 +236,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.ndays_card).visibility = if (ndaysMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.group_card).visibility = if (groupMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.btn_group_more).visibility = if (groupMode) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btn_more).visibility = View.GONE   // v1.3.22：组/N天用不到主页面更多
         if (groupMode) renderGroupMembers()
     }
 
@@ -814,18 +819,18 @@ class CreateItemActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             val lp = android.widget.GridLayout.LayoutParams().apply {
-                width = 0; height = dp(64)
-                setMargins(dp(5), dp(5), dp(5), dp(5))
-                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
+                width = dp(48); height = dp(48)   // v1.3.22：圆角正方形
+                setMargins(dp(4), dp(4), dp(4), dp(4))
+                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED)
             }
             layoutParams = lp
         }
         v.background = GradientDrawable().apply {
-            cornerRadius = dp(13).toFloat()
+            cornerRadius = dp(12).toFloat()
             setColor(if (sel) 0xFFE4F6EC.toInt() else 0xFFFFFFFF.toInt())
             setStroke(if (sel) dp(2) else dp(1), if (sel) 0xFF2FBF71.toInt() else 0xFFE3EAE5.toInt())
         }
-        v.addView(TextView(this).apply { text = ic.emoji; textSize = 24f; gravity = Gravity.CENTER })
+        v.addView(TextView(this).apply { text = ic.emoji; textSize = 22f; gravity = Gravity.CENTER })
         return v
     }
 
@@ -836,19 +841,19 @@ class CreateItemActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             val lp = android.widget.GridLayout.LayoutParams().apply {
-                width = 0; height = dp(64)
-                setMargins(dp(5), dp(5), dp(5), dp(5))
-                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
+                width = dp(48); height = dp(48)   // v1.3.22：圆角正方形
+                setMargins(dp(4), dp(4), dp(4), dp(4))
+                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED)
             }
             layoutParams = lp
         }
         v.background = GradientDrawable().apply {
-            cornerRadius = dp(13).toFloat()
+            cornerRadius = dp(12).toFloat()
             setColor(if (expanded) 0xFFFFFFFF.toInt() else 0x00000000)
             setStroke(dp(1), 0xFFC4D2CA.toInt())
         }
         v.addView(TextView(this).apply {
-            text = if (expanded) "▴" else "+"; textSize = 24f
+            text = if (expanded) "▴" else "+"; textSize = 22f
             setTextColor(0xFF7E9188.toInt()); gravity = Gravity.CENTER
         })
         return v
@@ -895,13 +900,7 @@ class CreateItemActivity : AppCompatActivity() {
         val journal = journalMode
         findViewById<View>(R.id.tv_method_title).visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.tv_method_desc).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.tv_rule_title).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.rule_card).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.schedule_card).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.tv_offset_title).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.offset_card).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.tv_policy_title).visibility = if (journal) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.policy_card).visibility = if (journal) View.GONE else View.VISIBLE
+        refreshMoreVisibility()   // v1.3.22：高级卡由「更多选项」折叠控制（日记一律隐藏）
         findViewById<View>(R.id.journal_panel).visibility = if (journal) View.VISIBLE else View.GONE
 
         // v1.3.3：普通方式容器仅普通 tab 显示；日记 tab 下 PHOTO/TEXT/VOICE 的 card 移到记录类型之间
@@ -1017,6 +1016,32 @@ class CreateItemActivity : AppCompatActivity() {
         refreshJournalVisibility()
         refreshConflicts()
         refreshComboNRow()
+    }
+
+    // ---------- v1.3.22 自定义打卡「更多选项」折叠 ----------
+    private fun bindMoreButton() {
+        findViewById<View>(R.id.btn_more).setOnClickListener {
+            moreExpanded = !moreExpanded
+            refreshMoreVisibility()
+        }
+    }
+
+    private fun refreshMoreVisibility() {
+        if (groupMode || ndaysMode) {
+            findViewById<View>(R.id.btn_more).visibility = View.GONE
+            return
+        }
+        findViewById<View>(R.id.btn_group_more).visibility = View.GONE   // v1.3.22：组更多仅打卡组创建页显示（普通/自定义/日记模式隐藏）
+        val show = !journalMode && moreExpanded
+        findViewById<View>(R.id.btn_more).visibility = if (journalMode) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.rule_card).visibility = if (show) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.schedule_card).visibility = if (show) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.offset_card).visibility = if (show) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.policy_card).visibility = if (show) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.tv_rule_title).visibility = if (show) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.tv_offset_title).visibility = if (show) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.tv_policy_title).visibility = if (show) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.btn_more).text = if (moreExpanded) "收起选项 ▴" else "更多选项 ▾"
     }
 
     /** v1.2.0 组合打卡：完成 N 个即完成（0=全部）。嵌在打卡方式卡片下，多选时显示 */
