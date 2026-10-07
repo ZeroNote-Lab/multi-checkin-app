@@ -154,7 +154,7 @@ class QuickCheckinFragment : Fragment() {
         autoBackfillMissing()
         val theme = ThemeManager.of(q.theme)
         calendar.themeColor = ThemeUi.current(requireActivity()).accent
-        root.findViewById<TextView>(R.id.tv_emoji).text = theme.emoji
+        root.findViewById<TextView>(R.id.tv_emoji).text = com.zerolab.checkin.theme.IconManager.emojiFor(q.icon, q.theme)
         root.findViewById<TextView>(R.id.tv_name).text = q.name
         btnCheckin.background?.setTint(ThemeUi.current(requireActivity()).accent)
         renderMonth()
@@ -469,7 +469,7 @@ class QuickCheckinFragment : Fragment() {
             }
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
         }
-        iconWrap.addView(TextView(requireContext()).apply { text = subTheme.emoji; textSize = 22f })
+        iconWrap.addView(TextView(requireContext()).apply { text = com.zerolab.checkin.theme.IconManager.emojiFor(m.icon, m.theme); textSize = 22f })
         row.addView(iconWrap)
         val col = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
@@ -568,6 +568,13 @@ class QuickCheckinFragment : Fragment() {
             }
             // v1.3.7：负打卡无操作日=成功日，不提供补签；正常模式缺卡日提供手动补签
             if (!neg) offerManualBackfill(it, date, neg)
+            // v1.3.18：超级管理员——未打卡日期可长按补录（成功/补签/破戒）
+            if (AdminMode.isOn) {
+                val citem = it
+                body.setOnLongClickListener {
+                    adminBackfillMenu(citem, date); true
+                }
+            }
             return
         }
         // v1.3.0：心情折线图置于记录区第一行（当天 ≥2 条带心情记录且开关开启）
@@ -770,20 +777,24 @@ class QuickCheckinFragment : Fragment() {
         }
     }
     /** v1.3.17：超级管理员——记录操作菜单（按记录内容动态生成） */
+    /** v1.3.18：补充「修改打卡时间」「更换照片」，覆盖不同打卡方式的记录内容 */
     private fun showRecordAdminMenu(r: CheckinRecord, date: String) {
         val opts = mutableListOf<String>()
         opts += "修改状态"
+        opts += "修改打卡时间"
         if (!r.textContent.isNullOrBlank()) opts += "修改文字"
-        if (r.latitude != null && r.longitude != null) opts += "删除位置"
-        if (r.photoPath?.isNotBlank() == true) opts += "删除图片"
+        if (r.photoPath?.isNotBlank() == true) { opts += "更换照片"; opts += "删除图片" }
         if (r.voicePath?.isNotBlank() == true) opts += "删除语音"
+        if (r.latitude != null && r.longitude != null) opts += "删除位置"
         opts += "删除整条记录"
         AlertDialog.Builder(requireContext())
             .setTitle("管理员 · 记录操作（$date）")
             .setItems(opts.toTypedArray()) { _, w ->
                 when (opts[w]) {
                     "修改状态" -> changeRecordStatus(r)
+                    "修改打卡时间" -> editRecordTime(r, date)
                     "修改文字" -> editRecordText(r)
+                    "更换照片" -> replaceRecordPhoto(r)
                     "删除位置" -> {
                         repo.updateRecord(r.copy(latitude = null, longitude = null, extraJson = clearLocName(r.extraJson)))
                         toast("已删除位置信息")
@@ -816,6 +827,54 @@ class QuickCheckinFragment : Fragment() {
             }.show()
     }
 
+    /** v1.3.18：管理员——修改记录打卡时间（输入 HH:mm 或 HH:mm:ss，归属日期不变） */
+    private fun editRecordTime(r: CheckinRecord, date: String) {
+        val et = android.widget.EditText(requireContext()).apply {
+            setText(java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(r.checkinTime)))
+            hint = "HH:mm（如 08:30）"
+            inputType = android.text.InputType.TYPE_CLASS_DATETIME or android.text.InputType.TYPE_DATETIME_VARIATION_TIME
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("修改打卡时间（$date）")
+            .setView(et)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                val s = et.text.toString().trim()
+                val parts = s.split(":").mapNotNull { it.toIntOrNull() }
+                if (parts.size < 2 || parts[0] !in 0..23 || parts[1] !in 0..59) {
+                    toast("时间格式不正确（需 HH:mm）"); return@setPositiveButton
+                }
+                try {
+                    val f = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+                    val t = f.parse("$date ${"%02d".format(parts[0])}:${"%02d".format(parts[1])}")?.time ?: run { toast("时间解析失败"); return@setPositiveButton }
+                    repo.updateRecord(r.copy(checkinTime = t))
+                    toast("打卡时间已修改")
+                    refresh()
+                } catch (_: Exception) { toast("时间解析失败") }
+            }.show()
+    }
+
+    /** v1.3.18：管理员——从相册更换该条记录的打卡照片（复制进应用目录，原图删除） */
+    private fun replaceRecordPhoto(r: CheckinRecord) {
+        val launcher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            try {
+                val dir = File(requireContext().filesDir, "checkin").apply { mkdirs() }
+                val target = File(dir, "admin_${System.currentTimeMillis()}.jpg")
+                requireContext().contentResolver.openInputStream(uri)?.use { ins ->
+                    target.outputStream().use { outs -> ins.copyTo(outs) }
+                }
+                if (target.length() <= 0) { toast("图片读取失败"); return@registerForActivityResult }
+                val old = r.photoPath
+                repo.updateRecord(r.copy(photoPath = target.absolutePath))
+                if (old?.isNotBlank() == true) { try { File(old).delete() } catch (_: Exception) {} }
+                toast("照片已更换")
+                refresh()
+            } catch (e: Exception) { toast("更换照片失败：${e.message}") }
+        }
+        launcher.launch("image/*")
+    }
+
     /** 修改记录状态（成功 / 补签 / 破戒） */
     private fun changeRecordStatus(r: CheckinRecord) {
         val cur = when (r.status) {
@@ -833,9 +892,25 @@ class QuickCheckinFragment : Fragment() {
             }.show()
     }
 
+    /** v1.3.18：管理员——未打卡日期补录（成功/补签/破戒，checkinTime 取该日 12:00:00） */
+    private fun adminBackfillMenu(it: CheckinItem, date: String) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("管理员 · 补录 $date")
+            .setItems(arrayOf("补一条成功记录", "补一条补签记录", "补一条破戒记录")) { _, w ->
+                val st = when (w) { 1 -> "OFFSET"; 2 -> "FAIL"; else -> "SUCCESS" }
+                val t = try {
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                        .parse("$date 12:00:00")?.time ?: System.currentTimeMillis()
+                } catch (_: Exception) { System.currentTimeMillis() }
+                repo.insertRecord(com.zerolab.checkin.data.entity.CheckinRecord(
+                    itemId = it.id, checkinDate = date, checkinTime = t, status = st))
+                toast("已补录一条${arrayOf("成功", "补签", "破戒")[w]}记录")
+                refresh()
+            }.setNegativeButton("取消", null).show()
+    }
+
     /** 修改记录文字内容 */
-    private fun editRecordText(r: CheckinRecord) {
-        val et = android.widget.EditText(requireContext()).apply {
+    private fun editRecordText(r: CheckinRecord) {        val et = android.widget.EditText(requireContext()).apply {
             setText(r.textContent ?: "")
             hint = "输入新的打卡内容"
         }

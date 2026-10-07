@@ -39,11 +39,27 @@ class CheckinRepository(private val db: AppDatabase) {
     fun deleteItem(id: Long) {
         val quick = quickDao.get()
         if (quick?.itemId == id) {
-            val next = itemDao.getFirstActive(id)
-            quickDao.upsert(QuickConfig(1, next?.id))
+            // v1.3.18：删除快捷项后，只在「可设为快捷」的项中按序递补第一个；
+            // 无可快捷项（全部是组/组子项或已无项）则快捷置空。
+            quickDao.upsert(QuickConfig(1, pickNextQuick(id)))
         }
         recordDao.deleteByItem(id)
         itemDao.deleteById(id)
+    }
+
+    /** v1.3.18：选出下一个可快捷项——非打卡组、非任何组的子项、激活，按列表序第一个；无则 null */
+    private fun pickNextQuick(excludeId: Long): Long? {
+        val items = itemDao.getAllSorted()
+        val subIds = items.asSequence()
+            .filter { it.id != excludeId }
+            .filter { runCatching { com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode }.getOrDefault(false) }
+            .flatMap { runCatching { com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMembers }.getOrDefault(emptyList()) }
+            .toSet()
+        return items.firstOrNull {
+            it.id != excludeId && it.isActive == 1 &&
+                !runCatching { com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode }.getOrDefault(false) &&
+                it.id !in subIds
+        }?.id
     }
 
     fun setPinned(id: Long, pinned: Boolean) {

@@ -152,7 +152,8 @@ class ItemListFragment : Fragment() {
             val theme = ThemeManager.of(item.theme)
             // v6.1.0：取消主题装饰色，图标底色统一中性浅灰（仅保留打卡按钮/今天描边的主题色）
             h.iconBg.background?.setTint(0xFFEFF1F6.toInt())
-            h.emoji.text = theme.emoji
+            // v1.3.18：图标独立于配色主题（icon 优先，旧数据回退主题 emoji）
+            h.emoji.text = com.zerolab.checkin.theme.IconManager.emojiFor(item.icon, item.theme)
             // v1.1.6：置顶卡片名称前加 📌 标记
             // v1.1.7：星标（快捷打卡）与置顶 📌 同为名称行内前缀
             val badges = StringBuilder()
