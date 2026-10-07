@@ -104,6 +104,7 @@ class CheckinRepository(private val db: AppDatabase) {
     // v1.3.8：一键修复工具用——删除单条记录 / 改状态 / 还回盾牌
     fun deleteRecord(id: Long) = recordDao.deleteById(id)
     fun updateRecordStatus(id: Long, status: String) = recordDao.updateStatus(id, status)
+    fun updateRecord(r: CheckinRecord) = recordDao.update(r)
     fun returnCreditByDate(itemId: Long, date: String): Int = creditDao.returnUsedByDate(itemId, date)
 
     // ---------- 抵消 ----------

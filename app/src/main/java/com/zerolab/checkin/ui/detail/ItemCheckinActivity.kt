@@ -58,6 +58,13 @@ class ItemCheckinActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         enableNfcForeground()
+        // v1.3.17：编辑（含超级管理员改名）保存返回后刷新顶部标题
+        val id = intent.getLongExtra(EXTRA_ID, -1L)
+        if (id > 0) {
+            val repo = (application as CheckinApp).repository
+            val it = repo.getItem(id)
+            if (it != null) findViewById<TextView>(R.id.tv_title).text = "${ThemeManager.of(it.theme).emoji} ${it.name}"
+        }
     }
 
     override fun onPause() {

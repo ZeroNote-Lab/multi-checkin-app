@@ -21,8 +21,8 @@ class SettingsFragment : Fragment() {
         ThemeUi.apply(requireActivity(), view)
         try {
             val tvVer = view.findViewById<TextView>(R.id.tv_version)
-            tvVer.text = "打卡 APP v" + requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName
-            // v1.3.6：隐藏迁移工具入口——版本号连点 5 次触发（一次性解锁旧版 LOCKED 项，用完即退役）
+            updateVerText(tvVer)
+            // v1.3.17：版本号连点 5 次 = 超级管理员模式开关（退出 App 自动关闭）
             tvVer.setOnClickListener { onVersionTapped() }
         } catch (_: Exception) {}
         view.findViewById<View>(R.id.item_export).setOnClickListener {
@@ -49,44 +49,42 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    // ---------- 隐藏工具入口：版本号连点 5 次触发 LOCKED 一次性迁移 ----------
+    // ---------- v1.3.17 超级管理员模式入口（版本号连点 5 次开关） ----------
     private var versionTapCount = 0
     private var lastVersionTap = 0L
+
+    private fun updateVerText(tvVer: TextView) {
+        val ver = try { requireContext().packageManager.getPackageInfo(requireContext().packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
+        tvVer.text = "打卡 APP v" + ver + if (AdminMode.isOn) "  ·  管理员模式" else ""
+    }
 
     private fun onVersionTapped() {
         val now = System.currentTimeMillis()
         if (now - lastVersionTap > 800) versionTapCount = 0
         lastVersionTap = now
         versionTapCount++
-        if (versionTapCount >= 5) {
-            versionTapCount = 0
-            offerLockMigration()
+        if (versionTapCount < 5) return
+        versionTapCount = 0
+        if (AdminMode.isOn) {
+            AlertDialog.Builder(requireContext())
+                .setTitle("关闭超级管理员模式")
+                .setMessage("退出管理员模式后，将恢复锁定项的限制。\n\n确定关闭？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("关闭") { _, _ ->
+                    AdminMode.off()
+                    view?.findViewById<TextView>(R.id.tv_version)?.let { updateVerText(it) }
+                    Toast.makeText(requireContext(), "管理员模式已关闭", Toast.LENGTH_SHORT).show()
+                }.show()
+        } else {
+            AlertDialog.Builder(requireContext())
+                .setTitle("开启超级管理员模式")
+                .setMessage("开启后可修改任意打卡项（含锁定项）与打卡记录。\n退出 App 后自动关闭，不影响原锁定状态。\n\n确定开启？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("开启") { _, _ ->
+                    AdminMode.on()
+                    view?.findViewById<TextView>(R.id.tv_version)?.let { updateVerText(it) }
+                    Toast.makeText(requireContext(), "超级管理员模式已开启", Toast.LENGTH_SHORT).show()
+                }.show()
         }
-    }
-
-    /** 把所有 LOCKED 旧打卡项一次性迁移为可修改（FLEX）；只执行一次，之后入口提示已迁移 */
-    private fun offerLockMigration() {
-        val prefs = requireContext().getSharedPreferences("checkin_migration", android.content.Context.MODE_PRIVATE)
-        if (prefs.getBoolean("lock_migrated", false)) {
-            Toast.makeText(requireContext(), "LOCKED 迁移已完成，无需重复执行", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val repo = (requireActivity().application as com.zerolab.checkin.CheckinApp).repository
-        val lockedCount = repo.getItems().count { it.editPolicy == "LOCKED" }
-        if (lockedCount == 0) {
-            prefs.edit().putBoolean("lock_migrated", true).apply()
-            Toast.makeText(requireContext(), "没有需要迁移的 LOCKED 打卡项", Toast.LENGTH_SHORT).show()
-            return
-        }
-        AlertDialog.Builder(requireContext())
-            .setTitle("数据迁移（开发者工具）")
-            .setMessage("检测到 $lockedCount 个「不可修改」打卡项（旧版本创建）。\n\n将一次性改为「可修改」，之后可正常编辑规则；本次迁移后新建的打卡项仍默认锁定。\n\n确定迁移？")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("迁移") { _, _ ->
-                val n = repo.migrateLockedToFlex()
-                prefs.edit().putBoolean("lock_migrated", true).apply()
-                Toast.makeText(requireContext(), "已迁移 $n 个打卡项为可修改 ✓", Toast.LENGTH_SHORT).show()
-            }
-            .show()
     }
 }

@@ -29,4 +29,8 @@ interface RecordDao {
 
     @Query("UPDATE checkin_record SET status = :status WHERE id = :id")
     fun updateStatus(id: Long, status: String)
+
+    // v1.3.17：超级管理员——整行更新（改状态/文字/素材清理等）
+    @Update
+    fun update(record: CheckinRecord): Int
 }

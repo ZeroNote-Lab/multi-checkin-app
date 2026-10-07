@@ -21,6 +21,7 @@ import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
 import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.data.entity.CheckinItem
+import com.zerolab.checkin.data.entity.CheckinRecord
 import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.engine.DayInfo
 import com.zerolab.checkin.engine.DayState
@@ -28,6 +29,7 @@ import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
 import com.zerolab.checkin.ui.detail.ItemCheckinActivity
+import com.zerolab.checkin.ui.settings.AdminMode
 import com.zerolab.checkin.ui.detail.ItemDetailActivity
 import com.zerolab.checkin.ui.flow.CheckinFlow
 import com.zerolab.checkin.util.DateUtils
@@ -300,9 +302,18 @@ class QuickCheckinFragment : Fragment() {
                         btnCheckin.isEnabled = false; grayBtn()
                     }
                 }
-                groupTitle.text = "打卡组子项"
+                // v1.3.17：组模式隐藏顶部状态卡（信息由子项卡片+底部按钮表达），连续天数并入子项标题行
+                root.findViewById<View>(R.id.status_bar).visibility = View.GONE
+                groupTitle.text = "打卡组子项 · 🔥 连续 $days 天"
                 groupBox.removeAllViews()
-                members.forEachIndexed { idx, mid ->
+                // v1.3.17：子项三档排序——部分完成(进行中)最上、未打卡居中、已完成沉底；同档保持原序（新一天全部未打卡即恢复默认）
+                val sorted = members.map { mid ->
+                    mid to (repo.getItem(mid)?.let { CheckinEngine.subDayProgress(it, today, repo) } ?: intArrayOf(0, 1))
+                }.sortedWith(compareByDescending<Pair<Long, IntArray>> { p ->
+                    val d = p.second[0]; val t = if (p.second[1] <= 0) 1 else p.second[1]
+                    when { d > 0 && d < t -> 2; d <= 0 -> 1; else -> 0 }
+                }).map { it.first }
+                sorted.forEachIndexed { idx, mid ->
                     val m = repo.getItem(mid) ?: return@forEachIndexed
                     val ok = if (!scheduled) true else mid in doneSet
                     groupBox.addView(groupSubCard(m, ok, idx == 0))
@@ -620,6 +631,12 @@ class QuickCheckinFragment : Fragment() {
                 val locName = try { org.json.JSONObject(r.extraJson ?: "{}").optString("locName", "") } catch (_: Exception) { "" }
                 sb.append("\n   📍 位置：${if (locName.isNotBlank()) locName else formatLatLng(r.latitude!!, r.longitude!!)}")
             }
+            // v1.3.17：超级管理员——长按记录弹出操作菜单
+            if (AdminMode.isOn) {
+                row.setOnLongClickListener {
+                    showRecordAdminMenu(r, date); true
+                }
+            }
             val tv = TextView(requireContext()).apply {
                 text = sb.toString(); textSize = 13f
                 setTextColor(0xFF1F2430.toInt()); setLineSpacing(3f * resources.displayMetrics.scaledDensity, 1f)
@@ -752,6 +769,99 @@ class QuickCheckinFragment : Fragment() {
             d = DateUtils.addDays(d, -1)
         }
     }
+    /** v1.3.17：超级管理员——记录操作菜单（按记录内容动态生成） */
+    private fun showRecordAdminMenu(r: CheckinRecord, date: String) {
+        val opts = mutableListOf<String>()
+        opts += "修改状态"
+        if (!r.textContent.isNullOrBlank()) opts += "修改文字"
+        if (r.latitude != null && r.longitude != null) opts += "删除位置"
+        if (r.photoPath?.isNotBlank() == true) opts += "删除图片"
+        if (r.voicePath?.isNotBlank() == true) opts += "删除语音"
+        opts += "删除整条记录"
+        AlertDialog.Builder(requireContext())
+            .setTitle("管理员 · 记录操作（$date）")
+            .setItems(opts.toTypedArray()) { _, w ->
+                when (opts[w]) {
+                    "修改状态" -> changeRecordStatus(r)
+                    "修改文字" -> editRecordText(r)
+                    "删除位置" -> {
+                        repo.updateRecord(r.copy(latitude = null, longitude = null, extraJson = clearLocName(r.extraJson)))
+                        toast("已删除位置信息")
+                        refresh()
+                    }
+                    "删除图片" -> {
+                        try { File(r.photoPath!!).delete() } catch (_: Exception) {}
+                        repo.updateRecord(r.copy(photoPath = null))
+                        toast("已删除该条记录的图片")
+                        refresh()
+                    }
+                    "删除语音" -> {
+                        try { File(r.voicePath!!).delete() } catch (_: Exception) {}
+                        repo.updateRecord(r.copy(voicePath = null))
+                        toast("已删除该条记录的语音")
+                        refresh()
+                    }
+                    "删除整条记录" -> {
+                        AlertDialog.Builder(requireContext())
+                            .setTitle("删除打卡记录")
+                            .setMessage("确定删除 $date 这条打卡记录吗？\n删除后当天完成度会相应变化。")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("删除") { _, _ ->
+                                repo.deleteRecord(r.id)
+                                toast("已删除该条记录")
+                                refresh()
+                            }.show()
+                    }
+                }
+            }.show()
+    }
+
+    /** 修改记录状态（成功 / 补签 / 破戒） */
+    private fun changeRecordStatus(r: CheckinRecord) {
+        val cur = when (r.status) {
+            "OFFSET" -> "补签"
+            "FAIL" -> "破戒"
+            else -> "成功"
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("修改状态（当前：$cur）")
+            .setItems(arrayOf("成功", "补签", "破戒")) { _, w ->
+                val st = when (w) { 1 -> "OFFSET"; 2 -> "FAIL"; else -> "SUCCESS" }
+                repo.updateRecord(r.copy(status = st))
+                toast("已改为「${arrayOf("成功", "补签", "破戒")[w]}」")
+                refresh()
+            }.show()
+    }
+
+    /** 修改记录文字内容 */
+    private fun editRecordText(r: CheckinRecord) {
+        val et = android.widget.EditText(requireContext()).apply {
+            setText(r.textContent ?: "")
+            hint = "输入新的打卡内容"
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("修改文字内容")
+            .setView(et)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                val txt = et.text.toString()
+                repo.updateRecord(r.copy(textContent = if (txt.isBlank()) null else txt))
+                toast("文字内容已修改")
+                refresh()
+            }.show()
+    }
+
+    /** 删除位置时同步清理 extraJson 里的 locName */
+    private fun clearLocName(extra: String?): String? {
+        if (extra.isNullOrBlank()) return extra
+        return try {
+            val o = org.json.JSONObject(extra)
+            if (o.has("locName")) o.remove("locName")
+            if (o.length() == 0) null else o.toString()
+        } catch (_: Exception) { extra }
+    }
+
+    private fun toast(s: String) = Toast.makeText(requireContext(), s, Toast.LENGTH_SHORT).show()
 }
 
 /** v1.3.16 方案D：打卡组子项进度环（浅灰背景环 + 前景进度弧 + 中心文字） */

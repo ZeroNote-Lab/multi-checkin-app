@@ -15,6 +15,7 @@ import com.zerolab.checkin.engine.CheckinEngine
 import com.zerolab.checkin.ui.list.ItemListFragment
 import com.zerolab.checkin.ui.quick.NfcHub
 import com.zerolab.checkin.ui.quick.QuickCheckinFragment
+import com.zerolab.checkin.ui.settings.AdminMode
 import com.zerolab.checkin.ui.settings.SettingsFragment
 import com.zerolab.checkin.theme.GlobalThemeManager
 import com.zerolab.checkin.theme.ThemeUi
@@ -121,6 +122,12 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         try { NfcAdapter.getDefaultAdapter(this)?.disableForegroundDispatch(this) } catch (_: Exception) {}
+    }
+
+    // v1.3.17：正常退出/划掉任务时关闭超级管理员模式（冷启动本就重置）
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) AdminMode.off()
     }
 
     private fun enableNfcForeground() {
