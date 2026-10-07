@@ -111,7 +111,7 @@
                     android:textColorHint="@color/text_hint" />
             </LinearLayout>
 
-            <!-- 主题卡 -->
+            <!-- v1.3.18 图标卡（原主题卡改图标选择，GridLayout 需全宽容器） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -122,21 +122,16 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="主题"
+                    android:text="图标"
                     android:textColor="@color/text_primary"
                     android:textSize="13sp"
                     android:textStyle="bold" />
-                <HorizontalScrollView
+                <LinearLayout
+                    android:id="@+id/theme_container"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:scrollbars="none">
-                    <LinearLayout
-                        android:id="@+id/theme_container"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal" />
-                </HorizontalScrollView>
+                    android:orientation="vertical" />
             </LinearLayout>
 
             <!-- v1.3.13 N天打卡：目标天数（严格连续） -->

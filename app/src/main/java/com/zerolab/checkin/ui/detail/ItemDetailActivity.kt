@@ -44,7 +44,7 @@ class ItemDetailActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tv_name).text = item.name
         val cfg = ItemConfig.parse(item.configJson)
         val theme = ThemeManager.of(item.theme)
-        findViewById<TextView>(R.id.tv_emoji).text = theme.emoji
+        findViewById<TextView>(R.id.tv_emoji).text = com.zerolab.checkin.theme.IconManager.emojiFor(item.icon, item.theme) // v1.3.18：图标独立
         findViewById<TextView>(R.id.tv_sub).text =
             "主题：${theme.name}    状态：${if (item.isActive == 1) "启用中" else "已暂停"}"
 

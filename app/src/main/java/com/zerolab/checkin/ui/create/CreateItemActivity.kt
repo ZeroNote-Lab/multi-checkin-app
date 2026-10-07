@@ -62,6 +62,9 @@ class CreateItemActivity : AppCompatActivity() {
     private var editing: CheckinItem? = null
     private val cfg = ItemConfig()
     private var selectedTheme = "sakura"
+    // v1.3.18：图标选择（独立于配色主题）；null=未选（编辑旧数据时无高亮）
+    private var selectedIcon: String? = null
+    private var iconExpanded = false
 
     private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout, var built: Boolean = false)
     private val rows = LinkedHashMap<String, MethodRow>()
@@ -279,7 +282,7 @@ class CreateItemActivity : AppCompatActivity() {
             background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(theme.soft) }
             layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
         }
-        iconWrap.addView(TextView(this).apply { text = theme.emoji; textSize = 17f })
+        iconWrap.addView(TextView(this).apply { text = com.zerolab.checkin.theme.IconManager.emojiFor(selectedIcon, selectedTheme); textSize = 17f })
         row.addView(iconWrap)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -837,7 +840,7 @@ class CreateItemActivity : AppCompatActivity() {
             } else {
                 val group = CheckinItem(
                     name = name, type = "GROUP", configJson = cfg.toJson(),
-                    icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
+                    icon = finalIconKey(), theme = autoThemeFor(), sortOrder = repo.itemCount(),
                     editPolicy = "FLEX", editInterval = null,
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                 )
@@ -858,7 +861,7 @@ class CreateItemActivity : AppCompatActivity() {
                     if (subCfg.methods.isEmpty()) subCfg.methods.add(Method.NORMAL.key)
                     val sub = CheckinItem(
                         name = s.name, type = "NORMAL", configJson = subCfg.toJson(),
-                        icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
+                        icon = "default", theme = autoThemeFor(), sortOrder = repo.itemCount(),
                         groupTag = gid.toString(), editPolicy = "LOCKED",
                         lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                     )
@@ -868,7 +871,7 @@ class CreateItemActivity : AppCompatActivity() {
             cfg.groupMembers.clear(); cfg.groupMembers.addAll(memberIds)
             cfg.groupMemberNames.clear(); cfg.groupMemberNames.addAll(groupSubs.map { it.name })
             if (editing != null) {
-                repo.updateItem(editing!!.copy(name = name, theme = selectedTheme, configJson = cfg.toJson(), updatedAt = now))
+                repo.updateItem(editing!!.copy(name = name, theme = selectedTheme, icon = finalIconKey(), configJson = cfg.toJson(), updatedAt = now))
             } else {
                 repo.getItem(gid)?.let { repo.updateItem(it.copy(configJson = cfg.toJson())) }
             }
@@ -879,41 +882,92 @@ class CreateItemActivity : AppCompatActivity() {
     // ---------- v1.3.13 打卡组 / N天打卡 ----------
     // ---------- 主题 ----------
     private fun buildThemeChips() {
+        // v1.3.18：主题选择卡片改为图标选择（方案B：4 列网格，常用 7 + 更多格；展开全部 21）
         val container = findViewById<LinearLayout>(R.id.theme_container)
-        ThemeManager.themes.forEach { t ->
-            val tv = TextView(this)
-            tv.text = " ${t.emoji} ${t.name} "
-            tv.textSize = 13f
-            tv.gravity = Gravity.CENTER
-            tv.setPadding(28, 18, 28, 18)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.marginEnd = 16
-            tv.layoutParams = lp
-            tv.setOnClickListener {
-                selectedTheme = t.id
-                ThemeManager.themes.forEachIndexed { i, _ -> container.getChildAt(i).invalidate() }
-                renderThemeChips()
-            }
-            container.addView(tv)
-        }
-        renderThemeChips()
+        renderIconGrid(container)
     }
 
-    private fun renderThemeChips() {
-        val container = findViewById<LinearLayout>(R.id.theme_container)
-        ThemeManager.themes.forEachIndexed { i, t ->
-            val tv = container.getChildAt(i) as TextView
-            val selected = t.id == selectedTheme
-            val bg = GradientDrawable()
-            bg.cornerRadius = 24f
-            // v6.1.0：取消主题色填充，选中态用深底浅字标识
-            bg.setColor(if (selected) 0xFF3A4152.toInt() else 0xFFEEF1F6.toInt())
-            bg.setStroke(if (selected) 0 else 2, 0xFFD6DBE6.toInt())
-            tv.background = bg
-            tv.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
-            tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+    private fun renderIconGrid(container: LinearLayout) {
+        container.removeAllViews()
+        val grid = android.widget.GridLayout(this).apply {
+            columnCount = 4
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
+        val shown = if (iconExpanded) com.zerolab.checkin.theme.IconManager.all else com.zerolab.checkin.theme.IconManager.common
+        shown.forEach { ic ->
+            val cell = iconCell(ic)
+            cell.setOnClickListener {
+                selectedIcon = ic.key
+                renderIconGrid(container)
+            }
+            grid.addView(cell)
+        }
+        val more = iconMoreCell(if (iconExpanded) "收起 ▴" else "更多")
+        more.setOnClickListener {
+            iconExpanded = !iconExpanded
+            renderIconGrid(container)
+        }
+        grid.addView(more)
+        container.addView(grid)
     }
+
+    private fun iconCell(ic: com.zerolab.checkin.theme.ItemIcon): View {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        val sel = ic.key == selectedIcon
+        val v = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            val lp = android.widget.GridLayout.LayoutParams().apply {
+                width = 0; height = dp(78)
+                setMargins(dp(6), dp(6), dp(6), dp(6))
+                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
+            }
+            layoutParams = lp
+        }
+        v.background = GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setColor(if (sel) 0xFFE4F6EC.toInt() else 0xFFFFFFFF.toInt())
+            setStroke(if (sel) dp(2) else dp(1), if (sel) 0xFF2FBF71.toInt() else 0xFFE3EAE5.toInt())
+        }
+        v.addView(TextView(this).apply { text = ic.emoji; textSize = 24f })
+        v.addView(TextView(this).apply {
+            text = ic.name; textSize = 10f
+            setTextColor(if (sel) 0xFF2FBF71.toInt() else 0xFF6E7F78.toInt())
+            typeface = if (sel) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        })
+        return v
+    }
+
+    private fun iconMoreCell(label: String): View {
+        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        val v = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            val lp = android.widget.GridLayout.LayoutParams().apply {
+                width = 0; height = dp(78)
+                setMargins(dp(6), dp(6), dp(6), dp(6))
+                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
+            }
+            layoutParams = lp
+        }
+        v.background = GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setColor(0x00000000)
+            setStroke(dp(1), 0xFFC4D2CA.toInt())
+        }
+        v.addView(TextView(this).apply {
+            text = if (label == "更多") "+" else "▴"; textSize = 22f
+            setTextColor(0xFF7E9188.toInt()); typeface = Typeface.DEFAULT
+        })
+        v.addView(TextView(this).apply { text = label; textSize = 10f; setTextColor(0xFF7E9188.toInt()) })
+        return v
+    }
+
+    /** 最终保存的 icon key：优先选中项；编辑未重选时保持原值；新建默认第一个常用图标 */
+    private fun finalIconKey(): String = selectedIcon ?: editing?.icon ?: com.zerolab.checkin.theme.IconManager.common.first().key
+
+    /** 新建项自动配色（图标独立后主题不再手动选择，按列表序号轮换 8 套莫兰迪色） */
+    private fun autoThemeFor(): String = ThemeManager.themes[(repo.itemCount()) % ThemeManager.themes.size].id
 
     // ---------- v1.3.0 打卡类型双 tab：普通打卡 / 日记打卡（v1.3.1 文件夹标签样式） ----------
     private fun buildModeSection() {
@@ -1858,6 +1912,8 @@ class CreateItemActivity : AppCompatActivity() {
         }
         findViewById<EditText>(R.id.et_name).setText(it.name)
         selectedTheme = it.theme
+        selectedIcon = if (com.zerolab.checkin.theme.IconManager.isKnown(it.icon)) it.icon else null
+        iconExpanded = false
         // v1.3.13 打卡组 / N天打卡 回显
         if (loaded.groupMode) {
             groupMode = true
@@ -1944,7 +2000,7 @@ class CreateItemActivity : AppCompatActivity() {
         renderSchedulePanels()
         renderWeekDayChips()
         renderBigSmallChips()
-        renderThemeChips()
+        findViewById<LinearLayout>(R.id.theme_container)?.let { renderIconGrid(it) }
         // v1.2.0：随心记模式回显 + 禁用态
         renderModeChips()
         refreshJournalVisibility()   // v1.3.0 双 tab 可见性
@@ -2165,7 +2221,7 @@ class CreateItemActivity : AppCompatActivity() {
             if (editing != null) {
                 val old = editing!!
                 val updated = old.copy(
-                    name = name, theme = selectedTheme,
+                    name = name, theme = selectedTheme, icon = finalIconKey(),
                     type = ItemConfig.mainType(cfg.methods), configJson = cfg.toJson(),
                     editPolicy = editPolicy,
                     editInterval = editInterval,
@@ -2176,7 +2232,7 @@ class CreateItemActivity : AppCompatActivity() {
             } else {
                 val item = CheckinItem(
                     name = name, type = ItemConfig.mainType(cfg.methods), configJson = cfg.toJson(),
-                    icon = "default", theme = selectedTheme, sortOrder = repo.itemCount(),
+                    icon = finalIconKey(), theme = autoThemeFor(), sortOrder = repo.itemCount(),
                     editPolicy = editPolicy,
                     editInterval = editInterval,
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now

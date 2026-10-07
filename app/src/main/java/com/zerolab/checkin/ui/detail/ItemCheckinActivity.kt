@@ -36,7 +36,7 @@ class ItemCheckinActivity : AppCompatActivity() {
         if (item == null) { finish(); return }
 
         findViewById<ImageButton>(R.id.btn_back).setOnClickListener { finish() }
-        findViewById<TextView>(R.id.tv_title).text = "${ThemeManager.of(item.theme).emoji} ${item.name}" // v1.1.7：顶部显示主题emoji
+        findViewById<TextView>(R.id.tv_title).text = "${com.zerolab.checkin.theme.IconManager.emojiFor(item.icon, item.theme)} ${item.name}" // v1.1.7：顶部显示主题emoji；v1.3.18：图标独立（icon 优先）
         findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
             // v1.3.2：⋮ 直接进详情页
             startActivity(android.content.Intent(this, com.zerolab.checkin.ui.detail.ItemDetailActivity::class.java)
@@ -63,7 +63,7 @@ class ItemCheckinActivity : AppCompatActivity() {
         if (id > 0) {
             val repo = (application as CheckinApp).repository
             val it = repo.getItem(id)
-            if (it != null) findViewById<TextView>(R.id.tv_title).text = "${ThemeManager.of(it.theme).emoji} ${it.name}"
+            if (it != null) findViewById<TextView>(R.id.tv_title).text = "${com.zerolab.checkin.theme.IconManager.emojiFor(it.icon, it.theme)} ${it.name}"
         }
     }
 
@@ -91,7 +91,7 @@ class ItemCheckinActivity : AppCompatActivity() {
             val repo = (application as CheckinApp).repository
             val ni = repo.getItem(newId)
             if (ni == null) { finish(); return }
-            findViewById<TextView>(R.id.tv_title).text = "${ThemeManager.of(ni.theme).emoji} ${ni.name}"
+            findViewById<TextView>(R.id.tv_title).text = "${com.zerolab.checkin.theme.IconManager.emojiFor(ni.icon, ni.theme)} ${ni.name}"
             findViewById<ImageButton>(R.id.btn_menu).setOnClickListener {
                 startActivity(Intent(this, ItemDetailActivity::class.java)
                     .putExtra(ItemDetailActivity.EXTRA_ID, newId))
