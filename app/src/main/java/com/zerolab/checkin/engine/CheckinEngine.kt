@@ -68,8 +68,9 @@ object CheckinEngine {
         val created = DateUtils.dateOf(item.createdAt)
         val methods = c.methods.filter { it != Method.AUTO.key }
         return when {
-            // 创建日之前：不属于本打卡项，按"未到"处理（不参与状态与连续天数）
-            date < created -> DayInfo(date, DayState.FUTURE, 0, false, records)
+            // 创建日之前：无记录按"未到"处理（不参与状态与连续天数）
+            // v1.3.19：有记录（如超级管理员补录历史日期）则继续按记录状态渲染，日历正常着色
+            date < created && records.isEmpty() -> DayInfo(date, DayState.FUTURE, 0, false, records)
             date > today -> DayInfo(date, DayState.FUTURE, records.size, auto, records)
             offset -> DayInfo(date, DayState.OFFSET, records.size, auto, records)
             // v1.3.15：打卡组——当日有成功记录=已打卡；否则未打卡（组无负打卡/无 SKIP 染色）
@@ -300,7 +301,11 @@ object CheckinEngine {
     fun groupDayInfo(group: CheckinItem, date: String, repo: CheckinRepository): DayInfo {
         val c = cfg(group)
         val today = DateUtils.today()
-        if (date < DateUtils.dateOf(group.createdAt)) return DayInfo(date, DayState.FUTURE, 0, false, emptyList())
+        // v1.3.19：创建日之前若有补录记录则按记录状态渲染，不再一律 FUTURE 不染色
+        if (date < DateUtils.dateOf(group.createdAt)) {
+            val recs0 = repo.recordsOfDay(group.id, date)
+            if (recs0.isEmpty()) return DayInfo(date, DayState.FUTURE, 0, false, emptyList())
+        }
         if (date > today) return DayInfo(date, DayState.FUTURE, 0, false, emptyList())
         val recs = repo.recordsOfDay(group.id, date)
         val auto = recs.any { it.isAuto == 1 }
