@@ -153,7 +153,8 @@ class QuickCheckinFragment : Fragment() {
         try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
         autoBackfillMissing()
         val theme = ThemeManager.of(q.theme)
-        calendar.themeColor = ThemeUi.current(requireActivity()).accent
+        // v1.3.25：今天描边=打卡项主题色（v6.1.0 极简：主题色仅打卡按钮/描边；按钮仍跟全局）
+        calendar.themeColor = theme.primary
         root.findViewById<TextView>(R.id.tv_emoji).text = com.zerolab.checkin.theme.IconManager.emojiFor(q.icon, q.theme)
         root.findViewById<TextView>(R.id.tv_name).text = q.name
         btnCheckin.background?.setTint(ThemeUi.current(requireActivity()).accent)
