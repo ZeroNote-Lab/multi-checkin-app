@@ -466,7 +466,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             }
             return
         }
-        if (c.locPoints.isEmpty()) { stepSuccess(); return }
+        if (c.locPoints.isEmpty()) { toast("位置打卡需先配置一个标准位置"); return }
         // 找到最近的点与距离
         var nearestName = c.locPoints[0].name; var nearestDist = Double.MAX_VALUE; var within = false
         c.locPoints.forEach { p ->

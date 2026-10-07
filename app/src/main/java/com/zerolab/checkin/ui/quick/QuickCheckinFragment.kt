@@ -199,6 +199,17 @@ class QuickCheckinFragment : Fragment() {
         // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽；v1.3.0：随心记/心情日记按实际改图例）
         val legendTv = root.findViewById<TextView>(R.id.tv_legend)
         if (groupMode) { legendTv.visibility = View.GONE; return }   // v1.3.15：打卡组日历不需要图注
+        // v1.3.21：N天打卡（习惯打卡）只保留核心状态，去掉不适用的补签/部分完成/无需打卡/自动
+        if (cfg.ndaysMode) {
+            val s2 = SpannableStringBuilder()
+            s2.append("○今日  ")
+            val d1 = s2.length; s2.append("●").append("已打卡").append("  ")
+            s2.setSpan(ForegroundColorSpan(0xFF2FBF71.toInt()), d1, d1 + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val d2 = s2.length; s2.append("●").append("缺卡")
+            s2.setSpan(ForegroundColorSpan(0xFFEF5350.toInt()), d2, d2 + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            legendTv.text = s2
+            return
+        }
         legendTv.visibility = View.VISIBLE
         val sb = SpannableStringBuilder()
         fun dot(color: Int, label: String) {
