@@ -7,6 +7,7 @@ import android.view.View
 import android.view.Window
 import android.widget.Button
 import android.widget.TextView
+import androidx.annotation.ColorInt
 
 /**
  * v1.3.14 全局换肤工具：把当前 GlobalTheme 应用到界面根背景 / 状态栏 / 主按钮 / 主文字。
@@ -45,12 +46,22 @@ object ThemeUi {
         }
     }
 
-    /** 底部导航选中色 */
+    /** 颜色按比例加深（v1.3.26：底部导航选中色加深约 8%，浅色主题更清晰） */
+    @ColorInt
+    fun darken(@ColorInt color: Int, factor: Float = 0.92f): Int {
+        val a = android.graphics.Color.alpha(color)
+        val r = (android.graphics.Color.red(color) * factor).toInt()
+        val g = (android.graphics.Color.green(color) * factor).toInt()
+        val b = (android.graphics.Color.blue(color) * factor).toInt()
+        return android.graphics.Color.argb(a, r, g, b)
+    }
+
+    /** 底部导航选中色（v1.3.26：accent 加深 8% 提升辨识度） */
     fun tintBottomNav(nav: com.google.android.material.bottomnavigation.BottomNavigationView, t: GlobalTheme) {
         try {
             val list = android.content.res.ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(t.accent, 0xFF9AA1B2.toInt())
+                intArrayOf(darken(t.accent), 0xFF9AA1B2.toInt())
             )
             nav.itemIconTintList = list
             nav.itemTextColor = list

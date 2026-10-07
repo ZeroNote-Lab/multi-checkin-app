@@ -28,6 +28,9 @@ class MonthCalendarView @JvmOverloads constructor(
     private var negativeMode = false
     /** v1.3.15：是否显示圆外小标记（⚡/×n；打卡组日历不显示） */
     private var showBadges = true
+    /** v1.3.26：当前选中的日期（点击圈选，参考真实日历；默认今天） */
+    var selectedDate: String? = DateUtils.today()
+        set(value) { field = value; invalidate() }
 
     private val successC = 0xFF2FBF71.toInt()
     private val failC = 0xFFEF5350.toInt()
@@ -102,15 +105,15 @@ class MonthCalendarView @JvmOverloads constructor(
                 info.state == DayState.PARTIAL -> partialC     // v1.1.6 部分完成：黄色
                 else -> 0
             }
-            // 非今天：填充画满整个圆角矩形
-            if (bg != 0 && !(inMonth && today)) {
+            // 非选中日期：填充画满整个圆角矩形
+            if (bg != 0 && date != selectedDate) {
                 paint.color = bg
                 paint.style = Paint.Style.FILL
                 canvas.drawRoundRect(RectF(cx - radius, cy - radius, cx + radius, cy + radius), radius*0.3f, radius*0.3f, paint)
             }
-            // v1.1.8：今天恒画主题色外边框。有填充时结构为 外框|白线|内部颜色（填充整体内缩，
-            // 白线紧贴外框内侧，三层连续无缝隙）；无填充时仅外框（白线落在白底上天然隐形）。
-            if (inMonth && today) {
+            // v1.3.26：选中的日期恒画主题色外边框（用户点击切换，参考真实日历）。有填充时结构为
+            // 外框|白线|内部颜色（填充整体内缩，白线紧贴外框内侧，三层连续无缝隙）；无填充时仅外框。
+            if (inMonth && date == selectedDate) {
                 val d = resources.displayMetrics.density
                 if (bg != 0) {
                     val fr = radius - 2.5f * d
@@ -165,7 +168,11 @@ class MonthCalendarView @JvmOverloads constructor(
             val idx = row * 7 + col
             if (idx in grid.indices) {
                 val (date, inMonth) = grid[idx]
-                if (inMonth && date <= DateUtils.today()) listener?.invoke(date)
+                if (inMonth && date <= DateUtils.today()) {
+                    // v1.3.26：点击即选中该日期（外边框跟随）
+                    selectedDate = date
+                    listener?.invoke(date)
+                }
             }
         }
         return true
