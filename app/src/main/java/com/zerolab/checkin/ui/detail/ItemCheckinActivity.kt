@@ -63,7 +63,9 @@ class ItemCheckinActivity : AppCompatActivity() {
         if (id > 0) {
             val repo = (application as CheckinApp).repository
             val it = repo.getItem(id)
-            if (it != null) findViewById<TextView>(R.id.tv_title).text = "${com.zerolab.checkin.theme.IconManager.emojiFor(it.icon, it.theme)} ${it.name}"
+            // v1.3.24：详情页删除该项后返回时，打卡页直接关闭回列表
+            if (it == null) { finish(); return }
+            findViewById<TextView>(R.id.tv_title).text = "${com.zerolab.checkin.theme.IconManager.emojiFor(it.icon, it.theme)} ${it.name}"
         }
     }
 

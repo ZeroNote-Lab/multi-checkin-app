@@ -97,7 +97,21 @@ class ItemDetailActivity : AppCompatActivity() {
             i.putExtra(CreateItemActivity.EXTRA_ID, item.id)
             startActivity(i)
         }
+        // v1.3.24：编辑下方新增红色删除选项（复用列表删除逻辑）
+        findViewById<Button>(R.id.btn_delete).setOnClickListener {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("删除打卡项")
+                .setMessage("确定删除「${item.name}」吗？此操作不可恢复。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除") { _, _ ->
+                    repo.deleteItem(item.id)
+                    toast("已删除")
+                    finish()
+                }.show()
+        }
     }
+
+    private fun toast(s: String) = android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_SHORT).show()
 
     companion object { const val EXTRA_ID = "extra_item_id" }
 }

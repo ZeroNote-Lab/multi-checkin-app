@@ -283,7 +283,8 @@ class QuickCheckinFragment : Fragment() {
         // v1.3.0：🔥连续天数文字深灰（红=缺卡语义，用于成就违和）；🔥 emoji 自带橙红不动
         streakView.setTextColor(0xFF4A4A4A.toInt())
 
-        btnCheckin.background?.setTint(ThemeManager.of(it.theme).primary)
+        // v1.3.24：打卡按钮跟随全局主题（方案B；每项主题仅作卡片/详情点缀）
+        btnCheckin.background?.setTint(ThemeUi.current(requireActivity()).accent)
         btnCheckin.isEnabled = true
         when {
             // v1.3.13 打卡组：展示子项进度（点击子项进入打卡页），完成全部子项后自动记组成功

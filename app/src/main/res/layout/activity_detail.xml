@@ -76,6 +76,18 @@
                 android:layout_width="match_parent"
                 android:layout_marginTop="16dp"
                 android:text="编辑打卡项" />
+
+            <!-- v1.3.24：编辑下方新增红色删除选项 -->
+            <Button
+                android:id="@+id/btn_delete"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_card"
+                android:text="删除打卡项"
+                android:textColor="#E53935"
+                android:textSize="16sp"
+                android:textStyle="bold" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>
