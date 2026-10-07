@@ -2,6 +2,9 @@ package com.zerolab.checkin.ui.quick
 
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.view.Gravity
@@ -31,6 +34,7 @@ import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.formatLatLng
 import java.io.File
 import java.util.Calendar
+import kotlin.math.min
 
 class QuickCheckinFragment : Fragment() {
 
@@ -426,11 +430,19 @@ class QuickCheckinFragment : Fragment() {
         val subTheme = ThemeManager.of(m.theme)
         val subCfg = ItemConfig.parse(m.configJson)
         val streak = try { CheckinEngine.streak(m, repo) } catch (_: Exception) { 0 }
+        // v1.3.16 方案D：白底圆角卡片（18dp 圆角 + 柔和阴影），卡片间 10dp 间距
         val row = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(13), dp(13), dp(13))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(0xFFFFFFFF.toInt())
+            }
+            elevation = dp(2).toFloat()
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            if (!first) lp.topMargin = dp(10)
+            if (first) lp.topMargin = dp(14)
+            lp.bottomMargin = dp(10)
             layoutParams = lp
             setOnClickListener {
                 startActivity(Intent(requireContext(), ItemCheckinActivity::class.java)
@@ -486,20 +498,18 @@ class QuickCheckinFragment : Fragment() {
         })
         col.addView(metaRow)
         row.addView(col)
-        // 右侧：状态徽章（✓ 已打卡 绿 / ○ 未完成 橙）
-        val badge = TextView(requireContext()).apply {
-            text = if (ok) "✓ 已打卡" else "○ 未完成"
-            textSize = 12f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(0xFFFFFFFF.toInt())
-            gravity = android.view.Gravity.CENTER
-            setPadding(dp(12), dp(5), dp(12), dp(5))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(if (ok) 0xFF2FBF71.toInt() else 0xFFF59E0B.toInt())
-            }
+        // 右侧：40dp 进度环（方案D）——已打卡=绿色满环 ✓，未完成=橙色进度 done/total
+        val pr = CheckinEngine.subDayProgress(m, DateUtils.today(), repo)
+        val done = pr[0]
+        val total = if (pr[1] <= 0) 1 else pr[1]
+        val ring = RingView(requireContext()).apply {
+            progress = if (ok) 1f else done.toFloat() / total
+            centerText = if (ok) "✓" else "$done/$total"
+            ringColor = if (ok) 0xFF2FBF71.toInt() else 0xFFF59E0B.toInt()
+            textColor = if (ok) 0xFF2FBF71.toInt() else 0xFF4A4A4B.toInt()
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
         }
-        row.addView(badge)
+        row.addView(ring)
         return row
     }
 
@@ -741,5 +751,42 @@ class QuickCheckinFragment : Fragment() {
             if (st == DayState.FAIL) CheckinEngine.offsetBackfill(it, repo, d)
             d = DateUtils.addDays(d, -1)
         }
+    }
+}
+
+/** v1.3.16 方案D：打卡组子项进度环（浅灰背景环 + 前景进度弧 + 中心文字） */
+private class RingView(ctx: android.content.Context) : View(ctx) {
+    var progress: Float = 0f
+    var centerText: String = ""
+    var ringColor: Int = 0xFF2FBF71.toInt()
+    var textColor: Int = 0xFF2FBF71.toInt()
+    private val density = ctx.resources.displayMetrics.density
+    private fun dp(v: Float): Float = v * density
+    private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(3.5f)
+        color = 0xFFF1E9ED.toInt()
+    }
+    private val fgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(3.5f)
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
+        textSize = dp(10f)
+    }
+    override fun onDraw(canvas: Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        val r = (min(width, height) / 2f) - fgPaint.strokeWidth / 2f - dp(1f)
+        canvas.drawCircle(cx, cy, r, bgPaint)
+        fgPaint.color = ringColor
+        val sweep = 360f * progress.coerceIn(0f, 1f)
+        if (sweep > 0f) canvas.drawArc(cx - r, cy - r, cx + r, cy + r, -90f, sweep, false, fgPaint)
+        textPaint.color = textColor
+        val baseline = cy - (textPaint.ascent() + textPaint.descent()) / 2f
+        canvas.drawText(centerText, cx, baseline, textPaint)
     }
 }

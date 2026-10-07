@@ -249,21 +249,28 @@ object CheckinEngine {
     /** v1.3.16：组子项「当日全部完成」判定（组完成 = 全部子项都达到此标准）：
      *  组合方式=全部方式完成；单方式=当日成功次数 >= 每日次数（不限次=有成功即算）；
      *  负打卡=当日无破戒记录；非排期日=自动视为完成；日记类=当日有成功记录 */
-    fun subDayDone(item: CheckinItem, date: String, repo: CheckinRepository): Boolean {
+    /** v1.3.16 方案D：子项当日完成进度 [done, total]，与 subDayDone 同口径（total 恒 >= 1） */
+    fun subDayProgress(item: CheckinItem, date: String, repo: CheckinRepository): IntArray {
         val c = cfg(item)
-        if (date < DateUtils.dateOf(item.createdAt) || date > DateUtils.today()) return false
+        if (date < DateUtils.dateOf(item.createdAt) || date > DateUtils.today()) return intArrayOf(0, 1)
         val recs = repo.recordsOfDay(item.id, date)
-        if (c.journalMode || c.moodMode) return recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }
-        if (isNegative(c)) return !recs.any { it.status == "FAIL" }
-        if (!isScheduledDay(item, date)) return true
+        if (c.journalMode || c.moodMode) return intArrayOf(if (recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }) 1 else 0, 1)
+        if (isNegative(c)) return intArrayOf(if (recs.any { it.status == "FAIL" }) 0 else 1, 1)
+        if (!isScheduledDay(item, date)) return intArrayOf(1, 1)
         val methods = c.methods.filter { it != Method.AUTO.key }
         if (methods.size > 1) {
             val req = if (c.comboRequired in 1..methods.size) c.comboRequired else methods.size
             val done = methods.count { m -> recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true } }
-            return done >= req
+            return intArrayOf(done, req)
         }
-        return if (c.dailyLimit < 0) recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }
-        else recs.count { it.status == "SUCCESS" } >= c.dailyLimit
+        return if (c.dailyLimit < 0) intArrayOf(if (recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }) 1 else 0, 1)
+        else intArrayOf(recs.count { it.status == "SUCCESS" }, if (c.dailyLimit >= 1) c.dailyLimit else 1)
+    }
+
+    /** v1.3.16：子项当日是否全部完成（与 subDayProgress 同口径） */
+    fun subDayDone(item: CheckinItem, date: String, repo: CheckinRepository): Boolean {
+        val p = subDayProgress(item, date, repo)
+        return p[0] >= p[1]
     }
 
     // ---------- v1.3.13 打卡组自动完成 ----------
