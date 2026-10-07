@@ -153,11 +153,11 @@ class QuickCheckinFragment : Fragment() {
         try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
         autoBackfillMissing()
         val theme = ThemeManager.of(q.theme)
-        // v1.3.25：今天描边=打卡项主题色（v6.1.0 极简：主题色仅打卡按钮/描边；按钮仍跟全局）
+        // v1.3.26：日历选中描边=打卡项主题色；打卡按钮同样用打卡项主题色（与描边一致）
         calendar.themeColor = theme.primary
         root.findViewById<TextView>(R.id.tv_emoji).text = com.zerolab.checkin.theme.IconManager.emojiFor(q.icon, q.theme)
         root.findViewById<TextView>(R.id.tv_name).text = q.name
-        btnCheckin.background?.setTint(ThemeUi.current(requireActivity()).accent)
+        btnCheckin.background?.setTint(theme.primary)
         renderMonth()
         renderToday()
         // 记录栏随快捷项/刷新重置为今日，避免残留上一项
@@ -203,7 +203,7 @@ class QuickCheckinFragment : Fragment() {
         // v1.3.21：N天打卡（习惯打卡）只保留核心状态，去掉不适用的补签/部分完成/无需打卡/自动
         if (cfg.ndaysMode) {
             val s2 = SpannableStringBuilder()
-            s2.append("○今日  ")
+            // v1.3.26：去掉第一行第一个的○今日
             val d1 = s2.length; s2.append("●").append("已打卡").append("  ")
             s2.setSpan(ForegroundColorSpan(0xFF2FBF71.toInt()), d1, d1 + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
             val d2 = s2.length; s2.append("●").append("缺卡")
@@ -218,7 +218,7 @@ class QuickCheckinFragment : Fragment() {
             sb.append("●").append(label).append("  ")
             sb.setSpan(ForegroundColorSpan(color), s, s + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
-        sb.append("○今日  ")
+        // v1.3.26：去掉第一行第一个的○今日
         when {
             cfg.moodMode -> {
                 // 心情日记：○今日 + 5 档心情色点
@@ -284,8 +284,8 @@ class QuickCheckinFragment : Fragment() {
         // v1.3.0：🔥连续天数文字深灰（红=缺卡语义，用于成就违和）；🔥 emoji 自带橙红不动
         streakView.setTextColor(0xFF4A4A4A.toInt())
 
-        // v1.3.24：打卡按钮跟随全局主题（方案B；每项主题仅作卡片/详情点缀）
-        btnCheckin.background?.setTint(ThemeUi.current(requireActivity()).accent)
+        // v1.3.26：打卡按钮=打卡项主题色（与日历选中描边一致）
+        btnCheckin.background?.setTint(ThemeManager.of(it.theme).primary)
         btnCheckin.isEnabled = true
         when {
             // v1.3.13 打卡组：展示子项进度（点击子项进入打卡页），完成全部子项后自动记组成功

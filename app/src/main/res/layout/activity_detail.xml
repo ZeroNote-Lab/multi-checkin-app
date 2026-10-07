@@ -77,15 +77,16 @@
                 android:layout_marginTop="16dp"
                 android:text="编辑打卡项" />
 
-            <!-- v1.3.24：编辑下方新增红色删除选项 -->
+            <!-- v1.3.24：编辑下方新增红色删除选项；v1.3.26：与编辑按钮同尺寸(52dp/14dp圆角)、红底白字
+                 Material 主题下 Button 背景由 backgroundTint 控制（android:background 会被忽略） -->
             <Button
                 android:id="@+id/btn_delete"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
                 android:layout_marginTop="12dp"
-                android:background="@drawable/bg_card"
+                android:backgroundTint="#E53935"
                 android:text="删除打卡项"
-                android:textColor="#E53935"
+                android:textColor="@android:color/white"
                 android:textSize="16sp"
                 android:textStyle="bold" />
         </LinearLayout>
