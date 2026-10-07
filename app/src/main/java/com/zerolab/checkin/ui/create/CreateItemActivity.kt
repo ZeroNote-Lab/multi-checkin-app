@@ -32,6 +32,7 @@ import com.zerolab.checkin.engine.LocatePoint
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.theme.ThemeManager
 import com.zerolab.checkin.ui.scan.ScanActivity
+import com.zerolab.checkin.ui.detail.ItemCheckinActivity
 import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.formatLatLng
 import com.zerolab.checkin.ui.settings.AdminMode
@@ -55,6 +56,8 @@ class CreateItemActivity : AppCompatActivity() {
         const val MODE_NDAYS = "ndays"               // 🏁 N天打卡（v1.3.13）
         const val MODE_JOURNAL_FREE = "journal_free" // 兼容保留：直接进随心记
         const val MODE_JOURNAL_MOOD = "journal_mood" // 兼容保留：直接进心情日记
+        /** v1.3.23：新建成功后回传给类型选择页的标记（选择页收到后一并退出，返回直达首页打卡选择页） */
+        const val EXTRA_CREATED = "created"
     }
 
     private val repo get() = (application as CheckinApp).repository
@@ -166,7 +169,7 @@ class CreateItemActivity : AppCompatActivity() {
             createMode == MODE_JOURNAL_FREE -> "新建随心记"
             createMode == MODE_JOURNAL_MOOD -> "新建心情日记"
             createMode == MODE_GROUP -> "新建打卡组"
-            createMode == MODE_NDAYS -> "新建N天打卡"
+            createMode == MODE_NDAYS -> "新建习惯打卡"
             else -> "新建打卡项"
         }
         // 类型已在选择页（或编辑项配置）确定：隐藏打卡类型双 tab
@@ -382,34 +385,10 @@ class CreateItemActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
         val candidates = listOf(Method.NORMAL, Method.PHOTO, Method.TEXT, Method.VOICE, Method.LOCATION, Method.STEPS, Method.TIMER, Method.QRCODE, Method.NFC)
-        // v1.3.19：方式 chips 已选带 ⚙，点 ⚙ 弹配置弹窗（方案三弹窗式）
-        var chips: List<GearChip> = emptyList()
-        chips = makeGearChips(
-            candidates,
-            { m -> m.key in cur },
-            { m ->
-                val mk = m.key
-                if (mk == Method.STEPS.key) {
-                    toast("该功能开发中"); styleGearChips(chips, candidates, cur, Method.STEPS.key)
-                } else {
-                    if (mk == Method.NORMAL.key) { cur.clear(); cur.add(Method.NORMAL.key) }
-                    else {
-                        if (Method.NORMAL.key in cur) cur.clear()
-                        val wasOn = mk in cur
-                        if (wasOn) cur.remove(mk) else cur.add(mk)
-                        if (cur.isEmpty()) cur.add(Method.NORMAL.key)
-                        // v1.3.21：选中可配置方式立即弹配置弹窗（取消不丢已设配置）
-                        if (!wasOn && hasMethodConfig(m)) buildMethodDialog(m, cfgSub, cur)
-                    }
-                    styleGearChips(chips, candidates, cur, Method.STEPS.key)
-                    // v1.3.15：方式变化后刷新可用性（参数区已弹窗化）
-                    chipsClickListenerRefresh?.invoke()
-                }
-            },
-            { m -> if (hasMethodConfig(m)) buildMethodDialog(m, cfgSub, cur) }
-        )
-        addGearChipsGrid(methodBox, chips)
-        styleGearChips(chips, candidates, cur, Method.STEPS.key)
+        // v1.3.23：竖排方式行（对齐自定义打卡布局，无⚙）；勾选可配置方式立即弹配置弹窗
+        buildSwitchMethodRows(methodBox, candidates, cur, cfgSub) {
+            chipsClickListenerRefresh?.invoke()
+        }
         wrap.addView(methodBox)
         // v1.3.15：更多选项入口（展开高级功能）
         val moreBtn = TextView(this).apply {
@@ -674,37 +653,12 @@ class CreateItemActivity : AppCompatActivity() {
 
     // v1.3.19：renderChips / addChipsToGrid 已由 GearChip 机制取代，移除
 
-    /** v1.3.14 N天打卡方式 chips（排除 MOOD/AUTO）；v1.3.19 已选带 ⚙ 弹配置 */
+    /** v1.3.23 习惯打卡方式选择：竖排方式行（对齐自定义打卡布局，无⚙），替代 3×3 GearChips 网格 */
     private fun buildNdaysMethods() {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val container = findViewById<LinearLayout>(R.id.ndays_method_container)
         container.removeAllViews()
         val candidates = listOf(Method.NORMAL, Method.PHOTO, Method.TEXT, Method.VOICE, Method.LOCATION, Method.STEPS, Method.TIMER, Method.QRCODE, Method.NFC)
-        var chips: List<GearChip> = emptyList()
-        chips = makeGearChips(
-            candidates,
-            { m -> m.key in ndaysMethods },
-            { m ->
-                val mk = m.key
-                if (mk == Method.STEPS.key) {
-                    toast("该功能开发中"); styleGearChips(chips, candidates, ndaysMethods, Method.STEPS.key)
-                } else {
-                    if (mk == Method.NORMAL.key) { ndaysMethods.clear(); ndaysMethods.add(Method.NORMAL.key) }
-                    else {
-                        if (Method.NORMAL.key in ndaysMethods) ndaysMethods.clear()
-                        val wasOn = mk in ndaysMethods
-                        if (wasOn) ndaysMethods.remove(mk) else ndaysMethods.add(mk)
-                        if (ndaysMethods.isEmpty()) ndaysMethods.add(Method.NORMAL.key)
-                        // v1.3.21：选中可配置方式立即弹配置弹窗（取消不丢已设配置）
-                        if (!wasOn && hasMethodConfig(m)) buildMethodDialog(m, cfg, ndaysMethods)
-                    }
-                    styleGearChips(chips, candidates, ndaysMethods, Method.STEPS.key)
-                }
-            },
-            { m -> if (hasMethodConfig(m)) buildMethodDialog(m, cfg, ndaysMethods) }
-        )
-        addGearChipsGrid(container, chips)
-        styleGearChips(chips, candidates, ndaysMethods, Method.STEPS.key)
+        buildSwitchMethodRows(container, candidates, ndaysMethods, cfg)
     }
 
     private fun saveGroup() {
@@ -764,10 +718,17 @@ class CreateItemActivity : AppCompatActivity() {
             cfg.groupMemberNames.clear(); cfg.groupMemberNames.addAll(groupSubs.map { it.name })
             if (editing != null) {
                 repo.updateItem(editing!!.copy(name = name, theme = selectedTheme, icon = finalIconKey(), configJson = cfg.toJson(), updatedAt = now))
+                runOnUiThread { finish() }
             } else {
                 repo.getItem(gid)?.let { repo.updateItem(it.copy(configJson = cfg.toJson())) }
+                // v1.3.23：新建打卡组完成后直接进入组打卡页；回传标记让类型选择页一并退出
+                runOnUiThread {
+                    setResult(RESULT_OK, Intent().putExtra(EXTRA_CREATED, true))
+                    startActivity(Intent(this, ItemCheckinActivity::class.java)
+                        .putExtra(ItemCheckinActivity.EXTRA_ID, gid))
+                    finish()
+                }
             }
-            runOnUiThread { finish() }
         }
     }
 
@@ -819,9 +780,9 @@ class CreateItemActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             val lp = android.widget.GridLayout.LayoutParams().apply {
-                width = dp(48); height = dp(48)   // v1.3.22：圆角正方形
+                width = 0; height = dp(48)   // v1.3.22：圆角正方形；v1.3.23：列宽均分随容器自适应，防溢出
                 setMargins(dp(4), dp(4), dp(4), dp(4))
-                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED)
+                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
             }
             layoutParams = lp
         }
@@ -841,9 +802,9 @@ class CreateItemActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             val lp = android.widget.GridLayout.LayoutParams().apply {
-                width = dp(48); height = dp(48)   // v1.3.22：圆角正方形
+                width = 0; height = dp(48)   // v1.3.22：圆角正方形；v1.3.23：列宽均分随容器自适应，防溢出
                 setMargins(dp(4), dp(4), dp(4), dp(4))
-                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED)
+                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
             }
             layoutParams = lp
         }
@@ -1538,66 +1499,106 @@ class CreateItemActivity : AppCompatActivity() {
         dlg.show()
     }
 
-    // ---------- GearChip 机制（N天/组子项方式 chips，v1.3.19） ----------
-    private class GearChip(val root: LinearLayout, val label: TextView, val gear: TextView)
-
-    private fun makeGearChips(
+    // ---------- v1.3.23 竖排方式选择行（对齐自定义打卡布局，替代 GearChip 3×3 网格） ----------
+    /**
+     * 每个打卡方式一张卡片、一行（左 emoji+名称，右 Switch），竖排；无 ⚙。
+     * 勾选可配置方式立即弹配置弹窗；普通打卡与其它方式互斥（互斥行视觉置灰但可点，点击顶掉普通）；
+     * 空选择兜底普通；步数打卡开发中禁用。
+     * @param sel 已选方式集合（直接读写）
+     * @param target 配置对象（配置弹窗写入）
+     * @param onChanged 方式变化后的回调（如刷新更多区可用性）
+     */
+    private fun buildSwitchMethodRows(
+        container: LinearLayout,
         candidates: List<Method>,
-        isSelected: (Method) -> Boolean,
-        onToggle: (Method) -> Unit,
-        onConfig: (Method) -> Unit
-    ): List<GearChip> {
+        sel: MutableSet<String>,
+        target: ItemConfig,
+        onChanged: () -> Unit = {}
+    ) {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        return candidates.map { m ->
-            val root = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-            }
-            val label = TextView(this).apply { text = " ${m.emoji} ${m.label} "; textSize = 12f; gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(12)) }
-            val gear = TextView(this).apply {
-                text = "⚙"; textSize = 13f; setPadding(dp(6), dp(12), dp(10), dp(12))
-                visibility = View.GONE
-            }
-            root.addView(label); root.addView(gear)
-            root.setOnClickListener { onToggle(m) }
-            gear.setOnClickListener { onConfig(m) }
-            GearChip(root, label, gear)
-        }
-    }
+        val switches = LinkedHashMap<String, SwitchCompat>()
+        val labels = LinkedHashMap<String, TextView>()
+        var refreshing = false   // 程序化刷新开关状态时不触发业务回调
 
-    /** gear chips 样式：选中浅绿底深绿字；⚙仅选中且可配置时显示 */
-    private fun styleGearChips(chips: List<GearChip>, candidates: List<Method>, sel: Set<String>, disabledKey: String? = null) {
-        chips.forEachIndexed { i, c ->
-            val m = candidates[i]
-            val selected = m.key in sel
-            val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in sel
-            val stepDisabled = m.key == disabledKey
-            val bg = GradientDrawable()
-            bg.cornerRadius = 22f
-            bg.setColor(if (selected) 0xFFE4F6EC.toInt() else if (stepDisabled) 0xFFE8EAEE.toInt() else if (blocked) 0xFFF1F1F3.toInt() else 0xFFEEF1F6.toInt())
-            bg.setStroke(2, if (selected) 0xFF2FBF71.toInt() else 0xFFD6DBE6.toInt())
-            c.root.background = bg
-            c.label.setTextColor(if (selected) 0xFF1F7A4D.toInt() else if (stepDisabled) 0xFFC2C7D1.toInt() else if (blocked) 0xFFB9BEC9.toInt() else 0xFF4A5160.toInt())
-            c.label.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            c.gear.visibility = if (selected && hasMethodConfig(m)) View.VISIBLE else View.GONE
-            c.gear.setTextColor(if (selected) 0xFF1F7A4D.toInt() else 0xFF6E7F78.toInt())
-        }
-    }
-
-    /** gear chips 每行 3 个放入容器 */
-    private fun addGearChipsGrid(container: LinearLayout, chips: List<GearChip>) {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        var row: LinearLayout? = null
-        chips.forEachIndexed { i, c ->
-            if (i % 3 == 0) {
-                row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        fun refreshAll() {
+            refreshing = true
+            try {
+                candidates.forEach { m ->
+                    val sw = switches[m.key] ?: return@forEach
+                    val lb = labels[m.key] ?: return@forEach
+                    val selected = m.key in sel
+                    val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in sel
+                    val stepDisabled = m.key == Method.STEPS.key
+                    val disabled = blocked || stepDisabled
+                    sw.isEnabled = !stepDisabled   // 对齐自定义打卡：互斥仅视觉置灰，保持可点击
+                    sw.alpha = if (disabled) 0.4f else 1f
+                    if (sw.isChecked != selected) sw.isChecked = selected
+                    lb.alpha = if (disabled) 0.4f else 1f
+                    lb.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    lb.setTextColor(if (selected) 0xFF1F7A4D.toInt() else 0xFF1F2430.toInt())
                 }
-                container.addView(row)
-            }
-            row!!.addView(c.root, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6); bottomMargin = dp(6) })
+            } finally { refreshing = false }
         }
+
+        candidates.forEach { m ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = getDrawable(R.drawable.bg_card)
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.bottomMargin = dp(10)
+                layoutParams = lp
+                setPadding(dp(16), dp(6), dp(16), dp(8))
+            }
+            val head = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val label = TextView(this).apply {
+                text = "${m.emoji} ${m.label}"
+                textSize = 15f
+                setTextColor(0xFF1F2430.toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val sw = SwitchCompat(this)
+            head.addView(label); head.addView(sw)
+            card.addView(head)
+            container.addView(card)
+            switches[m.key] = sw
+            labels[m.key] = label
+            sw.setOnCheckedChangeListener { _, on ->
+                if (refreshing) return@setOnCheckedChangeListener
+                val mk = m.key
+                if (on) {
+                    if (mk == Method.STEPS.key) {
+                        toast("该功能开发中")
+                        refreshing = true; sw.isChecked = false; refreshing = false
+                        refreshAll()
+                        return@setOnCheckedChangeListener
+                    }
+                    if (mk == Method.NORMAL.key) {
+                        sel.clear(); sel.add(Method.NORMAL.key)
+                    } else {
+                        if (Method.NORMAL.key in sel) sel.clear()
+                        sel.add(mk)
+                        // v1.3.21：选中可配置方式立即弹配置弹窗（取消不丢已设配置）
+                        if (hasMethodConfig(m)) buildMethodDialog(m, target, sel)
+                    }
+                } else {
+                    if (mk == Method.NORMAL.key) {
+                        toast("至少保留一种打卡方式")
+                        refreshing = true; sw.isChecked = true; refreshing = false
+                        refreshAll()
+                        return@setOnCheckedChangeListener
+                    } else {
+                        sel.remove(mk)
+                        if (sel.isEmpty()) sel.add(Method.NORMAL.key)
+                    }
+                }
+                refreshAll()
+                onChanged()
+            }
+        }
+        refreshAll()
     }
 
     /** v1.3.19：弹窗内获取当前位置并加入 target 的标准点列表 */
@@ -2340,7 +2341,15 @@ class CreateItemActivity : AppCompatActivity() {
                     editInterval = editInterval,
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                 )
-                repo.insertItem(item)
+                val newId = repo.insertItem(item)
+                // v1.3.23：新建完成后直接进入该打卡项；回传标记让类型选择页一并退出（返回直达首页打卡选择页）
+                runOnUiThread {
+                    setResult(RESULT_OK, Intent().putExtra(EXTRA_CREATED, true))
+                    startActivity(Intent(this, ItemCheckinActivity::class.java)
+                        .putExtra(ItemCheckinActivity.EXTRA_ID, newId))
+                    finish()
+                }
+                return@thread
             }
             runOnUiThread { finish() }
         }
