@@ -21,21 +21,22 @@ enum class Method(val key: String, val label: String, val emoji: String) {
 
         /**
          * 互斥矩阵：返回与 [selected] 集合互斥、因此必须置灰的方式。
-         * 依据 PRD 11.1：
-         *  - AUTO 与 NORMAL/PHOTO/TEXT/VOICE/TIMER/QRCODE/NFC 互斥
-         *  - NORMAL 与 TIMER 互斥
+         * 依据 PRD 11.1 + v1.3.24 用户规则：
+         *  - NORMAL（A）与其它全部手动方式互斥：选了普通，其他都不可选
+         *  - AUTO（D）与 NORMAL/PHOTO/TEXT/…/MOOD 全部互斥
+         *  - 其余方式（B/C 组）之间可多选组合
          */
         fun conflictsWith(selected: Set<String>): Set<String> {
             val blocked = mutableSetOf<String>()
             // 普通打卡与其他所有手动方式互斥（用户要求：选了普通，其他都不可选）
-            val others = listOf(PHOTO.key, TEXT.key, LOCATION.key, STEPS.key, TIMER.key, QRCODE.key, NFC.key, VOICE.key)
+            val others = listOf(PHOTO.key, TEXT.key, LOCATION.key, STEPS.key, TIMER.key, QRCODE.key, NFC.key, VOICE.key, MOOD.key)
             if (NORMAL.key in selected) blocked += others
             if (others.any { it in selected }) blocked += NORMAL.key
             // 自动打卡与需人工操作/素材的方式互斥
             if (AUTO.key in selected) {
-                blocked += listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key, LOCATION.key, STEPS.key)
+                blocked += listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key, LOCATION.key, STEPS.key, MOOD.key)
             }
-            if (listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key, LOCATION.key, STEPS.key).any { it in selected }) {
+            if (listOf(NORMAL.key, PHOTO.key, TEXT.key, VOICE.key, TIMER.key, QRCODE.key, NFC.key, LOCATION.key, STEPS.key, MOOD.key).any { it in selected }) {
                 blocked += AUTO.key
             }
             // 自身不算互斥

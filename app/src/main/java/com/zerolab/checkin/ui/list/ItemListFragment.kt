@@ -185,10 +185,9 @@ class ItemListFragment : Fragment() {
     private fun showMenu(item: CheckinItem) {
         val quickId = repo.getQuickId()
         val isQuick = quickId == item.id
-        // v1.3.14：打卡组不可设为快捷打卡（组本身不可手动打卡，无独立打卡动作）
-        val isGroup = ItemConfig.parse(item.configJson).groupMode
+        // v1.3.24：打卡组与普通项策略完全一致，均可设为快捷打卡
         val options = mutableListOf<String>()
-        if (!isGroup) options += if (isQuick) "⭐ 取消快捷打卡" else "⭐ 设为快捷打卡"
+        options += if (isQuick) "⭐ 取消快捷打卡" else "⭐ 设为快捷打卡"
         options += if (item.isPinned == 1) "📌 取消置顶" else "📌 置顶"
         options += if (item.isActive == 0) "▶️ 恢复" else "⏸️ 暂停"
         options += "✏️ 编辑"
@@ -197,8 +196,7 @@ class ItemListFragment : Fragment() {
             .setTitle(item.name)
             .setItems(options.toTypedArray()) { _, which ->
                 thread {
-                    // isGroup 时菜单少了快捷项，下标整体 +1 对齐
-                    val act = if (isGroup) which + 1 else which
+                    val act = which
                     when (act) {
                         0 -> {
                             repo.setQuick(if (isQuick) null else item.id)

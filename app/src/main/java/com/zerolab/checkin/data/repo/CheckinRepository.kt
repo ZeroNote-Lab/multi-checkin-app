@@ -39,27 +39,16 @@ class CheckinRepository(private val db: AppDatabase) {
     fun deleteItem(id: Long) {
         val quick = quickDao.get()
         if (quick?.itemId == id) {
-            // v1.3.18：删除快捷项后，只在「可设为快捷」的项中按序递补第一个；
-            // 无可快捷项（全部是组/组子项或已无项）则快捷置空。
+            // v1.3.24：删除快捷项后，按列表序递补第一个激活项（打卡组与普通策略一致）；无则快捷置空。
             quickDao.upsert(QuickConfig(1, pickNextQuick(id)))
         }
         recordDao.deleteByItem(id)
         itemDao.deleteById(id)
     }
 
-    /** v1.3.18：选出下一个可快捷项——非打卡组、非任何组的子项、激活，按列表序第一个；无则 null */
+    /** v1.3.24：选出下一个可快捷项——激活项（含打卡组），按列表序第一个；无则 null */
     private fun pickNextQuick(excludeId: Long): Long? {
-        val items = itemDao.getAllSorted()
-        val subIds = items.asSequence()
-            .filter { it.id != excludeId }
-            .filter { runCatching { com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode }.getOrDefault(false) }
-            .flatMap { runCatching { com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMembers }.getOrDefault(emptyList()) }
-            .toSet()
-        return items.firstOrNull {
-            it.id != excludeId && it.isActive == 1 &&
-                !runCatching { com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode }.getOrDefault(false) &&
-                it.id !in subIds
-        }?.id
+        return itemDao.getAllSorted().firstOrNull { it.id != excludeId && it.isActive == 1 }?.id
     }
 
     fun setPinned(id: Long, pinned: Boolean) {
@@ -90,20 +79,14 @@ class CheckinRepository(private val db: AppDatabase) {
     fun getQuickId(): Long? = quickDao.get()?.itemId
 
     fun setQuick(id: Long?) {
-        // v1.3.14：打卡组不可作为快捷打卡，任何路径（含导入）都跳过组
-        if (id != null) {
-            val it = itemDao.getById(id) ?: return
-            if (com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode) return
-        }
+        // v1.3.24：打卡组与普通项一致，均可设为快捷打卡
         quickDao.upsert(QuickConfig(1, id))
     }
 
     private fun ensureQuickAfterCreate(newId: Long) {
         val cfg = quickDao.get()
         if (cfg == null || cfg.itemId == null) {
-            // v1.3.14：打卡组不可作为快捷打卡（组本身无独立打卡动作），空库首个组不自动设快捷
-            val it = itemDao.getById(newId) ?: return
-            if (com.zerolab.checkin.engine.ItemConfig.parse(it.configJson).groupMode) return
+            // v1.3.24：空库首个项（含打卡组）自动设为快捷打卡
             quickDao.upsert(QuickConfig(1, newId))
         }
     }

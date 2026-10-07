@@ -686,7 +686,7 @@ class CreateItemActivity : AppCompatActivity() {
             } else {
                 val group = CheckinItem(
                     name = name, type = "GROUP", configJson = cfg.toJson(),
-                    icon = finalIconKey(), theme = autoThemeFor(), sortOrder = repo.itemCount(),
+                    icon = finalIconKey(), theme = selectedTheme, sortOrder = repo.itemCount(),
                     editPolicy = "FLEX", editInterval = null,
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                 )
@@ -770,6 +770,49 @@ class CreateItemActivity : AppCompatActivity() {
         }
         grid.addView(more)
         container.addView(grid)
+
+        // v1.3.24：图标下方新增主题选择（8 套点缀色；打卡按钮跟随全局主题，主题仅做卡片/点缀）
+        fun tdp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        container.addView(TextView(this).apply {
+            text = "主题"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF6E7F78.toInt())
+            setPadding(0, tdp(12), 0, tdp(6))
+        })
+        val themeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        com.zerolab.checkin.theme.ThemeManager.themes.forEach { t ->
+            val cell = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                lp.bottomMargin = tdp(4)
+                layoutParams = lp
+            }
+            val dot = View(this).apply {
+                val d = tdp(26)
+                layoutParams = LinearLayout.LayoutParams(d, d)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(t.primary)
+                    setStroke(tdp(2), if (t.id == selectedTheme) 0xFF1F2430.toInt() else 0x00000000)
+                }
+            }
+            cell.addView(dot)
+            cell.addView(TextView(this).apply {
+                text = t.name; textSize = 10f; gravity = Gravity.CENTER
+                setTextColor(if (t.id == selectedTheme) 0xFF1F2430.toInt() else 0xFF9AA1B2.toInt())
+            })
+            cell.setOnClickListener {
+                selectedTheme = t.id
+                renderIconGrid(container)
+            }
+            themeRow.addView(cell)
+        }
+        container.addView(themeRow)
     }
 
     /** v1.3.19：图标格——纯图标居中、无文字 */
@@ -824,7 +867,7 @@ class CreateItemActivity : AppCompatActivity() {
     private fun finalIconKey(): String =
         selectedIcon ?: editing?.icon ?: com.zerolab.checkin.theme.IconManager.all.random().key
 
-    /** 新建项自动配色（图标独立后主题不再手动选择，按列表序号轮换 8 套莫兰迪色） */
+    /** v1.3.24：按列表序轮转 FloraTheme——仅用于打卡组子项的自动配色（组子项无独立主题选择） */
     private fun autoThemeFor(): String = ThemeManager.themes[(repo.itemCount()) % ThemeManager.themes.size].id
 
     // ---------- v1.3.0 打卡类型双 tab：普通打卡 / 日记打卡（v1.3.1 文件夹标签样式） ----------
@@ -1081,7 +1124,7 @@ class CreateItemActivity : AppCompatActivity() {
         val container = findViewById<LinearLayout>(R.id.method_container)
         buildComboNRow()   // v1.2.0 组合完成数选择行（多选时显示）
         Method.values().forEach { m ->
-            // v1.3.11：外壳代码构建（轻量）；v1.3.19：参数配置改为弹窗式（方案三），面板不再内嵌
+            // v1.3.11：外壳代码构建（轻量）；v1.3.24：参数配置改为内联展开（方案B）
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 background = getDrawable(R.drawable.bg_card)
@@ -1092,16 +1135,9 @@ class CreateItemActivity : AppCompatActivity() {
             }
             val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val label = TextView(this).apply { text = "${m.emoji} ${m.label}"; textSize = 15f; setTextColor(0xFF1F2430.toInt()); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
-            // v1.3.19：已开启且有配置项的方式显示 ⚙，点击打开配置弹窗
-            val gear = TextView(this).apply {
-                text = "⚙"; textSize = 17f
-                setTextColor(0xFF6E7F78.toInt())
-                setPadding(20, 0, 12, 0)
-                visibility = View.GONE
-                setOnClickListener { buildMethodDialog(m, cfg, cfg.methods) }
-            }
+            // v1.3.24：删除 ⚙ 弹窗入口，配置改为开启后内联展开
             val sw = SwitchCompat(this)
-            head.addView(label); head.addView(gear); head.addView(sw)
+            head.addView(label); head.addView(sw)
             val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
             card.addView(head); card.addView(panel)
             sw.setOnCheckedChangeListener { _, on ->
@@ -1143,31 +1179,36 @@ class CreateItemActivity : AppCompatActivity() {
                     return@setOnCheckedChangeListener
                 }
                 if (on && m.key in Method.conflictsWith(cfg.methods)) {
-                    // 尝试开启互斥方式：拒绝切换并提示
-                    sw.isChecked = false
-                    panel.visibility = View.GONE
-                    cfg.methods.remove(m.key)
-                    toast("该方式与已选方式互斥，无法同时开启")
+                    // v1.3.24：切换式互斥——取消与其互斥的已选方式，选中当前方式并提示
+                    val cancel = cfg.methods.filter { it in Method.conflictsWith(setOf(m.key)) }
+                    cancel.forEach { k ->
+                        cfg.methods.remove(k)
+                        rows[k]?.let { r -> r.switch.isChecked = false; r.panel.visibility = View.GONE }
+                    }
+                    cfg.methods.add(m.key)
+                    if (!journalMode && hasMethodConfig(m)) { ensurePanel(m); panel.visibility = View.VISIBLE }
+                    val names = cancel.mapNotNull { Method.of(it)?.label }.joinToString("、")
+                    toast(if (names.isEmpty()) "已切换为「${m.label}」" else "已切换为「${m.label}」，${names}已关闭")
                     refreshConflicts()
+                    refreshComboNRow()
                     return@setOnCheckedChangeListener
                 }
-                // v1.3.4：随心记模式下只显示一级开关，二级 panel 全部隐藏
-                // v1.3.19：参数配置改弹窗式——不再内嵌展开 panel
-                gear.visibility = if (on && !journalMode && hasMethodConfig(m)) View.VISIBLE else View.GONE
+                // v1.3.24：开启方式后配置内联展开在卡片下方（方案B，无 ⚙）
                 if (on && !journalMode) { ensurePanel(m); panel.visibility = View.VISIBLE } else panel.visibility = View.GONE
                 if (on) cfg.methods.add(m.key) else cfg.methods.remove(m.key)
                 refreshConflicts()
             }
             container.addView(card)
-            rows[m.key] = MethodRow(sw, panel, card, gear)
+            rows[m.key] = MethodRow(sw, panel, card)
         }
     }
 
-    /** v1.3.19：方式参数改为弹窗配置（方案三）；ensurePanel 不再构建内嵌面板（保留 built 标记防重复） */
+    /** v1.3.24：方式参数内联面板（方案B）——首次开启时构建配置视图 */
     private fun ensurePanel(m: Method) {
         val row = rows[m.key] ?: return
         if (row.built) return
         row.built = true
+        row.panel.addView(buildMethodPanel(m, cfg))
     }
 
     private fun sectionLabel(text: String): TextView = TextView(this).apply {
@@ -1331,12 +1372,12 @@ class CreateItemActivity : AppCompatActivity() {
         else -> false
     }
 
-    /** v1.3.19：方案三弹窗式——方式规则配置弹窗；直接读写 target（cfg / cfgSub） */
-    private fun buildMethodDialog(m: Method, target: ItemConfig, selSet: MutableSet<String>?) {
+    /** v1.3.24：方式规则配置内联面板（方案B，替代弹窗）；直接读写 target（cfg / cfgSub），返回视图由调用方挂载 */
+    private fun buildMethodPanel(m: Method, target: ItemConfig): LinearLayout {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(52, 8, 52, 0)
+            setPadding(0, 8, 0, 0)
         }
         when (m) {
             Method.PHOTO -> {
@@ -1477,35 +1518,17 @@ class CreateItemActivity : AppCompatActivity() {
             }
             else -> box.addView(TextView(this).apply { text = "点击打卡即完成，无需额外设置。"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
         }
-        val dlg = android.app.AlertDialog.Builder(this)
-            .setTitle("${m.emoji} ${m.label}")
-            .setView(box)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("保存", null)
-            .create()
-        dlg.setOnShowListener {
-            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                // v1.3.19：保存前对未配置完整的方式逐项提示（参考普通打卡现有校验风格）
-                when (m) {
-                    Method.LOCATION -> if (target.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return@setOnClickListener }
-                    Method.NFC -> if (target.nfcTagId.isBlank()) { toast("NFC打卡需先绑定 NFC 标签"); return@setOnClickListener }
-                    Method.PHOTO -> if (!target.photoFromCamera && !target.photoFromAlbum) { toast("拍照打卡需至少勾选一种图片来源"); return@setOnClickListener }
-                    Method.QRCODE -> if (target.qrContent.isBlank()) { toast("扫码打卡需先生成专属二维码"); return@setOnClickListener }
-                    else -> {}
-                }
-                dlg.dismiss()
-            }
-        }
-        dlg.show()
+        // v1.3.24：内联面板无保存按钮——配置即写；完整性校验由 save()/子项确定时兜底
+        return box
     }
 
     // ---------- v1.3.23 竖排方式选择行（对齐自定义打卡布局，替代 GearChip 3×3 网格） ----------
     /**
      * 每个打卡方式一张卡片、一行（左 emoji+名称，右 Switch），竖排；无 ⚙。
-     * 勾选可配置方式立即弹配置弹窗；普通打卡与其它方式互斥（互斥行视觉置灰但可点，点击顶掉普通）；
-     * 空选择兜底普通；步数打卡开发中禁用。
+     * v1.3.24：勾选可配置方式后配置内联展开在卡片下方（方案B）；普通打卡与其它方式互斥（只按钮置灰但可点，
+     * 点击切换并提示）；空选择兜底普通；步数打卡开发中禁用。
      * @param sel 已选方式集合（直接读写）
-     * @param target 配置对象（配置弹窗写入）
+     * @param target 配置对象（内联配置写入）
      * @param onChanged 方式变化后的回调（如刷新更多区可用性）
      */
     private fun buildSwitchMethodRows(
@@ -1518,6 +1541,7 @@ class CreateItemActivity : AppCompatActivity() {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
         val switches = LinkedHashMap<String, SwitchCompat>()
         val labels = LinkedHashMap<String, TextView>()
+        val panels = LinkedHashMap<String, LinearLayout>()
         var refreshing = false   // 程序化刷新开关状态时不触发业务回调
 
         fun refreshAll() {
@@ -1530,12 +1554,13 @@ class CreateItemActivity : AppCompatActivity() {
                     val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in sel
                     val stepDisabled = m.key == Method.STEPS.key
                     val disabled = blocked || stepDisabled
-                    sw.isEnabled = !stepDisabled   // 对齐自定义打卡：互斥仅视觉置灰，保持可点击
+                    sw.isEnabled = !stepDisabled   // v1.3.24：互斥仅视觉置灰（只按钮灰、文字不变灰），保持可点击
                     sw.alpha = if (disabled) 0.4f else 1f
                     if (sw.isChecked != selected) sw.isChecked = selected
-                    lb.alpha = if (disabled) 0.4f else 1f
                     lb.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     lb.setTextColor(if (selected) 0xFF1F7A4D.toInt() else 0xFF1F2430.toInt())
+                    // v1.3.24：配置面板随选中状态展开/收起
+                    panels[m.key]?.visibility = if (selected && hasMethodConfig(m)) View.VISIBLE else View.GONE
                 }
             } finally { refreshing = false }
         }
@@ -1561,10 +1586,12 @@ class CreateItemActivity : AppCompatActivity() {
             }
             val sw = SwitchCompat(this)
             head.addView(label); head.addView(sw)
-            card.addView(head)
+            val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+            card.addView(head); card.addView(panel)
             container.addView(card)
             switches[m.key] = sw
             labels[m.key] = label
+            panels[m.key] = panel
             sw.setOnCheckedChangeListener { _, on ->
                 if (refreshing) return@setOnCheckedChangeListener
                 val mk = m.key
@@ -1578,10 +1605,18 @@ class CreateItemActivity : AppCompatActivity() {
                     if (mk == Method.NORMAL.key) {
                         sel.clear(); sel.add(Method.NORMAL.key)
                     } else {
-                        if (Method.NORMAL.key in sel) sel.clear()
+                        // v1.3.24：互斥切换提示（从普通切到其它方式时）
+                        val switched = Method.NORMAL.key in sel
+                        if (switched) {
+                            sel.clear()
+                            toast("已切换为「${m.label}」，普通打卡已关闭")
+                        }
                         sel.add(mk)
-                        // v1.3.21：选中可配置方式立即弹配置弹窗（取消不丢已设配置）
-                        if (hasMethodConfig(m)) buildMethodDialog(m, target, sel)
+                        // v1.3.24：配置内联展开在方式卡片下方（方案B，不再弹窗）
+                        if (hasMethodConfig(m)) {
+                            if (panels[mk]?.childCount == 0) panels[mk]?.addView(buildMethodPanel(m, target))
+                            panels[mk]?.visibility = View.VISIBLE
+                        }
                     }
                 } else {
                     if (mk == Method.NORMAL.key) {
@@ -1591,6 +1626,7 @@ class CreateItemActivity : AppCompatActivity() {
                         return@setOnCheckedChangeListener
                     } else {
                         sel.remove(mk)
+                        panels[mk]?.visibility = View.GONE
                         if (sel.isEmpty()) sel.add(Method.NORMAL.key)
                     }
                 }
@@ -2336,7 +2372,7 @@ class CreateItemActivity : AppCompatActivity() {
             } else {
                 val item = CheckinItem(
                     name = name, type = ItemConfig.mainType(cfg.methods), configJson = cfg.toJson(),
-                    icon = finalIconKey(), theme = autoThemeFor(), sortOrder = repo.itemCount(),
+                    icon = finalIconKey(), theme = selectedTheme, sortOrder = repo.itemCount(),
                     editPolicy = editPolicy,
                     editInterval = editInterval,
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
