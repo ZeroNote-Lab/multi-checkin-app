@@ -37,6 +37,16 @@ class CheckinRepository(private val db: AppDatabase) {
     }
 
     fun deleteItem(id: Long) {
+        // v1.3.27：删除打卡组时级联删除组内全部子项（含记录），避免子项悬挂、被快捷递补"释放"
+        itemDao.getById(id)?.let { item ->
+            val cfg = try { com.zerolab.checkin.engine.ItemConfig.parse(item.configJson) } catch (_: Exception) { null }
+            if (cfg?.groupMode == true) {
+                cfg.groupMembers.forEach { mid ->
+                    recordDao.deleteByItem(mid)
+                    itemDao.deleteById(mid)
+                }
+            }
+        }
         val quick = quickDao.get()
         if (quick?.itemId == id) {
             // v1.3.24：删除快捷项后，按列表序递补第一个激活项（打卡组与普通策略一致）；无则快捷置空。
