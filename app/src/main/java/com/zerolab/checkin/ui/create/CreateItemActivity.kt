@@ -15,6 +15,7 @@ import android.provider.MediaStore
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -2168,7 +2169,14 @@ class CreateItemActivity : AppCompatActivity() {
     private fun lockRules(msg: String) {
         locked = true
         toast(msg)
-        rows.values.forEach { it.switch.isEnabled = false; it.gear?.isEnabled = false; it.gear?.alpha = 0.4f }
+        // v1.3.27：内联方式面板内部控件一并锁定（v1.3.24 内联化后 panel 内控件此前未被锁定，
+        // 导致 LOCKED 下仍可改定位标准点/字数/来源等参数）；管理员模式不调用本方法
+        rows.values.forEach { row ->
+            row.switch.isEnabled = false
+            row.gear?.isEnabled = false
+            row.gear?.alpha = 0.4f
+            row.panel?.let { disableSubtree(it) }
+        }
         findViewById<CompoundButton>(R.id.cb_negative).isEnabled = false
         findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = false
         findViewById<Button>(R.id.btn_tw_start).isEnabled = false
@@ -2208,6 +2216,16 @@ class CreateItemActivity : AppCompatActivity() {
         cbTimerPausable?.isEnabled = false
         cbTimerForce?.isEnabled = false
         qrBindBtn?.isEnabled = false
+    }
+
+    /** v1.3.27：递归禁用视图子树（内联方式面板锁定；TextView 类附带降透明度提示不可用） */
+    private fun disableSubtree(v: View) {
+        if (v is ViewGroup) {
+            for (i in 0 until v.childCount) disableSubtree(v.getChildAt(i))
+        } else {
+            v.isEnabled = false
+            if (v is android.widget.TextView) v.alpha = 0.45f
+        }
     }
 
     private fun fillParamUi() {
