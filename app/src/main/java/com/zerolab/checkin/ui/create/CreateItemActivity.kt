@@ -111,7 +111,7 @@ class CreateItemActivity : AppCompatActivity() {
     private var ndaysTarget = 21
     // v1.3.14 打卡组子项：仅支持新增（id 非空=已入库子项，编辑时更新而非新建）
     // v1.3.15：子项携带完整 ItemConfig（每日次数/负打卡/时间规则/抵消/方式参数/自动打卡，弹层更多区编辑）
-    private data class GroupSub(var id: Long?, var name: String, val config: ItemConfig)
+    private data class GroupSub(var id: Long?, var name: String, val config: ItemConfig, var icon: String? = null)
     private val groupSubs = mutableListOf<GroupSub>()
     // v1.3.14 N天打卡：新建时可选打卡方式（多选组合）
     private val ndaysMethods = linkedSetOf(Method.NORMAL.key)
@@ -368,7 +368,8 @@ class CreateItemActivity : AppCompatActivity() {
 
         override fun onBindViewHolder(h: VH, position: Int) {
             val s = groupSubs[position]
-            h.icon.text = com.zerolab.checkin.theme.IconManager.emojiFor(selectedIcon, selectedTheme)
+            // v1.3.29：子项行显示子项自身图标（未选 default → 主题 emoji 回退）
+            h.icon.text = com.zerolab.checkin.theme.IconManager.emojiFor(s.icon ?: "default", selectedTheme)
             h.name.text = s.name
             val c = s.config
             val base = methodLabel(c.methods)
@@ -431,6 +432,40 @@ class CreateItemActivity : AppCompatActivity() {
         et.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         (et.layoutParams as LinearLayout.LayoutParams).topMargin = dp(12)
         wrap.addView(et)
+        // v1.3.29：子项自主图标——名称下方图标网格（收起常用 5 个 + 展开全部；复用普通项 iconCell/iconMoreCell）
+        wrap.addView(TextView(this).apply {
+            text = "图标"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF6E7F78.toInt())
+            setPadding(0, dp(14), 0, dp(8))
+        })
+        var subIcon = s?.icon
+        var iconExpanded = false
+        val iconGrid = android.widget.GridLayout(this).apply {
+            columnCount = 6
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        fun renderSubIcons() {
+            iconGrid.removeAllViews()
+            val shown = if (iconExpanded) com.zerolab.checkin.theme.IconManager.all
+                        else {
+                            val commons = com.zerolab.checkin.theme.IconManager.common.take(5).toMutableList()
+                            val selIcon = subIcon?.let { k -> com.zerolab.checkin.theme.IconManager.all.firstOrNull { it.key == k } }
+                            if (selIcon != null && commons.none { it.key == selIcon.key }) commons[4] = selIcon
+                            commons
+                        }
+            shown.forEach { ic ->
+                val cell = iconCell(ic, subIcon)
+                cell.setOnClickListener { subIcon = ic.key; renderSubIcons() }
+                iconGrid.addView(cell)
+            }
+            val more = iconMoreCell(iconExpanded)
+            more.setOnClickListener { iconExpanded = !iconExpanded; renderSubIcons() }
+            iconGrid.addView(more)
+        }
+        renderSubIcons()
+        wrap.addView(iconGrid)
         wrap.addView(TextView(this).apply {
             text = "打卡方式"
             textSize = 12f
@@ -495,7 +530,7 @@ class CreateItemActivity : AppCompatActivity() {
                 if (Method.NFC.key in cfgSub.methods && cfgSub.nfcTagId.isBlank()) { toast("NFC打卡需先绑定 NFC 标签"); return@setOnClickListener }
                 if (Method.QRCODE.key in cfgSub.methods && cfgSub.qrContent.isBlank()) { toast("扫码打卡需先生成专属二维码"); return@setOnClickListener }
                 if (Method.PHOTO.key in cfgSub.methods && !cfgSub.photoFromCamera && !cfgSub.photoFromAlbum) { toast("拍照打卡需至少勾选一种图片来源"); return@setOnClickListener }
-                if (s == null) groupSubs.add(GroupSub(null, nm, cfgSub)) else s.name = nm
+                if (s == null) groupSubs.add(GroupSub(null, nm, cfgSub, subIcon)) else { s.name = nm; s.icon = subIcon }
                 renderGroupMembers()
                 sheet.dismiss()
             }
@@ -754,10 +789,11 @@ class CreateItemActivity : AppCompatActivity() {
             groupSubs.forEach { s ->
                 if (s.id != null && repo.getItem(s.id!!) != null) {
                     // v1.3.15：编辑已有子项——全量覆盖配置（每日次数/负打卡/时间规则/抵消/方式参数/自动），不限于方式
+                    // v1.3.29：子项图标跟随弹窗选择（未选保持 default）
                     val sub = repo.getItem(s.id!!)!!
                     val subCfg = ItemConfig.parse(s.config.toJson())
                     if (subCfg.methods.isEmpty()) subCfg.methods.add(Method.NORMAL.key)
-                    repo.updateItem(sub.copy(name = s.name, configJson = subCfg.toJson(), groupTag = gid.toString(), updatedAt = now))
+                    repo.updateItem(sub.copy(name = s.name, icon = s.icon ?: "default", configJson = subCfg.toJson(), groupTag = gid.toString(), updatedAt = now))
                     memberIds.add(s.id!!)
                 } else {
                     // v1.3.15：新建子项——携带弹层内完整配置（原固定 dailyLimit=1 取消，按用户设置保存）
@@ -765,7 +801,7 @@ class CreateItemActivity : AppCompatActivity() {
                     if (subCfg.methods.isEmpty()) subCfg.methods.add(Method.NORMAL.key)
                     val sub = CheckinItem(
                         name = s.name, type = "NORMAL", configJson = subCfg.toJson(),
-                        icon = "default", theme = autoThemeFor(), sortOrder = repo.itemCount(),
+                        icon = s.icon ?: "default", theme = autoThemeFor(), sortOrder = repo.itemCount(),
                         groupTag = gid.toString(), editPolicy = "LOCKED",
                         lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                     )
@@ -814,7 +850,7 @@ class CreateItemActivity : AppCompatActivity() {
                         commons
                     }
         shown.forEach { ic ->
-            val cell = iconCell(ic)
+            val cell = iconCell(ic, selectedIcon)
             cell.setOnClickListener {
                 selectedIcon = ic.key
                 renderIconGrid(container)
@@ -873,10 +909,10 @@ class CreateItemActivity : AppCompatActivity() {
         container.addView(themeRow)
     }
 
-    /** v1.3.19：图标格——纯图标居中、无文字 */
-    private fun iconCell(ic: com.zerolab.checkin.theme.ItemIcon): View {
+    /** v1.3.19：图标格——纯图标居中、无文字；selKey 为当前选中 key（v1.3.29 泛化供子项弹窗复用） */
+    private fun iconCell(ic: com.zerolab.checkin.theme.ItemIcon, selKey: String?): View {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        val sel = ic.key == selectedIcon
+        val sel = ic.key == selKey
         val v = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -2131,9 +2167,10 @@ class CreateItemActivity : AppCompatActivity() {
                 val m = repo.getItem(mid)
                 val nm = m?.name ?: loaded.groupMemberNames.getOrNull(i) ?: "子项"
                 // v1.3.15：子项携带完整 ItemConfig 回显（后续点击行可直接编辑全部规则）
+                // v1.3.29：回显子项图标（isKnown 校验，未知保持 null → default）
                 val mc = m?.let { ItemConfig.parse(it.configJson) } ?: ItemConfig()
                 if (mc.methods.isEmpty()) mc.methods.add(Method.NORMAL.key)
-                groupSubs.add(GroupSub(mid, nm, mc))
+                groupSubs.add(GroupSub(mid, nm, mc, m?.icon?.let { k -> if (com.zerolab.checkin.theme.IconManager.isKnown(k)) k else null }))
             }
             renderGroupMembers()
         }
