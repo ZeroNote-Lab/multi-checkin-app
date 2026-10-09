@@ -21,6 +21,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -184,6 +187,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.tv_journal_type_label).visibility = if (showRecordType) View.VISIBLE else View.GONE
 
         buildThemeChips()
+        initGroupMemberList()   // v1.3.28：打卡组子项列表 RecyclerView（长按手柄拖动排序），须在 applySpecialModeVisibility 前初始化
         // v1.3.11：同步构建；方式行外壳轻量构建 + 参数面板懒加载，保证页面快速且一次性完整出现
         buildModeSection()   // v1.3.0 打卡类型双 tab（普通打卡 / 日记打卡），在方式开关之前构建
         buildMethodRows()
@@ -264,49 +268,108 @@ class CreateItemActivity : AppCompatActivity() {
         buildNdaysMethods()
     }
 
-    private fun renderGroupMembers() {
-        val list = findViewById<LinearLayout>(R.id.group_member_list)
-        list.removeAllViews()
-        groupSubs.forEachIndexed { i, s -> list.addView(groupMemberRow(s, i)) }
+    // ---------- v1.3.28：打卡组子项列表 RecyclerView + 长按手柄拖动排序（对齐打卡选择页；顺序随 groupSubs 落库到 groupMembers） ----------
+    private lateinit var groupAdapter: GroupSubAdapter
+    private lateinit var groupTouch: ItemTouchHelper
+
+    private fun initGroupMemberList() {
+        val list = findViewById<RecyclerView>(R.id.group_member_list)
+        list.layoutManager = LinearLayoutManager(this)
+        groupAdapter = GroupSubAdapter()
+        list.adapter = groupAdapter
+        groupTouch = ItemTouchHelper(object : ItemTouchHelper.Callback() {
+            override fun getMovementFlags(rv: RecyclerView, vh: RecyclerView.ViewHolder): Int =
+                makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
+            override fun onMove(rv: RecyclerView, src: RecyclerView.ViewHolder, dst: RecyclerView.ViewHolder): Boolean {
+                val from = src.bindingAdapterPosition; val to = dst.bindingAdapterPosition
+                if (from < 0 || to < 0 || from == to) return false
+                val s = groupSubs.removeAt(from); groupSubs.add(to, s)
+                groupAdapter.notifyItemMoved(from, to)
+                return true
+            }
+            override fun onSwiped(vh: RecyclerView.ViewHolder, direction: Int) {}
+            override fun isLongPressDragEnabled() = false // 由子项行拖动手柄触发
+        })
+        groupTouch.attachToRecyclerView(list)
     }
 
-    /** v1.3.14 子项卡片行：主题色图标底 + 名称 + 方式标签 + 删除 */
-    /** v1.3.15：点击整行返回编辑（不用删掉重新创建）；规则摘要并入标签行 */
-    private fun groupMemberRow(s: GroupSub, idx: Int): View {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        val theme = ThemeManager.of(selectedTheme)
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            background = getDrawable(R.drawable.bg_input)
-            setPadding(10, 10, 8, 10)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.topMargin = 6
-            layoutParams = lp
-            // v1.3.15：点击已添加子项行 → 返回修改（无需删除重建）
-            setOnClickListener { showGroupSubSheet(s) }
+    private fun renderGroupMembers() {
+        if (!::groupAdapter.isInitialized) return
+        groupAdapter.notifyDataSetChanged()
+    }
+
+    private inner class GroupSubAdapter : RecyclerView.Adapter<GroupSubAdapter.VH>() {
+        /** 子项行：拖动手柄 ≡ + 主题色图标底 + 名称 + 规则摘要 + ✕ 删除；点击整行编辑 */
+        inner class VH(
+            val row: View,
+            val icon: TextView,
+            val name: TextView,
+            val summary: TextView,
+            val handle: TextView,
+            val del: TextView
+        ) : RecyclerView.ViewHolder(row)
+
+        override fun getItemCount() = groupSubs.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+            val theme = ThemeManager.of(selectedTheme)
+            val row = LinearLayout(this@CreateItemActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                background = getDrawable(R.drawable.bg_input)
+                setPadding(10, 10, 8, 10)
+                val lp = RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT)
+                lp.topMargin = 6
+                layoutParams = lp
+            }
+            val handle = TextView(this@CreateItemActivity).apply {
+                text = "≡"
+                textSize = 18f
+                setTextColor(0xFF9AA5B0.toInt())
+                setPadding(0, 0, 8, 0)
+            }
+            row.addView(handle)
+            val iconWrap = LinearLayout(this@CreateItemActivity).apply {
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(theme.soft) }
+                layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
+            }
+            val icon = TextView(this@CreateItemActivity).apply { textSize = 17f }
+            iconWrap.addView(icon)
+            row.addView(iconWrap)
+            val col = LinearLayout(this@CreateItemActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                lp.marginStart = dp(10)
+                layoutParams = lp
+            }
+            val name = TextView(this@CreateItemActivity).apply {
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(0xFF1F2430.toInt())
+            }
+            val summary = TextView(this@CreateItemActivity).apply {
+                textSize = 11f
+                setTextColor(0xFF6E7F78.toInt())
+                setPadding(0, dp(2), 0, 0)
+            }
+            col.addView(name); col.addView(summary)
+            row.addView(col)
+            val del = TextView(this@CreateItemActivity).apply {
+                text = " ✕"
+                textSize = 14f
+                setTextColor(0xFFB0534C.toInt())
+                setPadding(16, 0, 6, 0)
+            }
+            row.addView(del)
+            return VH(row, icon, name, summary, handle, del)
         }
-        val iconWrap = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(theme.soft) }
-            layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
-        }
-        iconWrap.addView(TextView(this).apply { text = com.zerolab.checkin.theme.IconManager.emojiFor(selectedIcon, selectedTheme); textSize = 17f })
-        row.addView(iconWrap)
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            lp.marginStart = dp(10)
-            layoutParams = lp
-        }
-        col.addView(TextView(this).apply {
-            text = s.name
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF1F2430.toInt())
-        })
-        col.addView(TextView(this).apply {
-            // v1.3.15：方式标签 + 规则摘要（每日次数/负打卡/时间窗口等）
+
+        override fun onBindViewHolder(h: VH, position: Int) {
+            val s = groupSubs[position]
+            h.icon.text = com.zerolab.checkin.theme.IconManager.emojiFor(selectedIcon, selectedTheme)
+            h.name.text = s.name
             val c = s.config
             val base = methodLabel(c.methods)
             val extra = mutableListOf<String>()
@@ -316,20 +379,14 @@ class CreateItemActivity : AppCompatActivity() {
             if (c.dayCutoff >= 0) extra.add("时间分割")
             if (c.offset.enabled) extra.add("🛡️抵消")
             if (Method.AUTO.key in c.methods) extra.add("自动")
-            text = if (extra.isEmpty()) base else "$base   ·  ${extra.joinToString(" / ")}"
-            textSize = 11f
-            setTextColor(0xFF6E7F78.toInt())
-            setPadding(0, dp(2), 0, 0)
-        })
-        row.addView(col)
-        row.addView(TextView(this).apply {
-            text = " ✕"
-            textSize = 14f
-            setTextColor(0xFFB0534C.toInt())
-            setPadding(16, 0, 6, 0)
-            setOnClickListener { groupSubs.removeAt(idx); renderGroupMembers() }
-        })
-        return row
+            h.summary.text = if (extra.isEmpty()) base else "$base   ·  ${extra.joinToString(" / ")}"
+            h.row.setOnClickListener { showGroupSubSheet(s) }
+            h.handle.setOnLongClickListener { groupTouch.startDrag(h); true }
+            h.del.setOnClickListener {
+                val p = h.bindingAdapterPosition
+                if (p >= 0) { groupSubs.removeAt(p); notifyItemRemoved(p) }
+            }
+        }
     }
 
     private fun methodLabel(methods: Set<String>): String =

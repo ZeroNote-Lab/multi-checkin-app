@@ -56,9 +56,9 @@ class CheckinRepository(private val db: AppDatabase) {
         itemDao.deleteById(id)
     }
 
-    /** v1.3.24：选出下一个可快捷项——激活项（含打卡组），按列表序第一个；无则 null */
+    /** v1.3.28：选出下一个可快捷项——激活项（含打卡组外壳），按列表序第一个；排除组内子项（子项不出现在打卡选择列表，递补到子项会导致列表无星标）；无则 null */
     private fun pickNextQuick(excludeId: Long): Long? {
-        return itemDao.getAllSorted().firstOrNull { it.id != excludeId && it.isActive == 1 }?.id
+        return itemDao.getAllSorted().firstOrNull { it.id != excludeId && it.isActive == 1 && it.groupTag == null }?.id
     }
 
     fun setPinned(id: Long, pinned: Boolean) {

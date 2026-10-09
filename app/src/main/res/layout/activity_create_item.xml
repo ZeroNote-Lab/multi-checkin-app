@@ -235,12 +235,13 @@
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
-                <LinearLayout
+                <!-- v1.3.28：子项列表改 RecyclerView 支持长按手柄拖动排序（对齐打卡选择页） -->
+                <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/group_member_list"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:orientation="vertical" />
+                    android:overScrollMode="never" />
 
                 <TextView
                     android:id="@+id/btn_group_add_new"
