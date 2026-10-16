@@ -244,7 +244,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.ndays_card).visibility = if (ndaysMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.group_card).visibility = if (groupMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.btn_group_more).visibility = if (groupMode) View.VISIBLE else View.GONE
-        findViewById<View>(R.id.btn_more).visibility = View.GONE   // v1.3.22：组/N天用不到主页面更多
+        findViewById<View>(R.id.btn_more).visibility = if (ndaysMode) View.VISIBLE else View.GONE   // v1.3.30：习惯打卡更多可用（每日次数/时间规则）；组仍隐藏
         if (groupMode) renderGroupMembers()
     }
 
@@ -1125,11 +1125,26 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     private fun refreshMoreVisibility() {
-        if (groupMode || ndaysMode) {
+        if (groupMode) {
             findViewById<View>(R.id.btn_more).visibility = View.GONE
             return
         }
         findViewById<View>(R.id.btn_group_more).visibility = View.GONE   // v1.3.22：组更多仅打卡组创建页显示（普通/自定义/日记模式隐藏）
+        if (ndaysMode) {
+            // v1.3.30：习惯打卡"更多"只展开频率与规则卡（每日次数+时间规则，负打卡分区隐藏）
+            val show = moreExpanded
+            findViewById<View>(R.id.btn_more).visibility = View.VISIBLE
+            findViewById<View>(R.id.rule_card).visibility = if (show) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.negative_section).visibility = View.GONE
+            findViewById<View>(R.id.schedule_card).visibility = View.GONE
+            findViewById<View>(R.id.offset_card).visibility = View.GONE
+            findViewById<View>(R.id.policy_card).visibility = View.GONE
+            findViewById<View>(R.id.tv_rule_title).visibility = if (show) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.tv_offset_title).visibility = View.GONE
+            findViewById<View>(R.id.tv_policy_title).visibility = View.GONE
+            findViewById<TextView>(R.id.btn_more).text = if (moreExpanded) "收起选项 ▴" else "更多选项 ▾"
+            return
+        }
         val show = !journalMode && moreExpanded
         findViewById<View>(R.id.btn_more).visibility = if (journalMode) View.GONE else View.VISIBLE
         findViewById<View>(R.id.rule_card).visibility = if (show) View.VISIBLE else View.GONE
@@ -1492,7 +1507,15 @@ class CreateItemActivity : AppCompatActivity() {
                     textSize = 14f; background = getDrawable(R.drawable.bg_input)
                     layoutParams = LinearLayout.LayoutParams(dp(80), LinearLayout.LayoutParams.WRAP_CONTENT)
                 }
-                et.setOnFocusChangeListener { _, has -> if (!has) target.textMinWords = et.text.toString().toIntOrNull()?.coerceIn(1, 99) ?: target.textMinWords }
+                et.setOnFocusChangeListener(null)
+                // v1.3.30：TextWatcher 实时写入（同时长参数修复）
+                et.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun onTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) {
+                        s?.toString()?.toIntOrNull()?.let { target.textMinWords = it.coerceIn(1, 99) }
+                    }
+                })
                 row.addView(et)
                 row.addView(TextView(this).apply { text = " 字"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
                 box.addView(row)
@@ -1523,9 +1546,18 @@ class CreateItemActivity : AppCompatActivity() {
             }
             Method.TIMER -> {
                 box.addView(TextView(this).apply { text = "计时方式"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()); setPadding(0, 8, 0, 4) })
-                val rbCount = RadioButton(this).apply { text = "倒计时"; isChecked = target.timerMode != "COUNTUP"; setTextColor(0xFF1F2430.toInt()) }
-                val rbUp = RadioButton(this).apply { text = "正计时"; isChecked = target.timerMode == "COUNTUP"; setTextColor(0xFF1F2430.toInt()) }
-                box.addView(rbCount); box.addView(rbUp)
+                val rbCount = RadioButton(this).apply {
+                    id = android.view.View.generateViewId()   // v1.3.30：必须显式 id，否则 RadioGroup 互斥失效（NO_ID 时 check(-1) 短路，两个可同选）
+                    text = "倒计时"; isChecked = target.timerMode != "COUNTUP"; setTextColor(0xFF1F2430.toInt())
+                }
+                val rbUp = RadioButton(this).apply {
+                    id = android.view.View.generateViewId()
+                    text = "正计时"; isChecked = target.timerMode == "COUNTUP"; setTextColor(0xFF1F2430.toInt())
+                }
+                // v1.3.30：倒计时/正计时包进 RadioGroup 保证互斥（此前直接 addView 可同时勾选）
+                val rg = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+                rg.addView(rbCount); rg.addView(rbUp)
+                box.addView(rg)
                 rbCount.setOnCheckedChangeListener { _, on -> if (on) target.timerMode = "COUNTDOWN" }
                 rbUp.setOnCheckedChangeListener { _, on -> if (on) target.timerMode = "COUNTUP" }
                 val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -1535,7 +1567,14 @@ class CreateItemActivity : AppCompatActivity() {
                     textSize = 14f; background = getDrawable(R.drawable.bg_input)
                     layoutParams = LinearLayout.LayoutParams(dp(80), LinearLayout.LayoutParams.WRAP_CONTENT)
                 }
-                et.setOnFocusChangeListener { _, has -> if (!has) target.timerMinutes = et.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: target.timerMinutes }
+                // v1.3.30：TextWatcher 实时写入（原失焦写入——收键盘/直接保存时不触发失焦导致值丢失，显示回默认）
+                et.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun onTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) {
+                        s?.toString()?.toIntOrNull()?.let { target.timerMinutes = it.coerceAtLeast(1) }
+                    }
+                })
                 row.addView(et)
                 row.addView(TextView(this).apply { text = " 分钟"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
                 box.addView(row)
@@ -1605,7 +1644,15 @@ class CreateItemActivity : AppCompatActivity() {
                     textSize = 14f; background = getDrawable(R.drawable.bg_input)
                     layoutParams = LinearLayout.LayoutParams(dp(80), LinearLayout.LayoutParams.WRAP_CONTENT)
                 }
-                et.setOnFocusChangeListener { _, has -> if (!has) target.voiceMaxSeconds = et.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: target.voiceMaxSeconds }
+                et.setOnFocusChangeListener(null)
+                // v1.3.30：TextWatcher 实时写入（同时长参数修复）
+                et.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun onTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) {
+                        s?.toString()?.toIntOrNull()?.let { target.voiceMaxSeconds = it.coerceAtLeast(1) }
+                    }
+                })
                 row.addView(et)
                 row.addView(TextView(this).apply { text = " 秒"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
                 box.addView(row)
@@ -2408,16 +2455,13 @@ class CreateItemActivity : AppCompatActivity() {
         if (groupMode) { saveGroup(); return }
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
         if (name.isBlank()) { toast("请填写打卡名称"); return }
-        // v1.3.14 N天打卡强制规则：每日 1 次、每天排期，不参与负打卡/时间段/时间分割/抵消；打卡方式由 ndays 区选择
+        // v1.3.30：习惯打卡放开「每日次数 / 时间规则」（由更多选项配置，collectConfigFromUi 收集）；负打卡仍不提供
         if (ndaysMode) {
             cfg.ndaysMode = true
             cfg.ndaysTarget = ndaysTarget
-            cfg.dailyLimit = 1
             cfg.scheduleMode = "DAILY"
             cfg.negative = false
-            cfg.timeWindowEnabled = false
             cfg.offset.enabled = false
-            cfg.dayCutoff = -1
         }
         if (!journalMode && scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
         // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）

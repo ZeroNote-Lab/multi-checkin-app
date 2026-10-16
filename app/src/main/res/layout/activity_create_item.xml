@@ -455,25 +455,33 @@
                     android:textColor="@color/text_primary"
                     android:textSize="13sp" />
 
-                <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginVertical="6dp" android:background="@color/divider" />
-
-                <!-- v1.3.12b：负打卡独立分区（与时间类规则不再互斥） -->
-                <TextView
+                <!-- v1.3.30：负打卡分区独立容器（习惯打卡"更多"展开时整区隐藏） -->
+                <LinearLayout
+                    android:id="@+id/negative_section"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="负打卡"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
+                    android:orientation="vertical">
 
-                <RadioButton
-                    android:id="@+id/cb_negative"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="无操作=成功，主动记录=破戒失败"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
+                    <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginVertical="6dp" android:background="@color/divider" />
+
+                    <!-- v1.3.12b：负打卡独立分区（与时间类规则不再互斥） -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="负打卡"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <RadioButton
+                        android:id="@+id/cb_negative"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="无操作=成功，主动记录=破戒失败"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+                </LinearLayout>
 
                 <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginVertical="6dp" android:background="@color/divider" />
 
