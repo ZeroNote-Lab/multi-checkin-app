@@ -1695,8 +1695,8 @@ class CreateItemActivity : AppCompatActivity() {
                     val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in sel
                     val stepDisabled = m.key == Method.STEPS.key
                     val disabled = blocked || stepDisabled
-                    sw.isEnabled = !stepDisabled   // v1.3.24：互斥仅视觉置灰（只按钮灰、文字不变灰），保持可点击
-                    sw.alpha = if (disabled) 0.4f else 1f
+                    sw.isEnabled = !stepDisabled && !locked   // v1.3.24：互斥仅视觉置灰（只按钮灰、文字不变灰），保持可点击；v1.3.32：已锁定保持禁用
+                    sw.alpha = if (disabled || locked) 0.4f else 1f
                     if (sw.isChecked != selected) sw.isChecked = selected
                     lb.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     lb.setTextColor(if (selected) 0xFF1F7A4D.toInt() else 0xFF1F2430.toInt())
@@ -1705,6 +1705,8 @@ class CreateItemActivity : AppCompatActivity() {
                     // 此前只切 VISIBLE 不构建内容 → 编辑已开启方式时面板空白，需关→开才显示）
                     if (selected && hasMethodConfig(m) && panels[m.key]?.childCount == 0) {
                         panels[m.key]?.addView(buildMethodPanel(m, target))
+                        // v1.3.32：懒构建的面板内容在已锁定时立即禁用
+                        if (locked) disableSubtree(panels[m.key]!!)
                     }
                     panels[m.key]?.visibility = if (selected && hasMethodConfig(m)) View.VISIBLE else View.GONE
                 }
@@ -1738,6 +1740,14 @@ class CreateItemActivity : AppCompatActivity() {
             switches[m.key] = sw
             labels[m.key] = label
             panels[m.key] = panel
+            // v1.3.32：登记到成员 map 供 lockRules 锁定；页面已锁定（LOCKED/锁定期）时
+            // 晚构建（如组子项弹窗在锁定后打开）的开关/标题立即禁用
+            switchSwitches[m.key] = sw
+            switchPanels[m.key] = panel
+            if (locked) {
+                sw.isEnabled = false; sw.alpha = 0.4f
+                label.alpha = 0.45f
+            }
             sw.setOnCheckedChangeListener { _, on ->
                 if (refreshing) return@setOnCheckedChangeListener
                 val mk = m.key
@@ -2312,6 +2322,11 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     private var locked = false
+
+    // v1.3.32：buildSwitchMethodRows（习惯打卡/组子项弹窗）构建的方式开关与配置面板登记，
+    // 供 lockRules 一并锁定（此前仅锁定自定义方式行 rows，习惯/组面板在 LOCKED 下仍可改）
+    private val switchSwitches = LinkedHashMap<String, SwitchCompat>()
+    private val switchPanels = LinkedHashMap<String, LinearLayout>()
     private fun lockRules(msg: String) {
         locked = true
         toast(msg)
@@ -2323,6 +2338,9 @@ class CreateItemActivity : AppCompatActivity() {
             row.gear?.alpha = 0.4f
             row.panel?.let { disableSubtree(it) }
         }
+        // v1.3.32：buildSwitchMethodRows（习惯打卡/组子项弹窗）构建的方式开关与配置面板一并锁定
+        switchSwitches.values.forEach { it.isEnabled = false; it.alpha = 0.4f }
+        switchPanels.values.forEach { p -> if (p.childCount > 0) disableSubtree(p) }
         findViewById<CompoundButton>(R.id.cb_negative).isEnabled = false
         findViewById<CompoundButton>(R.id.cb_time_window).isEnabled = false
         findViewById<Button>(R.id.btn_tw_start).isEnabled = false
