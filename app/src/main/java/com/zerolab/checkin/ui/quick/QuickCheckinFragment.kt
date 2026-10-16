@@ -334,17 +334,28 @@ class QuickCheckinFragment : Fragment() {
             }
             // v1.3.13 N天打卡：严格连续，达成目标后可继续超额
             cfg.ndaysMode -> {
-                val streak = CheckinEngine.streak(it, repo)
-                val target = cfg.ndaysTarget
-                streakView.text = "🎯 ${target} 天挑战 · 已连续 $streak 天（中断清零）"
-                if (streak >= target) {
-                    statusView.text = "状态：目标 $target 天已达成 ✓"
-                    btnCheckin.text = if (cnt == 0) "超额打卡" else "今日已打卡 ✓"
-                    btnCheckin.isEnabled = cnt == 0
+                // v1.3.30：习惯打卡支持固定时间段——窗口外禁用并提示（对齐普通打卡）
+                if (cfg.timeWindowEnabled && !CheckinEngine.inTimeWindow(cfg)) {
+                    val a = DateUtils.parseHHmm(cfg.twStart); val b = DateUtils.parseHHmm(cfg.twEnd)
+                    val nowMin = DateUtils.nowMinutes()
+                    val passed = nowMin >= b
+                    statusView.text = if (passed) "状态：今日未打卡（已过打卡时间）"
+                        else "状态：未到打卡时间（${cfg.twStart}–${cfg.twEnd}）"
+                    btnCheckin.text = if (passed) "已过打卡时间" else "未到打卡时间"
+                    btnCheckin.isEnabled = false; grayBtn()
                 } else {
-                    statusView.text = "状态：连续 $streak/$target 天"
-                    btnCheckin.text = if (cnt == 0) "打卡" else "今日已打卡 ✓"
-                    btnCheckin.isEnabled = cnt == 0
+                    val streak = CheckinEngine.streak(it, repo)
+                    val target = cfg.ndaysTarget
+                    streakView.text = "🎯 ${target} 天挑战 · 已连续 $streak 天（中断清零）"
+                    if (streak >= target) {
+                        statusView.text = "状态：目标 $target 天已达成 ✓"
+                        btnCheckin.text = if (cnt == 0) "超额打卡" else "今日已打卡 ✓"
+                        btnCheckin.isEnabled = cnt == 0
+                    } else {
+                        statusView.text = "状态：连续 $streak/$target 天"
+                        btnCheckin.text = if (cnt == 0) "打卡" else "今日已打卡 ✓"
+                        btnCheckin.isEnabled = cnt == 0
+                    }
                 }
             }
             paused -> { statusView.text = "状态：已暂停"; btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn() }
