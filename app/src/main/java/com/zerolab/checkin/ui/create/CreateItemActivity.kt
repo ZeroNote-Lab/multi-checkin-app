@@ -1701,6 +1701,11 @@ class CreateItemActivity : AppCompatActivity() {
                     lb.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     lb.setTextColor(if (selected) 0xFF1F7A4D.toInt() else 0xFF1F2430.toInt())
                     // v1.3.24：配置面板随选中状态展开/收起
+                    // v1.3.31：编辑回显/程序刷新时懒构建面板内容（同自定义打卡 ensurePanel 逻辑，
+                    // 此前只切 VISIBLE 不构建内容 → 编辑已开启方式时面板空白，需关→开才显示）
+                    if (selected && hasMethodConfig(m) && panels[m.key]?.childCount == 0) {
+                        panels[m.key]?.addView(buildMethodPanel(m, target))
+                    }
                     panels[m.key]?.visibility = if (selected && hasMethodConfig(m)) View.VISIBLE else View.GONE
                 }
             } finally { refreshing = false }
