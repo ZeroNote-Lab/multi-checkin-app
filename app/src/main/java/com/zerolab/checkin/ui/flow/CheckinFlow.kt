@@ -229,7 +229,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             box.addView(row)
         }
         comboDialog = AlertDialog.Builder(ctx)
-            .setTitle(if (journal) "📔 随心记 · 选择记录方式（今日已记 ${doneMethods.size} 次）"
+            .setTitle(if (journal) "📔 随心记 · 选择记录方式"   // v1.3.33：去掉"今日已记 N 次"（次数焦虑）
                 else "打卡方式（${doneMethods.size}/${methods.size}）")
             .setView(box)
             .setNegativeButton("关闭", null)

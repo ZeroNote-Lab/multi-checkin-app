@@ -161,8 +161,9 @@ class ItemListFragment : Fragment() {
             if (item.isPinned == 1) badges.append("📌 ")
             h.name.text = badges.toString() + (if (item.isActive == 0) "${item.name}（已暂停）" else item.name)
             h.type.text = methodLabel(item)
-            // v1.2.0：随心记显示记录天数（📔），普通项保持连续天数（🔥）
-            h.streak.text = if (row.journal) "📔 ${row.streak}天" else "🔥 ${row.streak}天"
+            // v1.3.33：随心记/心情日记是最简单的日记本，列表不显示记录天数；普通项保持连续天数（🔥）
+            if (row.journal) { h.streak.visibility = View.GONE }
+            else { h.streak.visibility = View.VISIBLE; h.streak.text = "🔥 ${row.streak}天" }
             if (row.credits > 0 && !row.journal) { h.credits.visibility = View.VISIBLE; h.credits.text = "🛡️×${row.credits}" }
             else h.credits.visibility = View.GONE
             // v1.1.7：拖动手柄——置顶项隐藏（不可拖动），暂停项弱化

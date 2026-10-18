@@ -200,6 +200,8 @@ class QuickCheckinFragment : Fragment() {
         // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽；v1.3.0：随心记/心情日记按实际改图例）
         val legendTv = root.findViewById<TextView>(R.id.tv_legend)
         if (groupMode) { legendTv.visibility = View.GONE; return }   // v1.3.15：打卡组日历不需要图注
+        // v1.3.33：随心记日历下方图例整行隐藏（有没有记录看日历圆圈即可，去掉"今日没记录/已记录"行）
+        if (cfg.journalMode) { legendTv.visibility = View.GONE; return }
         // v1.3.21：N天打卡（习惯打卡）只保留核心状态，去掉不适用的补签/部分完成/无需打卡/自动
         if (cfg.ndaysMode) {
             val s2 = SpannableStringBuilder()
@@ -226,10 +228,6 @@ class QuickCheckinFragment : Fragment() {
                 dot(MonthCalendarView.MOOD_COLORS[3], "😐一般"); dot(MonthCalendarView.MOOD_COLORS[4], "😟低落")
                 dot(MonthCalendarView.MOOD_COLORS[5], "😖很差")
             }
-            cfg.journalMode -> {
-                // 随心记：○今日 + ●已记录（没有缺卡/补签/破戒等）
-                dot(0xFF2FBF71.toInt(), "已记录")
-            }
             CheckinEngine.isNegative(cfg) -> {
                 dot(0xFF2FBF71.toInt(), "已打卡"); dot(0xFFEF5350.toInt(), "破戒"); dot(0xFF4C8DFF.toInt(), "补签"); dot(0xFFF59E0B.toInt(), "无需打卡")
             }
@@ -241,7 +239,6 @@ class QuickCheckinFragment : Fragment() {
         sb.append(
             when {
                 cfg.moodMode -> "⏳今天没记录  😊记录心情  📝可附文字"
-                cfg.journalMode -> "⏳今天没记录  ●已记录"
                 CheckinEngine.isNegative(cfg) -> "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌破戒/缺卡"
                 else -> "⏳今天尚未打卡  ✅已打卡  ↩补签  ⚡自动  ❌缺卡"
             }
@@ -271,18 +268,20 @@ class QuickCheckinFragment : Fragment() {
         val statusView = root.findViewById<TextView>(R.id.tv_today_status)
         val streakView = root.findViewById<TextView>(R.id.tv_streak)
         // v1.2.0：随心记显示"记录天数"（有记录+1、断签不归零）；v1.3.0：心情日记同；普通模式保持连续天数
-        val days = if (journal || mood) CheckinEngine.recordDays(it, repo) else CheckinEngine.streak(it, repo)
-        val credits = repo.availableCredits(it.id)
-        val sb = when {
-            mood -> StringBuilder("😊 记录 $days 天")
-            journal -> StringBuilder("📔 已记录 $days 天")
-            else -> StringBuilder("🔥 连续 $days 天")
+        // v1.3.33：随心记/心情日记是最简单的日记本，不显示任何天数统计（隐藏统计行）
+        val days = CheckinEngine.streak(it, repo)   // 组子项标题用（连续天数）
+        if (journal || mood) {
+            streakView.visibility = View.GONE
+        } else {
+            streakView.visibility = View.VISIBLE
+            val credits = repo.availableCredits(it.id)
+            val sb = StringBuilder("🔥 连续 $days 天")
+            if (credits > 0) sb.append("    🛡️×$credits")
+            if (cfg.dailyLimit > 1 && !neg) sb.append("    目标：每日${cfg.dailyLimit}次")
+            streakView.text = sb.toString()
+            // v1.3.0：🔥连续天数文字深灰（红=缺卡语义，用于成就违和）；🔥 emoji 自带橙红不动
+            streakView.setTextColor(0xFF4A4A4A.toInt())
         }
-        if (credits > 0) sb.append("    🛡️×$credits")
-        if (cfg.dailyLimit > 1 && !neg && !journal && !mood) sb.append("    目标：每日${cfg.dailyLimit}次")
-        streakView.text = sb.toString()
-        // v1.3.0：🔥连续天数文字深灰（红=缺卡语义，用于成就违和）；🔥 emoji 自带橙红不动
-        streakView.setTextColor(0xFF4A4A4A.toInt())
 
         // v1.3.26：打卡按钮=打卡项主题色（与日历选中描边一致）
         btnCheckin.background?.setTint(ThemeManager.of(it.theme).primary)
@@ -361,10 +360,11 @@ class QuickCheckinFragment : Fragment() {
             paused -> { statusView.text = "状态：已暂停"; btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn() }
             // v1.2.0 随心记 / v1.3.0 心情日记：记录 / 继续记录（一天可多次，只记成功）
             journal || mood -> {
+                // v1.3.33：去掉记录次数（焦虑感），按钮恒为"记录"
                 statusView.text = if (cnt == 0)
                     (if (mood) "状态：心情日记 · 今天还没记录" else "状态：随心记 · 今天还没记录")
-                    else "状态：今日已记录 $cnt 次 ✓"
-                btnCheckin.text = if (cnt == 0) "记录" else "继续记录 ($cnt)"
+                    else "状态：今日已记录 ✓"
+                btnCheckin.text = "记录"
             }
             !CheckinEngine.isScheduledDay(it, today) -> {
                 // 无需打卡日：自动完成另一种打卡（橙色标注）
@@ -579,8 +579,12 @@ class QuickCheckinFragment : Fragment() {
             recs.any { it.status == "PAUSED" } -> "⏸"
             else -> "✅"
         }
-        title.text = if (neg) "$statePrefix $date  破戒 $shownCount 次"
-            else "$statePrefix $date  共 $shownCount 条记录"
+        // v1.3.33：随心记/心情日记标题不显示记录条数（焦虑感），负打卡/普通模式保留次数
+        title.text = when {
+            neg -> "$statePrefix $date  破戒 $shownCount 次"
+            cfg.moodMode || cfg.journalMode -> "$statePrefix $date"
+            else -> "$statePrefix $date  共 $shownCount 条记录"
+        }
         if (recs.isEmpty()) {
             body.text = when {
                 // v1.2.0：随心记 / v1.3.0：心情日记无记录日不显示缺卡文案（不染色）

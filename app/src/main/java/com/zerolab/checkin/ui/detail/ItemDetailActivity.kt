@@ -82,13 +82,15 @@ class ItemDetailActivity : AppCompatActivity() {
 
         thread {
             // v1.2.0：随心记显示"记录天数"，普通模式保持连续天数；v1.3.0：心情日记同
-            val days = if (cfg.journalMode) CheckinEngine.recordDays(item, repo)
-                else CheckinEngine.streak(item, repo)
+            // v1.3.33：随心记/心情日记不显示天数统计，仅普通模式需要连续天数
+            val days = if (cfg.journalMode || cfg.moodMode) 0 else CheckinEngine.streak(item, repo)
             val credits = repo.availableCredits(item.id)
-            val prefix = if (cfg.moodMode) "😊已记录" else if (cfg.journalMode) "📔已记录" else "🔥连续"
+            // v1.3.33：随心记/心情日记是最简单的日记本，不显示记录天数统计
+            val stat = if (cfg.journalMode || cfg.moodMode) "" else "🔥连续${days}天"
             runOnUiThread {
                 findViewById<TextView>(R.id.tv_sub).text =
-                    "主题：${theme.name}    $prefix${days}天" + if (credits > 0 && !cfg.journalMode) "    🛡️×$credits" else ""
+                    "主题：${theme.name}" + (if (stat.isNotEmpty()) "    $stat" else "") +
+                        if (credits > 0 && !cfg.journalMode) "    🛡️×$credits" else ""
             }
         }
 
