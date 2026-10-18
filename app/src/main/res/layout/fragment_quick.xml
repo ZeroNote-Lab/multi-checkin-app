@@ -128,7 +128,7 @@
                     <com.zerolab.checkin.ui.quick.MonthCalendarView
                         android:id="@+id/calendar"
                         android:layout_width="match_parent"
-                        android:layout_height="300dp" />
+                        android:layout_height="260dp" />
 
                     <TextView
                         android:id="@+id/tv_legend"
