@@ -145,15 +145,19 @@ class MonthCalendarView @JvmOverloads constructor(
             val ty = cy - (textPaint.descent() + textPaint.ascent()) / 2
             canvas.drawText(day.toString(), cx, ty, textPaint)
             textPaint.isFakeBoldText = false
-            // v1.3.15：小标记移到圆圈外右上角（原圆内下方会随有无标记导致日期数字错位）
-            // 固定深色文字避免圆外白底隐形；位置整体置于状态方块右上外侧
+            // v1.3.35：×n/⚡ 固定在格子右上角。垂直保持圆外右上（cy - radius*0.85），
+            // 水平按文字宽度右对齐到格子右边界内侧（留 2dp），视觉仍是右上角，
+            // 但任意列（含周日最右列）永不超出控件边界被裁剪。
             if (hasBottom) {
                 val inf = info!!
                 textPaint.textSize = 9f * resources.displayMetrics.scaledDensity
                 textPaint.color = 0xFF3A4152.toInt()
                 textPaint.isFakeBoldText = true
                 val label = (if (inf.isAuto) "⚡" else "") + (if (inf.count > 1) "×${inf.count}" else "")
-                canvas.drawText(label, cx + radius * 1.25f, cy - radius * 0.85f, textPaint)
+                val labelW = textPaint.measureText(label)
+                val rightPad = 2f * resources.displayMetrics.density
+                val lx = cx + colW / 2f - rightPad - labelW / 2f
+                canvas.drawText(label, lx, cy - radius * 0.85f, textPaint)
                 textPaint.isFakeBoldText = false
             }
         }
