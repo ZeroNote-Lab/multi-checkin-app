@@ -41,6 +41,7 @@
 
         <activity android:name=".ui.create.ChooseTypeActivity" android:exported="false" />
         <activity android:name=".ui.create.CreateItemActivity" android:exported="false" />
+        <activity android:name=".ui.journal.JournalEditActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".ui.detail.ItemDetailActivity" android:exported="false" />
         <!-- v1.3.16：改为 standard——组页点子项需压入独立实例，返回时回到组页（singleTop 会复用组页实例导致返回直退列表） -->
         <activity android:name=".ui.detail.ItemCheckinActivity" android:exported="false" />

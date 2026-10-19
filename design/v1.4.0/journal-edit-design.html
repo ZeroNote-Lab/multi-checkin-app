@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>随心记 1.4.0 设计稿 · 编辑页 + 显示页</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Noto Serif SC", "Songti SC", "PingFang SC", "Microsoft YaHei", serif;
+    background: #E8E4DC;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    color: #3D342B;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .subtitle {
+    text-align: center;
+    color: #8A7B6B;
+    font-size: 14px;
+    margin-bottom: 40px;
+  }
+  .phones {
+    display: flex;
+    gap: 40px;
+    justify-content: center;
+    flex-wrap: wrap;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .phone-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .phone-label {
+    margin-top: 20px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #3D342B;
+  }
+  .phone-desc {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #8A7B6B;
+    text-align: center;
+    max-width: 300px;
+    line-height: 1.7;
+  }
+  .phone {
+    width: 300px;
+    height: 620px;
+    border-radius: 36px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(60,40,20,0.18);
+    display: flex;
+    flex-direction: column;
+    border: 8px solid #2D2520;
+    background: #FAF7F2;
+    position: relative;
+  }
+
+  /* ===== 顶部导航 ===== */
+  .navbar {
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 15px;
+    font-weight: 600;
+    color: #3D342B;
+    flex-shrink: 0;
+    border-bottom: 1px solid #EDE6DB;
+    background: #FAF7F2;
+  }
+  .nav-back { font-size: 18px; cursor: pointer; }
+  .nav-title { font-size: 15px; }
+  .nav-action { font-size: 14px; cursor: pointer; color: #C97B4A; }
+  .nav-save-pill {
+    background: #C97B4A;
+    color: #fff;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+  }
+
+  /* ===== 内容区 ===== */
+  .content {
+    flex: 1;
+    overflow: hidden;
+    padding: 16px 16px 100px;
+  }
+  .text-block {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #3D342B;
+    margin-bottom: 16px;
+  }
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .photo-cell {
+    aspect-ratio: 1;
+    border-radius: 10px;
+  }
+  .photo-add {
+    aspect-ratio: 1;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: #B09880;
+    background: #F0E8DC;
+    border: 1.5px dashed #D4C4AC;
+  }
+  .photo-view {
+    aspect-ratio: 1;
+    border-radius: 10px;
+  }
+
+  /* ===== 语音块 ===== */
+  .voice-block {
+    background: #FFFFFF;
+    border-radius: 14px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(180,150,110,0.08);
+  }
+  .voice-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 12px;
+    color: #5C4E3E;
+  }
+  .voice-play {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #C97B4A;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .voice-wave {
+    flex: 1;
+    height: 16px;
+    position: relative;
+  }
+  .wave-bar {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 4px;
+    border-radius: 2px;
+    background: #C97B4A;
+  }
+  .voice-del {
+    font-size: 14px;
+    color: #B09880;
+    cursor: pointer;
+  }
+  .voice-add {
+    text-align: center;
+    font-size: 12px;
+    color: #C97B4A;
+    padding: 6px 0 2px;
+    cursor: pointer;
+  }
+
+  /* ===== 位置块 ===== */
+  .loc-block {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #F0E8DC;
+    color: #5C4E3E;
+    padding: 8px 14px;
+    border-radius: 12px;
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+
+  /* ===== 悬浮底栏（编辑页） ===== */
+  .bottom-dock {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    background: #FFFFFF;
+    border-radius: 24px;
+    box-shadow: 0 4px 20px rgba(60,40,20,0.12);
+    display: flex;
+    padding: 6px;
+  }
+  .dock-btn {
+    flex: 1;
+    text-align: center;
+    padding: 10px 0;
+    font-size: 12px;
+    color: #5C4E3E;
+    cursor: pointer;
+    border-radius: 18px;
+    font-family: inherit;
+  }
+  .dock-btn.active {
+    background: #F5E6D8;
+    color: #C97B4A;
+    font-weight: 600;
+  }
+
+  /* ===== 显示页专属 ===== */
+  .display-meta {
+    font-size: 11px;
+    color: #B09880;
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 1px dashed #E0D5C5;
+  }
+  .edit-fab {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #C97B4A;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 4px 16px rgba(201,123,74,0.4);
+    cursor: pointer;
+  }
+  .photo-cell.p1 { background: linear-gradient(135deg, #F4D5B8, #E8B896); }
+  .photo-cell.p2 { background: linear-gradient(135deg, #D4E4BC, #B8CC96); }
+  .photo-cell.p3 { background: linear-gradient(135deg, #F0C8C0, #E0A89E); }
+</style>
+</head>
+<body>
+
+<h1>随心记 1.4.0 · 编辑页 + 显示页</h1>
+<p class="subtitle">温暖纸感日记本风，白色悬浮胶囊底栏（编辑页专用）</p>
+
+<div class="phones">
+
+  <!-- 编辑页 -->
+  <div class="phone-wrap">
+    <div class="phone">
+      <div class="navbar">
+        <span class="nav-back">✕</span>
+        <span class="nav-title">新建随心记</span>
+        <span class="nav-action nav-save-pill">保存</span>
+      </div>
+      <div class="content">
+        <div class="text-block">今天周末，和朋友去爬了白云山。天气超好，山顶风很大，视野也开阔。</div>
+        <div class="photo-grid">
+          <div class="photo-cell p1"></div>
+          <div class="photo-cell p2"></div>
+          <div class="photo-add">+</div>
+        </div>
+        <div class="text-block">中途在山脚下吃了粿条汤，汤头很鲜，葱花很香。</div>
+        <div class="voice-block">
+          <div class="voice-item">
+            <div class="voice-play">▶</div>
+            <div style="width:32px">0:12</div>
+            <div class="voice-wave"><div class="wave-bar" style="width:45%"></div></div>
+            <span class="voice-del">✕</span>
+          </div>
+          <div class="voice-item">
+            <div class="voice-play">▶</div>
+            <div style="width:32px">0:35</div>
+            <div class="voice-wave"><div class="wave-bar" style="width:70%"></div></div>
+            <span class="voice-del">✕</span>
+          </div>
+          <div class="voice-add">＋ 录一条新语音</div>
+        </div>
+        <div class="loc-block">📍 广州 · 天河区　✕</div>
+      </div>
+      <div class="bottom-dock">
+        <div class="dock-btn active">📷 图片</div>
+        <div class="dock-btn">🎙 语音</div>
+        <div class="dock-btn">📍 位置</div>
+      </div>
+    </div>
+    <div class="phone-label">编辑页</div>
+    <div class="phone-desc">块流编辑器。每段文字独立成块，图片宫格 / 语音块可穿插。底部悬浮胶囊三按钮，点完即插入。</div>
+  </div>
+
+  <!-- 显示页 -->
+  <div class="phone-wrap">
+    <div class="phone">
+      <div class="navbar">
+        <span class="nav-back">←</span>
+        <span class="nav-title">10月19日 · 周日</span>
+        <span class="nav-action">⋯</span>
+      </div>
+      <div class="content">
+        <div class="text-block">今天周末，和朋友去爬了白云山。天气超好，山顶风很大，视野也开阔。</div>
+        <div class="photo-grid">
+          <div class="photo-view p1"></div>
+          <div class="photo-view p2"></div>
+          <div class="photo-view p3"></div>
+        </div>
+        <div class="text-block">中途在山脚下吃了粿条汤，汤头很鲜，葱花很香。</div>
+        <div class="voice-block">
+          <div class="voice-item">
+            <div class="voice-play">▶</div>
+            <div style="width:32px">0:12</div>
+            <div class="voice-wave"><div class="wave-bar" style="width:45%"></div></div>
+          </div>
+          <div class="voice-item">
+            <div class="voice-play">▶</div>
+            <div style="width:32px">0:35</div>
+            <div class="voice-wave"><div class="wave-bar" style="width:70%"></div></div>
+          </div>
+        </div>
+        <div class="loc-block">📍 广州 · 天河区</div>
+        <div class="display-meta">2026.10.19 · 14:32 记录</div>
+      </div>
+      <div class="edit-fab">✏️</div>
+    </div>
+    <div class="phone-label">显示页（回看）</div>
+    <div class="phone-desc">只读回看，和编辑页同一套块结构。语音可播放、图片可点开放大。右下角悬浮铅笔按钮 = 进入编辑。</div>
+  </div>
+
+</div>
+
+</body>
+</html>

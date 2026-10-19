@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.4.0 随心记块流编辑页 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FAF7F2">
+
+    <!-- 顶部导航 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:background="#FAF7F2">
+
+        <TextView
+            android:id="@+id/btn_close"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="✕"
+            android:textSize="20sp"
+            android:textColor="#8A7B6B" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="新建随心记"
+            android:textSize="17sp"
+            android:textColor="#3D342B"
+            android:textStyle="bold"
+            android:fontFamily="serif" />
+
+        <TextView
+            android:id="@+id/btn_save"
+            android:layout_width="60dp"
+            android:layout_height="34dp"
+            android:gravity="center"
+            android:text="保存"
+            android:textSize="14sp"
+            android:textColor="#FFFFFF"
+            android:background="#C97B4A" />
+    </LinearLayout>
+
+    <!-- 内容滚动区 -->
+    <ScrollView
+        android:id="@+id/scroll_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:id="@+id/block_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:paddingBottom="100dp" />
+    </ScrollView>
+
+    <!-- 底部悬浮按钮栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="16dp"
+        android:paddingTop="8dp"
+        android:background="#FAF7F2">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:background="#FFFFFF"
+            android:elevation="8dp"
+            android:padding="6dp">
+
+            <TextView
+                android:id="@+id/btn_add_photo"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="🖼 图片"
+                android:textSize="14sp"
+                android:textColor="#8A7B6B" />
+
+            <View
+                android:layout_width="1px"
+                android:layout_height="24dp"
+                android:layout_gravity="center_vertical"
+                android:background="#E0D5C5" />
+
+            <TextView
+                android:id="@+id/btn_add_voice"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="🎤 语音"
+                android:textSize="14sp"
+                android:textColor="#8A7B6B" />
+
+            <View
+                android:layout_width="1px"
+                android:layout_height="24dp"
+                android:layout_gravity="center_vertical"
+                android:background="#E0D5C5" />
+
+            <TextView
+                android:id="@+id/btn_add_location"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="📍 位置"
+                android:textSize="14sp"
+                android:textColor="#8A7B6B" />
+        </LinearLayout>
+    </LinearLayout>
+
+</LinearLayout>

@@ -169,7 +169,7 @@ class CreateItemActivity : AppCompatActivity() {
         val createMode = intent.getStringExtra(EXTRA_MODE)
         findViewById<TextView>(R.id.tv_title).text = when {
             editing != null -> "编辑打卡项"
-            createMode == MODE_JOURNAL -> "新建日记打卡"
+            createMode == MODE_JOURNAL -> "新建日记记录"
             createMode == MODE_JOURNAL_FREE -> "新建随心记"
             createMode == MODE_JOURNAL_MOOD -> "新建心情日记"
             createMode == MODE_GROUP -> "新建打卡组"
@@ -988,7 +988,7 @@ class CreateItemActivity : AppCompatActivity() {
         journalTv.typeface = if (journalMode) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 
         modeHint?.text = if (journalMode)
-            "📔 日记打卡：日记式记录，只记成功、可多次记录，不记缺卡、不设排期"
+            "📔 日记记录：日记式记录，只记成功、可多次记录，不记缺卡、不设排期"
             else "✅ 普通打卡：按规则打卡，有缺卡与连续天数。"
     }
 
@@ -1038,8 +1038,8 @@ class CreateItemActivity : AppCompatActivity() {
             // v1.3.19：日记模式下不提供 ⚙ 配置弹窗
             if (journal) { row.panel?.visibility = View.GONE; row.gear?.visibility = View.GONE }
         }
-        // 随心记方式区仅在随心记（非心情日记）时显示
-        journalMethodsBox.visibility = if (journal && !moodMode) View.VISIBLE else View.GONE
+        // v1.4.0：随心记四种方式（拍照/文字/语音/位置）全部内置，方式开关区整行隐藏
+        journalMethodsBox.visibility = View.GONE
         findViewById<View>(R.id.cb_mood_chart).visibility = if (journal && moodMode) View.VISIBLE else View.GONE
         refreshComboNRow()
     }
@@ -2499,6 +2499,13 @@ class CreateItemActivity : AppCompatActivity() {
             cfg.methods.clear(); cfg.methods.add(Method.MOOD.key)
             cfg.journalMode = true
         }
+        // v1.4.0：随心记四种方式全部内置（在空校验之前填充，避免被拦）
+        if (cfg.journalMode && !cfg.moodMode && cfg.methods.isEmpty()) {
+            cfg.methods.add(Method.PHOTO.key)
+            cfg.methods.add(Method.TEXT.key)
+            cfg.methods.add(Method.VOICE.key)
+            cfg.methods.add(Method.LOCATION.key)
+        }
         if (cfg.methods.isEmpty()) { toast("请至少打开一种打卡方式"); return }
         if (!Method.isValid(cfg.methods)) { toast("所选方式存在互斥冲突"); return }
         // v1.2.0：随心记强制规则（兜底，防脏配置）
@@ -2508,12 +2515,12 @@ class CreateItemActivity : AppCompatActivity() {
             cfg.offset.enabled = false
             cfg.offset.autoConsume = false
             cfg.dailyLimit = -1
-            cfg.methods.remove(Method.NORMAL.key)
-            cfg.methods.remove(Method.AUTO.key)
-            cfg.methods.remove(Method.NFC.key)
-            cfg.methods.remove(Method.STEPS.key)
-            cfg.methods.remove(Method.TIMER.key)
-            if (cfg.methods.isEmpty()) { toast("随心记需至少选择一种记录方式（如文字/图片）"); return }
+            // v1.4.0：四种方式全部内置，不再让用户选
+            cfg.methods.clear()
+            cfg.methods.add(Method.PHOTO.key)
+            cfg.methods.add(Method.TEXT.key)
+            cfg.methods.add(Method.VOICE.key)
+            cfg.methods.add(Method.LOCATION.key)
         }
         // 组合打卡每日次数固定为 1（UI 已置灰，此处兜底）
         if (cfg.methods.count { it != Method.AUTO.key } > 1) { dailyLimit = 1; cfg.dailyLimit = 1 }
