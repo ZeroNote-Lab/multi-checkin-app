@@ -15,6 +15,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -67,6 +68,7 @@ class JournalEditActivity : AppCompatActivity() {
     private var recordingBlock: Block.VoiceBlock? = null
     private var mediaPlayer: android.media.MediaPlayer? = null
     private var playingBtn: TextView? = null
+    private var pendingPhotoTarget: Block.PhotoBlock? = null  // v1.4.0：点某块+号后追加到该块
 
     companion object {
         const val EXTRA_ITEM_ID = "extra_item_id"
@@ -89,9 +91,16 @@ class JournalEditActivity : AppCompatActivity() {
             }
             main.post {
                 if (saved.isEmpty()) { toast("图片读取失败"); return@post }
-                val photoBlock = Block.PhotoBlock(saved)
-                blocks.add(photoBlock)
-                appendAutoTextBlock()
+                // v1.4.0：有目标块就追加，没目标才新建
+                val target = pendingPhotoTarget
+                if (target != null) {
+                    target.paths.addAll(saved)
+                    pendingPhotoTarget = null
+                } else {
+                    val photoBlock = Block.PhotoBlock(saved)
+                    blocks.add(photoBlock)
+                    appendAutoTextBlock()
+                }
                 renderAll()
                 toast("已添加 ${saved.size} 张图片")
             }
@@ -183,22 +192,50 @@ class JournalEditActivity : AppCompatActivity() {
             vb
         }
         recordingBlock = target
-        try {
-            audioRecorder.start(File(filesDir, "checkin_voices/$itemId"), 60)
-        } catch (e: Exception) { toast("录音启动失败: ${e.message}"); return }
-        AlertDialog.Builder(this).setTitle("正在录音…").setMessage("最长 60 秒，点击完成结束").setCancelable(false)
-            .setNegativeButton("取消") { _, _ ->
-                audioRecorder.cancel()
-                recordingBlock = null
-            }
-            .setPositiveButton("完成") { _, _ ->
-                val f = audioRecorder.stop()
-                recordingBlock = null
-                if (f != null && f.exists()) {
-                    val seconds = ((f.length() / 16000.0) * 2.0).toInt().coerceAtLeast(1)
-                    target.voices.add(VoiceItem(f.absolutePath, seconds))
-                    renderAll()
-                } else toast("录音太短")
+        // v1.4.0：先弹开始确认，点开始才真正录
+        val msgView = TextView(this).apply {
+            text = "点击开始录音，最长60秒"
+            textSize = 14f
+            setTextColor(0xFF3D342B.toInt())
+            setPadding(40, 30, 40, 10)
+        }
+        AlertDialog.Builder(this).setTitle("录音").setView(msgView).setCancelable(false)
+            .setNegativeButton("取消") { _, _ -> recordingBlock = null }
+            .setPositiveButton("开始") { _, _ ->
+                try {
+                    audioRecorder.start(File(filesDir, "checkin_voices/$itemId"), 60)
+                } catch (e: Exception) { toast("录音启动失败: ${e.message}"); recordingBlock = null; return@setPositiveButton }
+                // 录音中弹窗：显示已录秒数
+                val recordMsg = TextView(this).apply {
+                    text = "正在录音…\n已录 0 秒"
+                    textSize = 16f
+                    gravity = Gravity.CENTER
+                    setPadding(40, 40, 40, 20)
+                }
+                val dlg = AlertDialog.Builder(this).setTitle("录音中").setView(recordMsg).setCancelable(false)
+                    .setNegativeButton("取消") { _, _ ->
+                        audioRecorder.cancel(); recordingBlock = null
+                    }
+                    .setPositiveButton("完成") { _, _ ->
+                        val f = audioRecorder.stop()
+                        recordingBlock = null
+                        if (f != null && f.exists()) {
+                            val seconds = ((f.length() / 16000.0) * 2.0).toInt().coerceAtLeast(1)
+                            target.voices.add(VoiceItem(f.absolutePath, seconds))
+                            renderAll()
+                        } else toast("录音太短")
+                    }.show()
+                // 计时更新
+                val handler = Handler(Looper.getMainLooper())
+                var sec = 0
+                val tick = object : Runnable {
+                    override fun run() {
+                        sec++
+                        recordMsg.text = "正在录音…\n已录 $sec 秒"
+                        if (sec < 60) handler.postDelayed(this, 1000)
+                    }
+                }
+                handler.postDelayed(tick, 1000)
             }.show()
     }
 
@@ -288,7 +325,8 @@ class JournalEditActivity : AppCompatActivity() {
         // 3列宫格：用 LinearLayout 包裹，每行3个
         val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val screenW = resources.displayMetrics.widthPixels - dp(32)
-        val cellW = (screenW / 3.0f).toInt() - dp(4)
+        val gap = dp(6)
+        val cellW = (screenW - gap * 2) / 3  // v1.4.0：修复第三张截断
         var row: LinearLayout? = null
         b.paths.forEachIndexed { i, path ->
             if (i % 3 == 0) {
@@ -298,23 +336,47 @@ class JournalEditActivity : AppCompatActivity() {
                 }
                 grid.addView(row)
             }
+            // 图片+删除按钮容器
+            val cell = FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(cellW, cellW).apply {
+                    marginEnd = if (i % 3 < 2) gap else 0
+                }
+            }
             val iv = android.widget.ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(cellW, cellW).apply { marginEnd = dp(6) }
+                layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
                 scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
                 setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
                 setOnClickListener { showImagePreview(path) }
             }
-            row?.addView(iv)
+            cell.addView(iv)
+            // 删除按钮（右上角×）
+            val del = TextView(this).apply {
+                text = "✕"
+                textSize = 12f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(0x80000000.toInt())
+                gravity = Gravity.CENTER
+                layoutParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.END)
+                setOnClickListener {
+                    b.paths.removeAt(i)
+                    if (b.paths.isEmpty()) blocks.remove(b)
+                    renderAll()
+                }
+            }
+            cell.addView(del)
+            row?.addView(cell)
         }
         // 末尾虚线+号
         val addCell = TextView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(cellW, cellW).apply { marginEnd = dp(6) }
+            layoutParams = FrameLayout.LayoutParams(cellW, cellW).apply {
+                marginEnd = if (b.paths.size % 3 < 2) gap else 0
+            }
             text = "+"
             gravity = Gravity.CENTER
             textSize = 24f
             setTextColor(textSub)
             background = rounded(divider, dp(8))
-            setOnClickListener { pickPhotos.launch("image/*") }
+            setOnClickListener { pendingPhotoTarget = b; pickPhotos.launch("image/*") }
         }
         if (row == null || (b.paths.size % 3 == 0 && b.paths.isNotEmpty())) {
             row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, dp(6)) }

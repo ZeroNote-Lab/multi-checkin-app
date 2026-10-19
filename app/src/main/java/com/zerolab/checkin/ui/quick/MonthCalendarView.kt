@@ -19,6 +19,13 @@ class MonthCalendarView @JvmOverloads constructor(
     var themeColor: Int = 0xFF39C5BB.toInt()
         set(value) { field = value; invalidate() }
 
+    /** v1.4.0：周模式（只显示当前周一行，高度紧凑） */
+    var weekMode: Boolean = false
+        set(value) { field = value; requestLayout(); invalidate() }
+    /** v1.4.0：日记模式月视图矮一点，普通项保持300dp */
+    var compactMonth: Boolean = false
+        set(value) { field = value; requestLayout(); invalidate() }
+
     /** 日期字符串 -> 当日信息（仅本月需要） */
     private var infoMap: Map<String, DayInfo> = emptyMap()
     private var grid: List<Pair<String, Boolean>> = emptyList()
@@ -73,6 +80,18 @@ class MonthCalendarView @JvmOverloads constructor(
 
     private val headerH get() = (34 * resources.displayMetrics.density)
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        // v1.4.0：周模式78dp；月模式普通项300dp，日记模式220dp
+        val h = when {
+            weekMode -> (34 + 44).dp()
+            compactMonth -> 220.dp()
+            else -> 300.dp()
+        }
+        setMeasuredDimension(measuredWidth, h)
+    }
+    private fun Int.dp() = (this * resources.displayMetrics.density).toInt()
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val colW = width / 7f
@@ -83,11 +102,18 @@ class MonthCalendarView @JvmOverloads constructor(
         week.forEachIndexed { i, w -> canvas.drawText(w, colW * i + colW / 2, baseY, textPaint) }
 
         val top = headerH
-        val rowH = (height - headerH) / 6f
+        // v1.4.0：周模式只画包含今天的那一行，平移到可视区域顶部
+        val rowOffset = if (weekMode) {
+            val todayIdx = grid.indexOfFirst { it.first == DateUtils.today() }
+            if (todayIdx >= 0) todayIdx / 7 else 0
+        } else 0
+        val rowH = (height - headerH) / (if (weekMode) 1f else 6f)
         grid.forEachIndexed { idx, (date, inMonth) ->
             val row = idx / 7; val col = idx % 7
+            if (weekMode && row != rowOffset) return@forEachIndexed
+            val displayRow = row - rowOffset
             val cx = colW * col + colW / 2
-            val cy = top + rowH * row + rowH / 2
+            val cy = top + rowH * displayRow + rowH / 2
             val info = infoMap[date]
             val day = DateUtils.dayOfMonth(date)
             val radius = Math.min(colW, rowH) * 0.36f
@@ -96,23 +122,19 @@ class MonthCalendarView @JvmOverloads constructor(
             val bg = when {
                 !inMonth -> 0
                 info == null -> if (date > DateUtils.today()) 0 else 0
-                // v1.3.0：心情日记——有心情记录取当天最后一次打卡心情色（无心情记录回退成功绿）
                 info.state == DayState.SUCCESS -> info.records.lastOrNull { moodOf(it) != null }
                     ?.let { MOOD_COLORS[moodOf(it)!!] } ?: successC
-                info.state == DayState.FAIL -> if (date == DateUtils.today() && info.records.isEmpty() && !info.finalToday) 0 else failC // v1.1.7：破戒/固定时间段超时当天红；普通缺卡次日红
+                info.state == DayState.FAIL -> if (date == DateUtils.today() && info.records.isEmpty() && !info.finalToday) 0 else failC
                 info.state == DayState.OFFSET -> offsetC
-                info.state == DayState.SKIP -> skipC            // 无需打卡日：橙色
-                info.state == DayState.PARTIAL -> partialC     // v1.1.6 部分完成：黄色
+                info.state == DayState.SKIP -> skipC
+                info.state == DayState.PARTIAL -> partialC
                 else -> 0
             }
-            // 非选中日期：填充画满整个圆角矩形
             if (bg != 0 && date != selectedDate) {
                 paint.color = bg
                 paint.style = Paint.Style.FILL
                 canvas.drawRoundRect(RectF(cx - radius, cy - radius, cx + radius, cy + radius), radius*0.3f, radius*0.3f, paint)
             }
-            // v1.3.26：选中的日期恒画主题色外边框（用户点击切换，参考真实日历）。有填充时结构为
-            // 外框|白线|内部颜色（填充整体内缩，白线紧贴外框内侧，三层连续无缝隙）；无填充时仅外框。
             if (inMonth && date == selectedDate) {
                 val d = resources.displayMetrics.density
                 if (bg != 0) {
@@ -133,21 +155,16 @@ class MonthCalendarView @JvmOverloads constructor(
             }
             textPaint.textSize = 14f * resources.displayMetrics.scaledDensity
             textPaint.isFakeBoldText = bg != 0
-            // v1.3.0：心情黄/黄绿底用深色文字保证对比度（其他底色白字）
             val textOnBg = if (bg == MOOD_COLORS[2] || bg == MOOD_COLORS[3]) 0xFF1F2430.toInt() else 0xFFFFFFFF.toInt()
             textPaint.color = when {
                 !inMonth -> futureText
                 bg != 0 -> textOnBg
                 else -> normalText
             }
-            // v1.3.15：日期数字不再因标记存在而上下偏移（所有日期排版统一）
             val hasBottom = showBadges && info != null && (info.isAuto || info.count > 1)
             val ty = cy - (textPaint.descent() + textPaint.ascent()) / 2
             canvas.drawText(day.toString(), cx, ty, textPaint)
             textPaint.isFakeBoldText = false
-            // v1.3.35：×n/⚡ 固定在格子右上角。垂直保持圆外右上（cy - radius*0.85），
-            // 水平按文字宽度右对齐到格子右边界内侧（留 2dp），视觉仍是右上角，
-            // 但任意列（含周日最右列）永不超出控件边界被裁剪。
             if (hasBottom) {
                 val inf = info!!
                 textPaint.textSize = 9f * resources.displayMetrics.scaledDensity
@@ -166,14 +183,19 @@ class MonthCalendarView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_UP) {
             val colW = width / 7f
-            val rowH = (height - headerH) / 6f
+            // v1.4.0：周模式下行号需要偏移
+            val rowOffset = if (weekMode) {
+                val todayIdx = grid.indexOfFirst { it.first == DateUtils.today() }
+                if (todayIdx >= 0) todayIdx / 7 else 0
+            } else 0
+            val rowH = (height - headerH) / (if (weekMode) 1f else 6f)
             val col = (event.x / colW).toInt()
-            val row = ((event.y - headerH) / rowH).toInt()
+            val displayRow = ((event.y - headerH) / rowH).toInt()
+            val row = displayRow + rowOffset
             val idx = row * 7 + col
             if (idx in grid.indices) {
                 val (date, inMonth) = grid[idx]
                 if (inMonth && date <= DateUtils.today()) {
-                    // v1.3.26：点击即选中该日期（外边框跟随）
                     selectedDate = date
                     listener?.invoke(date)
                 }
