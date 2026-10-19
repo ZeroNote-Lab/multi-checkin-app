@@ -26,6 +26,10 @@ class MonthCalendarView @JvmOverloads constructor(
     var compactMonth: Boolean = false
         set(value) { field = value; requestLayout(); invalidate() }
 
+    /** v1.4.0：周视图锚点日期（默认今天），左右箭头切周时±7天 */
+    var weekAnchor: String = DateUtils.today()
+        set(value) { field = value; invalidate() }
+
     /** 日期字符串 -> 当日信息（仅本月需要） */
     private var infoMap: Map<String, DayInfo> = emptyMap()
     private var grid: List<Pair<String, Boolean>> = emptyList()
@@ -102,10 +106,10 @@ class MonthCalendarView @JvmOverloads constructor(
         week.forEachIndexed { i, w -> canvas.drawText(w, colW * i + colW / 2, baseY, textPaint) }
 
         val top = headerH
-        // v1.4.0：周模式只画包含今天的那一行，平移到可视区域顶部
+        // v1.4.0：周模式只画 weekAnchor 所在那一行，平移到可视区域顶部
         val rowOffset = if (weekMode) {
-            val todayIdx = grid.indexOfFirst { it.first == DateUtils.today() }
-            if (todayIdx >= 0) todayIdx / 7 else 0
+            val anchorIdx = grid.indexOfFirst { it.first == weekAnchor }
+            if (anchorIdx >= 0) anchorIdx / 7 else 0
         } else 0
         val rowH = (height - headerH) / (if (weekMode) 1f else 6f)
         grid.forEachIndexed { idx, (date, inMonth) ->

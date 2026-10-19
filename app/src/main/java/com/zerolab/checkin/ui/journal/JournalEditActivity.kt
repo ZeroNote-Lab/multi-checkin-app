@@ -68,8 +68,7 @@ class JournalEditActivity : AppCompatActivity() {
     private var recordingBlock: Block.VoiceBlock? = null
     private var mediaPlayer: android.media.MediaPlayer? = null
     private var playingBtn: TextView? = null
-    private var playingTrack: android.widget.FrameLayout? = null   // v1.4.0：进度条轨道
-    private var playingProgress: View? = null                   // v1.4.0：进度条填充
+    private var playingSeekBar: android.widget.SeekBar? = null    // v1.4.0：可拖动进度条
     private var progressHandler: Handler? = null
     private var progressRunnable: Runnable? = null
     private var pendingPhotoTarget: Block.PhotoBlock? = null  // v1.4.0：点某块+号后追加到该块
@@ -198,7 +197,7 @@ class JournalEditActivity : AppCompatActivity() {
         recordingBlock = target
         // v1.4.0：先弹开始确认，点开始才真正录
         val msgView = TextView(this).apply {
-            text = "点击开始录音，最长60秒"
+            text = "点击开始录音"
             textSize = 14f
             setTextColor(0xFF3D342B.toInt())
             setPadding(40, 30, 40, 10)
@@ -207,7 +206,7 @@ class JournalEditActivity : AppCompatActivity() {
             .setNegativeButton("取消") { _, _ -> recordingBlock = null }
             .setPositiveButton("开始") { _, _ ->
                 try {
-                    audioRecorder.start(File(filesDir, "checkin_voices/$itemId"), 60)
+                    audioRecorder.start(File(filesDir, "checkin_voices/$itemId"), 0)
                 } catch (e: Exception) { toast("录音启动失败: ${e.message}"); recordingBlock = null; return@setPositiveButton }
                 // 录音中弹窗：显示已录秒数
                 val recordMsg = TextView(this).apply {
@@ -224,7 +223,14 @@ class JournalEditActivity : AppCompatActivity() {
                         val f = audioRecorder.stop()
                         recordingBlock = null
                         if (f != null && f.exists()) {
-                            val seconds = ((f.length() / 16000.0) * 2.0).toInt().coerceAtLeast(1)
+                            // v1.4.0：用 MediaMetadataRetriever 读 AAC 真实时长（毫秒→秒），废弃文件大小估算
+                            val seconds = try {
+                                val mmr = android.media.MediaMetadataRetriever()
+                                mmr.setDataSource(f.absolutePath)
+                                val durMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                                mmr.release()
+                                (durMs / 1000).toInt().coerceAtLeast(1)
+                            } catch (_: Exception) { 1 }
                             target.voices.add(VoiceItem(f.absolutePath, seconds))
                             renderAll()
                         } else toast("录音太短")
@@ -236,7 +242,7 @@ class JournalEditActivity : AppCompatActivity() {
                     override fun run() {
                         sec++
                         recordMsg.text = "正在录音…\n已录 $sec 秒"
-                        if (sec < 60) handler.postDelayed(this, 1000)
+                        handler.postDelayed(this, 1000)
                     }
                 }
                 handler.postDelayed(tick, 1000)
@@ -430,17 +436,17 @@ class JournalEditActivity : AppCompatActivity() {
                 setTextSize(12f)
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) }
             }
-            // 进度条：轨道 + 填充
-            val barTrack = android.widget.FrameLayout(this).apply {
-                setBackgroundColor(voiceTrack)
-                layoutParams = LinearLayout.LayoutParams(0, dp(3), 1f).apply { marginEnd = dp(8) }
+            // 进度条：v1.4.0 改为可拖动 SeekBar
+            val seekBar = android.widget.SeekBar(this).apply {
+                max = v.seconds.coerceAtLeast(1) * 1000
+                progress = 0
+                progressTintList = android.content.res.ColorStateList.valueOf(accent)
+                progressBackgroundTintList = android.content.res.ColorStateList.valueOf(voiceTrack)
+                thumbTintList = android.content.res.ColorStateList.valueOf(accent)
+                splitTrack = false
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) }
             }
-            val barProgress = View(this).apply {
-                setBackgroundColor(accent)
-                layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
-            }
-            barTrack.addView(barProgress)
-            play.setOnClickListener { togglePlay(v.path, play, barTrack, barProgress) }
+            play.setOnClickListener { togglePlay(v.path, play, seekBar) }
             // 删除
             val del = TextView(this).apply {
                 text = "✕"
@@ -452,7 +458,7 @@ class JournalEditActivity : AppCompatActivity() {
                     renderAll()
                 }
             }
-            row.addView(play); row.addView(dur); row.addView(barTrack); row.addView(del)
+            row.addView(play); row.addView(dur); row.addView(seekBar); row.addView(del)
             wrap.addView(row)
         }
         // 语音块内部末尾+号：追加一条语音
@@ -496,17 +502,15 @@ class JournalEditActivity : AppCompatActivity() {
         progressRunnable = null
         progressHandler = null
     }
-    private fun startProgress(mp: android.media.MediaPlayer, track: android.widget.FrameLayout, prog: View) {
+    private fun startProgress(mp: android.media.MediaPlayer, sb: android.widget.SeekBar) {
         stopProgress()
         val h = Handler(Looper.getMainLooper())
         progressHandler = h
-        val total = mp.duration.coerceAtLeast(1)
         val r = object : Runnable {
             override fun run() {
                 try {
                     if (mp.isPlaying) {
-                        val w = (track.width * mp.currentPosition / total).toInt()
-                        prog.layoutParams = android.widget.FrameLayout.LayoutParams(w, dp(3))
+                        sb.progress = mp.currentPosition
                         h.postDelayed(this, 200)
                     }
                 } catch (_: Exception) {}
@@ -516,34 +520,44 @@ class JournalEditActivity : AppCompatActivity() {
         h.postDelayed(r, 200)
     }
 
-    private fun togglePlay(path: String, btn: TextView, track: android.widget.FrameLayout, prog: View) {
+    private fun togglePlay(path: String, btn: TextView, sb: android.widget.SeekBar) {
+        // 拖动监听：松手即 seekTo
+        sb.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: android.widget.SeekBar?, p: Int, fromUser: Boolean) {}
+            override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(s: android.widget.SeekBar?) {
+                try { mediaPlayer?.seekTo(sb.progress) } catch (_: Exception) {}
+            }
+        })
         // 正在播放这条：停止
         if (mediaPlayer != null && playingBtn === btn && mediaPlayer!!.isPlaying) {
             try { mediaPlayer?.stop() } catch (_: Exception) {}
             mediaPlayer?.release(); mediaPlayer = null
             btn.text = "▶"; playingBtn = null
-            prog.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+            sb.progress = 0
             stopProgress()
             return
         }
         // 切到新的：先停旧的并复位旧UI
         try { mediaPlayer?.stop(); mediaPlayer?.release() } catch (_: Exception) {}
         playingBtn?.let { it.text = "▶" }
-        playingProgress?.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+        playingSeekBar?.progress = 0
         stopProgress()
         try {
             val mp = android.media.MediaPlayer()
             mp.setDataSource(path); mp.prepare()
+            sb.max = mp.duration.coerceAtLeast(1)
+            sb.progress = 0
             mp.setOnCompletionListener {
                 try { it.release() } catch (_: Exception) {}
                 mediaPlayer = null; btn.text = "▶"; playingBtn = null
-                prog.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+                sb.progress = 0
                 stopProgress()
             }
             mp.start()
             mediaPlayer = mp; playingBtn = btn; btn.text = "⏸"
-            playingTrack = track; playingProgress = prog
-            startProgress(mp, track, prog)
+            playingSeekBar = sb
+            startProgress(mp, sb)
         } catch (e: Exception) { toast("播放失败: ${e.message}") }
     }
 
