@@ -151,6 +151,14 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         timerExtra = null; moodValue = null; locName = null
         timerForceOn = false
         doneMethods.clear(); queue.clear()
+        // v1.4.0：随心记（journalMode）直接跳转块流编辑页，不弹方式选择
+        if (cfg.journalMode && !cfg.moodMode) {
+            val i = Intent(ctx, com.zerolab.checkin.ui.journal.JournalEditActivity::class.java)
+            i.putExtra(com.zerolab.checkin.ui.journal.JournalEditActivity.EXTRA_ITEM_ID, item.id)
+            ctx.startActivity(i)
+            onDone()
+            return
+        }
         val interactive = cfg.methods.filter { it != Method.AUTO.key }
         // 组合（多方式）：弹出方式卡片，逐个完成
         if (interactive.size > 1) {
