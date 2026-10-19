@@ -65,6 +65,8 @@ class JournalEditActivity : AppCompatActivity() {
     private lateinit var container: LinearLayout
     private var audioRecorder = AudioRecorder()
     private var recordingBlock: Block.VoiceBlock? = null
+    private var mediaPlayer: android.media.MediaPlayer? = null
+    private var playingBtn: TextView? = null
 
     companion object {
         const val EXTRA_ITEM_ID = "extra_item_id"
@@ -354,6 +356,7 @@ class JournalEditActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 setTextSize(11f)
                 layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(8) }
+                setOnClickListener { togglePlay(v.path, this) }
             }
             // 时长
             val dur = TextView(this).apply {
@@ -417,6 +420,34 @@ class JournalEditActivity : AppCompatActivity() {
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
+    private fun togglePlay(path: String, btn: TextView) {
+        // 正在播放这条：停止
+        if (mediaPlayer != null && playingBtn === btn && mediaPlayer!!.isPlaying) {
+            try { mediaPlayer?.stop() } catch (_: Exception) {}
+            mediaPlayer?.release(); mediaPlayer = null
+            btn.text = "▶"; playingBtn = null
+            return
+        }
+        // 切到新的：先停旧的
+        try { mediaPlayer?.stop(); mediaPlayer?.release() } catch (_: Exception) {}
+        playingBtn?.let { it.text = "▶" }
+        try {
+            val mp = android.media.MediaPlayer()
+            mp.setDataSource(path); mp.prepare()
+            mp.setOnCompletionListener {
+                try { it.release() } catch (_: Exception) {}
+                mediaPlayer = null; btn.text = "▶"; playingBtn = null
+            }
+            mp.start()
+            mediaPlayer = mp; playingBtn = btn; btn.text = "⏸"
+        } catch (e: Exception) { toast("播放失败: ${e.message}") }
+    }
+
+    override fun onDestroy() {
+        try { mediaPlayer?.stop(); mediaPlayer?.release() } catch (_: Exception) {}
+        super.onDestroy()
+    }
+
     // ---- 保存 ----
     private fun save() {
         val item = (application as CheckinApp).repository.getItem(itemId)
@@ -446,16 +477,16 @@ class JournalEditActivity : AppCompatActivity() {
                     if (firstText == null) firstText = b.text
                 }
                 is Block.PhotoBlock -> {
-                    b.paths.forEachIndexed { i, p ->
-                        arr.put(JSONObject().put("type", "photo").put("path", p))
-                        if (firstPhoto == null && i == 0) firstPhoto = p
-                    }
+                    val pathsArr = JSONArray()
+                    b.paths.forEach { pathsArr.put(it) }
+                    arr.put(JSONObject().put("type", "photos").put("paths", pathsArr))
+                    if (firstPhoto == null && b.paths.isNotEmpty()) firstPhoto = b.paths[0]
                 }
                 is Block.VoiceBlock -> {
-                    b.voices.forEach { v ->
-                        arr.put(JSONObject().put("type", "voice").put("path", v.path).put("seconds", v.seconds))
-                        if (firstVoice == null) firstVoice = v.path
-                    }
+                    val voicesArr = JSONArray()
+                    b.voices.forEach { voicesArr.put(JSONObject().put("path", it.path).put("seconds", it.seconds)) }
+                    arr.put(JSONObject().put("type", "voice").put("voices", voicesArr))
+                    if (firstVoice == null && b.voices.isNotEmpty()) firstVoice = b.voices[0].path
                 }
                 is Block.LocationBlock -> {
                     arr.put(JSONObject().put("type", "location").put("name", b.name).put("lat", b.lat).put("lng", b.lng))

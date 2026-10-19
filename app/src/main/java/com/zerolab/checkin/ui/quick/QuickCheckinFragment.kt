@@ -149,6 +149,19 @@ class QuickCheckinFragment : Fragment() {
         }
         contentView.visibility = View.VISIBLE; emptyView.visibility = View.GONE
         cfg = ItemConfig.parse(q.configJson)
+        // v1.4.0：随心记日记本风主题覆盖
+        if (cfg.journalMode) {
+            root.setBackgroundColor(0xFFFAF7F2.toInt())
+            // 打卡按钮改白色悬浮胶囊（棕字）
+            val btn = view?.findViewById<Button>(R.id.btn_checkin)
+            btn?.let {
+                it.text = "记录"
+                it.setBackgroundColor(0xFFFFFFFF.toInt())
+                it.setTextColor(0xFFC97B4A.toInt())
+                it.elevation = 6f * resources.displayMetrics.density
+                it.setPadding(it.paddingLeft, (14 * resources.displayMetrics.density).toInt(), it.paddingRight, (14 * resources.displayMetrics.density).toInt())
+            }
+        }
         // v1.3.8：负打卡机会结算（页面同步跑，保证点击记录时盾牌已到位，避免与 onResume 异步线程竞态）
         try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
         autoBackfillMissing()
@@ -158,6 +171,12 @@ class QuickCheckinFragment : Fragment() {
         root.findViewById<TextView>(R.id.tv_emoji).text = com.zerolab.checkin.theme.IconManager.emojiFor(q.icon, q.theme)
         root.findViewById<TextView>(R.id.tv_name).text = q.name
         btnCheckin.background?.setTint(theme.primary)
+        // v1.4.0：随心记日记本风——按钮改白色悬浮胶囊（在主题色设置之后覆盖）
+        if (cfg.journalMode && !cfg.moodMode) {
+            btnCheckin.setBackgroundColor(0xFFFFFFFF.toInt())
+            btnCheckin.setTextColor(0xFFC97B4A.toInt())
+            btnCheckin.elevation = 6f * resources.displayMetrics.density
+        }
         renderMonth()
         renderToday()
         // 记录栏随快捷项/刷新重置为今日，避免残留上一项
@@ -617,6 +636,22 @@ class QuickCheckinFragment : Fragment() {
                 lp.bottomMargin = (10 * resources.displayMetrics.density).toInt()
                 layoutParams = lp
             }
+            // v1.4.0：随心记块流记录——按 blocks[] 数组渲染，不再走老的单字段拼接
+            val hasBlocks = try {
+                org.json.JSONObject(r.extraJson ?: "{}").has("blocks")
+            } catch (_: Exception) { false }
+            if (hasBlocks) {
+                val ts = TextView(requireContext()).apply {
+                    text = "✅ ${fmt.format(java.util.Date(r.checkinTime))}"
+                    textSize = 12f
+                    setTextColor(0xFF8A7B6B.toInt())
+                    setPadding(0, 0, 0, 6)
+                }
+                row.addView(ts)
+                renderJournalBlocks(r)?.let { row.addView(it) }
+                recordsBox.addView(row)
+                return@forEach
+            }
             val prefix = when {
                 r.status == "OFFSET" -> "↩ 补签"
                 r.isAuto == 1 -> "⚡ 自动"
@@ -766,6 +801,98 @@ class QuickCheckinFragment : Fragment() {
             }
         }
         return btn
+    }
+
+    /** v1.4.0：随心记块流渲染——按 extraJson.blocks[] 顺序渲染所有块 */
+    private fun renderJournalBlocks(r: CheckinRecord): View? {
+        val blocks = try {
+            val o = org.json.JSONObject(r.extraJson ?: "{}")
+            o.optJSONArray("blocks") ?: return null
+        } catch (_: Exception) { return null }
+        if (blocks.length() == 0) return null
+
+        val ctx = requireContext()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+
+        val wrap = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(8))
+        }
+
+        for (i in 0 until blocks.length()) {
+            val b = blocks.optJSONObject(i) ?: continue
+            when (b.optString("type")) {
+                "text" -> {
+                    val t = b.optString("text")
+                    if (t.isNotBlank()) {
+                        val tv = android.widget.TextView(ctx).apply {
+                            text = t; textSize = 14f
+                            setTextColor(0xFF3D342B.toInt())
+                            setLineSpacing(2f * density, 1f)
+                            setPadding(0, dp(4), 0, dp(4))
+                        }
+                        wrap.addView(tv)
+                    }
+                }
+                "photos" -> {
+                    val arr = b.optJSONArray("paths") ?: continue
+                    if (arr.length() == 0) continue
+                    // 三列宫格
+                    val grid = android.widget.GridLayout(ctx).apply {
+                        columnCount = 3
+                        setPadding(0, dp(4), 0, dp(4))
+                    }
+                    val cellW = ((resources.displayMetrics.widthPixels - dp(40)) / 3.0f).toInt()
+                    for (j in 0 until arr.length()) {
+                        val path = arr.optString(j)
+                        if (!java.io.File(path).exists()) continue
+                        val iv = android.widget.ImageView(ctx).apply {
+                            layoutParams = android.widget.GridLayout.LayoutParams().apply {
+                                width = cellW; height = cellW
+                                marginEnd = dp(4); bottomMargin = dp(4)
+                            }
+                            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                            setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
+                            setOnClickListener {
+                                val big = android.widget.ImageView(ctx).apply {
+                                    setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
+                                    adjustViewBounds = true
+                                    maxHeight = dp(600); maxWidth = dp(320)
+                                }
+                                android.app.AlertDialog.Builder(ctx).setView(big)
+                                    .setPositiveButton("关闭", null).show()
+                            }
+                        }
+                        grid.addView(iv)
+                    }
+                    wrap.addView(grid)
+                }
+                "voice" -> {
+                    val arr = b.optJSONArray("voices") ?: continue
+                    if (arr.length() == 0) continue
+                    for (j in 0 until arr.length()) {
+                        val v = arr.optJSONObject(j) ?: continue
+                        val path = v.optString("path")
+                        if (!java.io.File(path).exists()) continue
+                        wrap.addView(voicePlayButton(path))
+                    }
+                }
+                "location" -> {
+                    val name = b.optString("name")
+                    val lat = b.optDouble("lat", 0.0)
+                    val lng = b.optDouble("lng", 0.0)
+                    val tv = android.widget.TextView(ctx).apply {
+                        text = "📍 ${if (name.isNotBlank()) name else "%.5f, %.5f".format(lat, lng)}"
+                        textSize = 12f
+                        setTextColor(0xFF8A7B6B.toInt())
+                        setPadding(0, dp(6), 0, dp(2))
+                    }
+                    wrap.addView(tv)
+                }
+            }
+        }
+        return wrap
     }
 
     /** 过去缺卡/破戒日且有抵消机会时，提供手动补签（v1.3.7：负打卡破戒日也可补签） */
