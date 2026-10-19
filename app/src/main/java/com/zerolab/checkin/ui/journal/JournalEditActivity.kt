@@ -68,6 +68,10 @@ class JournalEditActivity : AppCompatActivity() {
     private var recordingBlock: Block.VoiceBlock? = null
     private var mediaPlayer: android.media.MediaPlayer? = null
     private var playingBtn: TextView? = null
+    private var playingTrack: android.widget.FrameLayout? = null   // v1.4.0：进度条轨道
+    private var playingProgress: View? = null                   // v1.4.0：进度条填充
+    private var progressHandler: Handler? = null
+    private var progressRunnable: Runnable? = null
     private var pendingPhotoTarget: Block.PhotoBlock? = null  // v1.4.0：点某块+号后追加到该块
 
     companion object {
@@ -418,7 +422,6 @@ class JournalEditActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 setTextSize(11f)
                 layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(8) }
-                setOnClickListener { togglePlay(v.path, this) }
             }
             // 时长
             val dur = TextView(this).apply {
@@ -427,11 +430,17 @@ class JournalEditActivity : AppCompatActivity() {
                 setTextSize(12f)
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) }
             }
-            // 进度条
-            val bar = View(this).apply {
+            // 进度条：轨道 + 填充
+            val barTrack = android.widget.FrameLayout(this).apply {
                 setBackgroundColor(voiceTrack)
                 layoutParams = LinearLayout.LayoutParams(0, dp(3), 1f).apply { marginEnd = dp(8) }
             }
+            val barProgress = View(this).apply {
+                setBackgroundColor(accent)
+                layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+            }
+            barTrack.addView(barProgress)
+            play.setOnClickListener { togglePlay(v.path, play, barTrack, barProgress) }
             // 删除
             val del = TextView(this).apply {
                 text = "✕"
@@ -443,7 +452,7 @@ class JournalEditActivity : AppCompatActivity() {
                     renderAll()
                 }
             }
-            row.addView(play); row.addView(dur); row.addView(bar); row.addView(del)
+            row.addView(play); row.addView(dur); row.addView(barTrack); row.addView(del)
             wrap.addView(row)
         }
         // 语音块内部末尾+号：追加一条语音
@@ -482,26 +491,59 @@ class JournalEditActivity : AppCompatActivity() {
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
-    private fun togglePlay(path: String, btn: TextView) {
+    private fun stopProgress() {
+        progressRunnable?.let { progressHandler?.removeCallbacks(it) }
+        progressRunnable = null
+        progressHandler = null
+    }
+    private fun startProgress(mp: android.media.MediaPlayer, track: android.widget.FrameLayout, prog: View) {
+        stopProgress()
+        val h = Handler(Looper.getMainLooper())
+        progressHandler = h
+        val total = mp.duration.coerceAtLeast(1)
+        val r = object : Runnable {
+            override fun run() {
+                try {
+                    if (mp.isPlaying) {
+                        val w = (track.width * mp.currentPosition / total).toInt()
+                        prog.layoutParams = android.widget.FrameLayout.LayoutParams(w, dp(3))
+                        h.postDelayed(this, 200)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        progressRunnable = r
+        h.postDelayed(r, 200)
+    }
+
+    private fun togglePlay(path: String, btn: TextView, track: android.widget.FrameLayout, prog: View) {
         // 正在播放这条：停止
         if (mediaPlayer != null && playingBtn === btn && mediaPlayer!!.isPlaying) {
             try { mediaPlayer?.stop() } catch (_: Exception) {}
             mediaPlayer?.release(); mediaPlayer = null
             btn.text = "▶"; playingBtn = null
+            prog.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+            stopProgress()
             return
         }
-        // 切到新的：先停旧的
+        // 切到新的：先停旧的并复位旧UI
         try { mediaPlayer?.stop(); mediaPlayer?.release() } catch (_: Exception) {}
         playingBtn?.let { it.text = "▶" }
+        playingProgress?.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+        stopProgress()
         try {
             val mp = android.media.MediaPlayer()
             mp.setDataSource(path); mp.prepare()
             mp.setOnCompletionListener {
                 try { it.release() } catch (_: Exception) {}
                 mediaPlayer = null; btn.text = "▶"; playingBtn = null
+                prog.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+                stopProgress()
             }
             mp.start()
             mediaPlayer = mp; playingBtn = btn; btn.text = "⏸"
+            playingTrack = track; playingProgress = prog
+            startProgress(mp, track, prog)
         } catch (e: Exception) { toast("播放失败: ${e.message}") }
     }
 

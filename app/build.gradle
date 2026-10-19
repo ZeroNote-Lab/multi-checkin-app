@@ -12,7 +12,7 @@ android {
         applicationId "com.zerolab.checkin"
         minSdk 24
         targetSdk 34
-        versionCode 126
+        versionCode 127
         versionName "1.4.0"
         vectorDrawables.useSupportLibrary = true
     }
