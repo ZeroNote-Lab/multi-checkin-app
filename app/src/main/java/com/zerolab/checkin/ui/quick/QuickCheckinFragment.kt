@@ -52,7 +52,7 @@ class QuickCheckinFragment : Fragment() {
     private lateinit var btnCheckin: Button
     private lateinit var flow: CheckinFlow
     private var mediaPlayer: MediaPlayer? = null
-    private var playingVoiceBtn: TextView? = null  // v1.4.0：详情页语音播放全局状态
+    private var playingVoice: VoicePlayUi? = null  // v1.4.0：详情页语音播放全局状态（按钮+进度条）
     private var progressHandler: android.os.Handler? = null
     private var progressRunnable: Runnable? = null
 
@@ -98,6 +98,9 @@ class QuickCheckinFragment : Fragment() {
         calendar = view.findViewById(R.id.calendar)
         btnCheckin = view.findViewById(R.id.btn_checkin)
         flow = CheckinFlow(this) { refresh() }
+        // v1.4.0：随心记悬浮"写一条"按钮
+        val btnWrite = view.findViewById<TextView>(R.id.btn_journal_write)
+        btnWrite.setOnClickListener { flow.start(item!!, cfg) }
         view.findViewById<Button>(R.id.btn_go_create).setOnClickListener {
             (requireActivity() as? com.zerolab.checkin.ui.main.MainActivity)?.gotoListTab()
         }
@@ -181,11 +184,21 @@ class QuickCheckinFragment : Fragment() {
             // 折线按钮只在随心记显示
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.VISIBLE
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.text = "⌄"
+            // v1.4.0：悬浮"写一条"按钮替代内嵌打卡按钮
+            view?.findViewById<TextView>(R.id.btn_journal_write)?.visibility = View.VISIBLE
+            btnCheckin.visibility = View.GONE
+            // 滚动区底部留白，避免最后一条记录被悬浮按钮挡住
+            val pad = resources.displayMetrics.density.toInt()
+            view?.findViewById<LinearLayout>(R.id.scroll_content)?.setPadding(14 * pad, 14 * pad, 14 * pad, 96 * pad)
         } else {
             calendar.compactMonth = false
             calendar.weekMode = false
             updateCalendarHeight()
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.GONE
+            view?.findViewById<TextView>(R.id.btn_journal_write)?.visibility = View.GONE
+            btnCheckin.visibility = View.VISIBLE
+            val pad = resources.displayMetrics.density.toInt()
+            view?.findViewById<LinearLayout>(R.id.scroll_content)?.setPadding(14 * pad, 14 * pad, 14 * pad, 14 * pad)
         }
         // v1.3.8：负打卡机会结算（页面同步跑，保证点击记录时盾牌已到位，避免与 onResume 异步线程竞态）
         try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
@@ -784,7 +797,7 @@ class QuickCheckinFragment : Fragment() {
                 setPadding(0, 6, 0, 0)
             }
             if (r.photoPath?.isNotBlank() == true && File(r.photoPath).exists()) mediaRow.addView(thumbView(File(r.photoPath)))
-            if (r.voicePath?.isNotBlank() == true && File(r.voicePath).exists()) mediaRow.addView(voicePlayButton(r.voicePath!!))
+            if (r.voicePath?.isNotBlank() == true && File(r.voicePath).exists()) mediaRow.addView(voicePlayButton(r.voicePath!!, 0))
             if (mediaRow.childCount > 0) row.addView(mediaRow)
             recordsBox.addView(row)
         }
@@ -814,8 +827,11 @@ class QuickCheckinFragment : Fragment() {
         return iv
     }
 
+    /** 语音播放UI holder：同时记住按钮和进度条，切换时旧UI能复位 */
+    private data class VoicePlayUi(val btn: TextView, val progress: View, val trackBg: android.widget.FrameLayout)
+
     /** 语音播放/停止按钮（v1.4.0：带进度条轨道+全局状态，和编辑页一致） */
-    private fun voicePlayButton(path: String): View {
+    private fun voicePlayButton(path: String, seconds: Int): View {
         val ctx = requireContext()
         val density = resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
@@ -835,7 +851,7 @@ class QuickCheckinFragment : Fragment() {
             layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(8) }
         }
         val dur = TextView(ctx).apply {
-            text = "语音"
+            text = if (seconds > 0) "%d:%02d".format(seconds / 60, seconds % 60) else "语音"
             setTextColor(0xFF8A7B6B.toInt())
             textSize = 12f
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) }
@@ -857,7 +873,7 @@ class QuickCheckinFragment : Fragment() {
             progressRunnable = null
             progressHandler = null
         }
-        fun startProgress(mp: MediaPlayer) {
+        fun startProgress(mp: MediaPlayer, ui: VoicePlayUi) {
             stopProgress()
             val h = android.os.Handler(android.os.Looper.getMainLooper())
             progressHandler = h
@@ -867,8 +883,8 @@ class QuickCheckinFragment : Fragment() {
                     try {
                         if (mp.isPlaying) {
                             val pos = mp.currentPosition
-                            val w = (trackBg.width * pos / total).toInt()
-                            trackProgress.layoutParams = android.widget.FrameLayout.LayoutParams(w, dp(3))
+                            val w = (ui.trackBg.width * pos / total).toInt()
+                            ui.progress.layoutParams = android.widget.FrameLayout.LayoutParams(w, dp(3))
                             h.postDelayed(this, 200)
                         }
                     } catch (_: Exception) {}
@@ -877,18 +893,29 @@ class QuickCheckinFragment : Fragment() {
             progressRunnable = r
             h.postDelayed(r, 200)
         }
+        // 复位旧播放UI
+        fun resetOld() {
+            playingVoice?.let {
+                it.btn.text = "▶"
+                it.progress.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+            }
+            playingVoice = null
+        }
 
         playBtn.setOnClickListener {
+            val ui = VoicePlayUi(playBtn, trackProgress, trackBg)
             val mp = mediaPlayer
-            if (mp != null && mp.isPlaying) {
+            if (mp != null && mp.isPlaying && playingVoice?.btn === playBtn) {
                 try { mp.stop(); mp.release() } catch (_: Exception) {}
                 mediaPlayer = null; playBtn.text = "▶"
-                playingVoiceBtn = null
+                trackProgress.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+                resetOld()
                 stopProgress()
             } else {
-                // 先停止前一个播放
-                playingVoiceBtn?.let { try { mediaPlayer?.stop(); mediaPlayer?.release() } catch (_: Exception) {} }
+                // 先停止前一个播放并复位旧UI
+                try { mediaPlayer?.stop(); mediaPlayer?.release() } catch (_: Exception) {}
                 mediaPlayer = null
+                resetOld()
                 stopProgress()
                 try {
                     val np = MediaPlayer()
@@ -898,14 +925,15 @@ class QuickCheckinFragment : Fragment() {
                         try { it.release() } catch (_: Exception) {}
                         if (mediaPlayer === it) mediaPlayer = null
                         playBtn.text = "▶"
-                        playingVoiceBtn = null
+                        trackProgress.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+                        playingVoice = null
                         stopProgress()
                     }
                     np.start()
                     mediaPlayer = np
                     playBtn.text = "⏸"
-                    playingVoiceBtn = playBtn
-                    startProgress(np)
+                    playingVoice = ui
+                    startProgress(np, ui)
                 } catch (e: Exception) { Toast.makeText(ctx, "语音播放失败：${e.message}", Toast.LENGTH_SHORT).show() }
             }
         }
@@ -947,10 +975,10 @@ class QuickCheckinFragment : Fragment() {
                 "photos" -> {
                     val arr = b.optJSONArray("paths") ?: continue
                     if (arr.length() == 0) continue
-                    // 三列宫格 v1.4.0：修复第三张截断
+                    // 三列宫格 v1.4.0：按详情页实际容器宽度（外层16+卡片14+wrap4=两侧68dp）计算
                     val grid = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
                     val gap = dp(6)
-                    val cellW = (resources.displayMetrics.widthPixels - dp(32) - gap * 2) / 3
+                    val cellW = (resources.displayMetrics.widthPixels - dp(68) - gap * 2) / 3
                     var row: android.widget.LinearLayout? = null
                     for (j in 0 until arr.length()) {
                         if (j % 3 == 0) {
@@ -989,7 +1017,8 @@ class QuickCheckinFragment : Fragment() {
                         val v = arr.optJSONObject(j) ?: continue
                         val path = v.optString("path")
                         if (!java.io.File(path).exists()) continue
-                        wrap.addView(voicePlayButton(path))
+                        val secs = v.optInt("seconds", 0)
+                        wrap.addView(voicePlayButton(path, secs))
                     }
                 }
                 "location" -> {
