@@ -217,8 +217,8 @@
         </ScrollView>
     </LinearLayout>
 
-    <!-- v1.4.0：随心记悬浮"写一条"按钮（日记模式才显示） -->
-    <TextView
+    <!-- v1.4.0：随心记悬浮"写一条"按钮（日记模式才显示）；铅笔✏旋转180°笔尖朝左下 -->
+    <LinearLayout
         android:id="@+id/btn_journal_write"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -229,12 +229,25 @@
         android:background="@drawable/bg_journal_write"
         android:elevation="8dp"
         android:gravity="center"
+        android:orientation="horizontal"
         android:paddingVertical="14dp"
-        android:text="✏ 写一条"
-        android:textColor="#C97B4A"
-        android:textSize="15sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
+        android:visibility="gone">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:rotation="135"
+            android:text="✏"
+            android:textColor="#C97B4A"
+            android:textSize="15sp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="写一条"
+            android:textColor="#C97B4A"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <!-- 空状态 -->
     <LinearLayout

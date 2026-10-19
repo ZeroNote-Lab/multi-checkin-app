@@ -98,8 +98,8 @@ class QuickCheckinFragment : Fragment() {
         calendar = view.findViewById(R.id.calendar)
         btnCheckin = view.findViewById(R.id.btn_checkin)
         flow = CheckinFlow(this) { refresh() }
-        // v1.4.0：随心记悬浮"写一条"按钮
-        val btnWrite = view.findViewById<TextView>(R.id.btn_journal_write)
+        // v1.4.0：随心记悬浮"写一条"按钮（LinearLayout容器）
+        val btnWrite = view.findViewById<android.view.View>(R.id.btn_journal_write)
         btnWrite.setOnClickListener { flow.start(item!!, cfg) }
         view.findViewById<Button>(R.id.btn_go_create).setOnClickListener {
             (requireActivity() as? com.zerolab.checkin.ui.main.MainActivity)?.gotoListTab()
@@ -119,6 +119,14 @@ class QuickCheckinFragment : Fragment() {
             calendar.weekMode = !calendar.weekMode
             (v as TextView).text = if (calendar.weekMode) "⌄" else "⌃"
             updateCalendarHeight()
+            // v1.4.0：立即重绘标题与日历（周显示日期范围，月显示月份），无需再点箭头
+            if (!calendar.weekMode) {
+                // 展开月视图：同步到锚点所在月，避免月历与周不一致
+                val ac = java.util.Calendar.getInstance()
+                ac.time = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(calendar.weekAnchor)
+                showYear = ac.get(java.util.Calendar.YEAR); showMonth = ac.get(java.util.Calendar.MONTH)
+            }
+            renderMonth()
         }
         // v1.3.14：全局主题换肤（根背景 / 主按钮）
         ThemeUi.apply(requireActivity(), view, listOf(R.id.btn_checkin, R.id.btn_go_create))
@@ -136,6 +144,22 @@ class QuickCheckinFragment : Fragment() {
     override fun onPause() {
         super.onPause()
         NfcHub.unregister(this)
+        // v1.4.0：离开页面（切tab/进编辑页/退出）立即停止语音播放并复位UI，避免声音继续、按钮状态错乱
+        try {
+            mediaPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (_: Exception) {}
+        mediaPlayer = null
+        playingVoice?.let {
+            it.btn.text = "▶"
+            it.seekBar.progress = 0
+        }
+        playingVoice = null
+        progressRunnable?.let { progressHandler?.removeCallbacks(it) }
+        progressRunnable = null
+        progressHandler = null
     }
 
     override fun onStop() {
@@ -185,7 +209,7 @@ class QuickCheckinFragment : Fragment() {
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.VISIBLE
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.text = "⌄"
             // v1.4.0：悬浮"写一条"按钮替代内嵌打卡按钮
-            view?.findViewById<TextView>(R.id.btn_journal_write)?.visibility = View.VISIBLE
+            view?.findViewById<android.view.View>(R.id.btn_journal_write)?.visibility = View.VISIBLE
             btnCheckin.visibility = View.GONE
             // 滚动区底部留白，避免最后一条记录被悬浮按钮挡住
             val pad = resources.displayMetrics.density.toInt()
@@ -195,7 +219,7 @@ class QuickCheckinFragment : Fragment() {
             calendar.weekMode = false
             updateCalendarHeight()
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.GONE
-            view?.findViewById<TextView>(R.id.btn_journal_write)?.visibility = View.GONE
+            view?.findViewById<android.view.View>(R.id.btn_journal_write)?.visibility = View.GONE
             btnCheckin.visibility = View.VISIBLE
             val pad = resources.displayMetrics.density.toInt()
             view?.findViewById<LinearLayout>(R.id.scroll_content)?.setPadding(14 * pad, 14 * pad, 14 * pad, 14 * pad)
@@ -230,10 +254,28 @@ class QuickCheckinFragment : Fragment() {
     }
 
     private fun shiftMonth(delta: Int) {
-        val c = Calendar.getInstance(); c.clear(); c.set(showYear, showMonth, 1)
-        c.add(Calendar.MONTH, delta)
-        showYear = c.get(Calendar.YEAR); showMonth = c.get(Calendar.MONTH)
-        renderMonth()
+        if (calendar.weekMode) {
+            // v1.4.0：周视图箭头切周（锚点±7天），并同步月份到锚点所在月
+            val c = Calendar.getInstance(); c.time = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(calendar.weekAnchor)
+            c.add(Calendar.DAY_OF_MONTH, delta * 7)
+            val newAnchor = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(c.time)
+            calendar.weekAnchor = newAnchor
+            showYear = c.get(Calendar.YEAR); showMonth = c.get(Calendar.MONTH)
+            renderMonth()
+        } else {
+            val c = Calendar.getInstance(); c.clear(); c.set(showYear, showMonth, 1)
+            c.add(Calendar.MONTH, delta)
+            showYear = c.get(Calendar.YEAR); showMonth = c.get(Calendar.MONTH)
+            // v1.4.0：月视图切月，锚点跟随到目标月（保留原日号，超出则钳到月末），收起后显示该月对应周
+            val ac = Calendar.getInstance()
+            ac.time = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(calendar.weekAnchor)
+            val oldDay = ac.get(Calendar.DAY_OF_MONTH)
+            ac.set(Calendar.YEAR, showYear); ac.set(Calendar.MONTH, showMonth)
+            val maxDay = ac.getActualMaximum(Calendar.DAY_OF_MONTH)
+            ac.set(Calendar.DAY_OF_MONTH, oldDay.coerceAtMost(maxDay))
+            calendar.weekAnchor = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(ac.time)
+            renderMonth()
+        }
     }
 
     /** v1.4.0：动态设置日历高度（ScrollView里布局写死300dp需代码覆盖） */
@@ -249,7 +291,31 @@ class QuickCheckinFragment : Fragment() {
 
     private fun renderMonth() {
         val it = item ?: return
-        root.findViewById<TextView>(R.id.tv_month).text = DateUtils.monthTitle(showYear, showMonth)
+        // v1.4.0：周视图标题显示本周日期范围（10月19日 – 25日）
+        if (calendar.weekMode) {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            val cal = Calendar.getInstance(); cal.time = fmt.parse(calendar.weekAnchor)
+            // 周一=1 ... 周日=7，回退到本周周一
+            val dow = cal.get(Calendar.DAY_OF_WEEK) // 周日=1
+            val back = if (dow == Calendar.SUNDAY) 6 else dow - Calendar.MONDAY
+            cal.add(Calendar.DAY_OF_MONTH, -back)
+            val monday = cal.timeInMillis
+            cal.add(Calendar.DAY_OF_MONTH, 6)
+            val sunday = cal.timeInMillis
+            val mFmt = java.text.SimpleDateFormat("M月d日", java.util.Locale.US)
+            val mondayStr = mFmt.format(java.util.Date(monday))
+            val sundayCal = Calendar.getInstance(); sundayCal.timeInMillis = sunday
+            val sMonth = sundayCal.get(Calendar.MONTH)
+            val mondayCal = Calendar.getInstance(); mondayCal.timeInMillis = monday
+            val title = if (sMonth == mondayCal.get(Calendar.MONTH)) {
+                "$mondayStr – ${sundayCal.get(Calendar.DAY_OF_MONTH)}日"
+            } else {
+                "$mondayStr – ${mFmt.format(java.util.Date(sunday))}"
+            }
+            root.findViewById<TextView>(R.id.tv_month).text = title
+        } else {
+            root.findViewById<TextView>(R.id.tv_month).text = DateUtils.monthTitle(showYear, showMonth)
+        }
         val c = Calendar.getInstance(); c.clear(); c.set(showYear, showMonth, 1)
         val start = DateUtils.dateOf(c.timeInMillis)
         c.set(Calendar.DAY_OF_MONTH, c.getActualMaximum(Calendar.DAY_OF_MONTH))
@@ -272,7 +338,10 @@ class QuickCheckinFragment : Fragment() {
             d = DateUtils.addDays(d, 1)
         }
         // v1.3.15：组日历不显示 ⚡/×n 圆外小标记
-        calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg), { date -> showDayDetail(date) }, showBadges = !groupMode)
+        calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg), { date ->
+            calendar.weekAnchor = date
+            showDayDetail(date)
+        }, showBadges = !groupMode)
         // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽；v1.3.0：随心记/心情日记按实际改图例）
         val legendTv = root.findViewById<TextView>(R.id.tv_legend)
         if (groupMode) { legendTv.visibility = View.GONE; return }   // v1.3.15：打卡组日历不需要图注
@@ -828,9 +897,9 @@ class QuickCheckinFragment : Fragment() {
     }
 
     /** 语音播放UI holder：同时记住按钮和进度条，切换时旧UI能复位 */
-    private data class VoicePlayUi(val btn: TextView, val progress: View, val trackBg: android.widget.FrameLayout)
+    private data class VoicePlayUi(val btn: TextView, val seekBar: android.widget.SeekBar)
 
-    /** 语音播放/停止按钮（v1.4.0：带进度条轨道+全局状态，和编辑页一致） */
+    /** 语音播放/停止按钮（v1.4.0：可拖动 SeekBar，和编辑页一致） */
     private fun voicePlayButton(path: String, seconds: Int): View {
         val ctx = requireContext()
         val density = resources.displayMetrics.density
@@ -856,35 +925,32 @@ class QuickCheckinFragment : Fragment() {
             textSize = 12f
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) }
         }
-        // 进度条容器（背景轨道）+ 进度填充
-        val trackBg = android.widget.FrameLayout(ctx).apply {
-            layoutParams = LinearLayout.LayoutParams(0, dp(3), 1f).apply { marginEnd = dp(8) }
-            setBackgroundColor(0xFFE8D5C0.toInt())
+        // v1.4.0：可拖动 SeekBar
+        val seekBar = android.widget.SeekBar(ctx).apply {
+            max = seconds.coerceAtLeast(1) * 1000
+            progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFFC97B4A.toInt())
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(0xFFE8D5C0.toInt())
+            thumbTintList = android.content.res.ColorStateList.valueOf(0xFFC97B4A.toInt())
+            splitTrack = false
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) }
         }
-        val trackProgress = View(ctx).apply {
-            setBackgroundColor(0xFFC97B4A.toInt())
-            layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
-        }
-        trackBg.addView(trackProgress)
-        row.addView(playBtn); row.addView(dur); row.addView(trackBg)
+        row.addView(playBtn); row.addView(dur); row.addView(seekBar)
 
         fun stopProgress() {
             progressRunnable?.let { progressHandler?.removeCallbacks(it) }
             progressRunnable = null
             progressHandler = null
         }
-        fun startProgress(mp: MediaPlayer, ui: VoicePlayUi) {
+        fun startProgress(mp: MediaPlayer, sb: android.widget.SeekBar) {
             stopProgress()
             val h = android.os.Handler(android.os.Looper.getMainLooper())
             progressHandler = h
-            val total = mp.duration.coerceAtLeast(1)
             val r = object : Runnable {
                 override fun run() {
                     try {
                         if (mp.isPlaying) {
-                            val pos = mp.currentPosition
-                            val w = (ui.trackBg.width * pos / total).toInt()
-                            ui.progress.layoutParams = android.widget.FrameLayout.LayoutParams(w, dp(3))
+                            sb.progress = mp.currentPosition
                             h.postDelayed(this, 200)
                         }
                     } catch (_: Exception) {}
@@ -897,18 +963,26 @@ class QuickCheckinFragment : Fragment() {
         fun resetOld() {
             playingVoice?.let {
                 it.btn.text = "▶"
-                it.progress.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+                it.seekBar.progress = 0
             }
             playingVoice = null
         }
 
+        seekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: android.widget.SeekBar?, p: Int, fromUser: Boolean) {}
+            override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(s: android.widget.SeekBar?) {
+                try { mediaPlayer?.seekTo(seekBar.progress) } catch (_: Exception) {}
+            }
+        })
+
         playBtn.setOnClickListener {
-            val ui = VoicePlayUi(playBtn, trackProgress, trackBg)
+            val ui = VoicePlayUi(playBtn, seekBar)
             val mp = mediaPlayer
             if (mp != null && mp.isPlaying && playingVoice?.btn === playBtn) {
                 try { mp.stop(); mp.release() } catch (_: Exception) {}
                 mediaPlayer = null; playBtn.text = "▶"
-                trackProgress.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+                seekBar.progress = 0
                 resetOld()
                 stopProgress()
             } else {
@@ -921,11 +995,13 @@ class QuickCheckinFragment : Fragment() {
                     val np = MediaPlayer()
                     np.setDataSource(path)
                     np.prepare()
+                    seekBar.max = np.duration.coerceAtLeast(1)
+                    seekBar.progress = 0
                     np.setOnCompletionListener {
                         try { it.release() } catch (_: Exception) {}
                         if (mediaPlayer === it) mediaPlayer = null
                         playBtn.text = "▶"
-                        trackProgress.layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+                        seekBar.progress = 0
                         playingVoice = null
                         stopProgress()
                     }
@@ -933,7 +1009,7 @@ class QuickCheckinFragment : Fragment() {
                     mediaPlayer = np
                     playBtn.text = "⏸"
                     playingVoice = ui
-                    startProgress(np, ui)
+                    startProgress(np, seekBar)
                 } catch (e: Exception) { Toast.makeText(ctx, "语音播放失败：${e.message}", Toast.LENGTH_SHORT).show() }
             }
         }
