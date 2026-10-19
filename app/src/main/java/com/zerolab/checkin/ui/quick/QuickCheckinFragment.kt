@@ -52,6 +52,9 @@ class QuickCheckinFragment : Fragment() {
     private lateinit var btnCheckin: Button
     private lateinit var flow: CheckinFlow
     private var mediaPlayer: MediaPlayer? = null
+    private var playingVoiceBtn: TextView? = null  // v1.4.0：详情页语音播放全局状态
+    private var progressHandler: android.os.Handler? = null
+    private var progressRunnable: Runnable? = null
 
     override fun onDestroyView() {
         super.onDestroyView()
@@ -108,6 +111,12 @@ class QuickCheckinFragment : Fragment() {
             }
         }
         btnCheckin.setOnClickListener { flow.start(item!!, cfg) }
+        // v1.4.0：周/月视图切换折线
+        view.findViewById<TextView>(R.id.btn_toggle_week)?.setOnClickListener { v ->
+            calendar.weekMode = !calendar.weekMode
+            (v as TextView).text = if (calendar.weekMode) "⌄" else "⌃"
+            updateCalendarHeight()
+        }
         // v1.3.14：全局主题换肤（根背景 / 主按钮）
         ThemeUi.apply(requireActivity(), view, listOf(R.id.btn_checkin, R.id.btn_go_create))
         // v1.1.6：列表进入打卡页（override）时隐藏 Fragment 内部顶栏，只留 Activity 顶栏一行（避免双名称/双设置）
@@ -149,36 +158,60 @@ class QuickCheckinFragment : Fragment() {
         }
         contentView.visibility = View.VISIBLE; emptyView.visibility = View.GONE
         cfg = ItemConfig.parse(q.configJson)
-        // v1.4.0：随心记日记本风主题覆盖
-        if (cfg.journalMode) {
-            root.setBackgroundColor(0xFFFAF7F2.toInt())
-            // 打卡按钮改白色悬浮胶囊（棕字）
-            val btn = view?.findViewById<Button>(R.id.btn_checkin)
-            btn?.let {
-                it.text = "记录"
-                it.setBackgroundColor(0xFFFFFFFF.toInt())
-                it.setTextColor(0xFFC97B4A.toInt())
-                it.elevation = 6f * resources.displayMetrics.density
-                it.setPadding(it.paddingLeft, (14 * resources.displayMetrics.density).toInt(), it.paddingRight, (14 * resources.displayMetrics.density).toInt())
-            }
+        // v1.4.0：随心记内部主题（默认日记本风，后续可扩展多套）
+        val journalTheme = object {
+            val bg = 0xFFFAF7F2.toInt()
+            val accent = 0xFFC97B4A.toInt()
+            val card = 0xFFFFFFFF.toInt()
+            val textMain = 0xFF3D342B.toInt()
+            val textSub = 0xFF8A7B6B.toInt()
+            val lightBg = 0xFFF0E8DC.toInt()
+            val voiceTrack = 0xFFE8D5C0.toInt()
+        }
+        if (cfg.journalMode && !cfg.moodMode) {
+            root.setBackgroundColor(journalTheme.bg)
+            // 状态栏同色
+            val window = requireActivity().window
+            window.statusBarColor = journalTheme.bg
+            window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            // 日历默认周视图 + 动态高度（ScrollView里布局写死300dp，需代码覆盖）
+            calendar.weekMode = true
+            calendar.compactMonth = true
+            updateCalendarHeight()
+            // 折线按钮只在随心记显示
+            view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.VISIBLE
+            view?.findViewById<TextView>(R.id.btn_toggle_week)?.text = "⌄"
+        } else {
+            calendar.compactMonth = false
+            calendar.weekMode = false
+            updateCalendarHeight()
+            view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.GONE
         }
         // v1.3.8：负打卡机会结算（页面同步跑，保证点击记录时盾牌已到位，避免与 onResume 异步线程竞态）
         try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
         autoBackfillMissing()
         val theme = ThemeManager.of(q.theme)
         // v1.3.26：日历选中描边=打卡项主题色；打卡按钮同样用打卡项主题色（与描边一致）
-        calendar.themeColor = theme.primary
+        calendar.themeColor = if (cfg.journalMode && !cfg.moodMode) journalTheme.accent else theme.primary
         root.findViewById<TextView>(R.id.tv_emoji).text = com.zerolab.checkin.theme.IconManager.emojiFor(q.icon, q.theme)
         root.findViewById<TextView>(R.id.tv_name).text = q.name
         btnCheckin.background?.setTint(theme.primary)
         // v1.4.0：随心记日记本风——按钮改白色悬浮胶囊（在主题色设置之后覆盖）
         if (cfg.journalMode && !cfg.moodMode) {
-            btnCheckin.setBackgroundColor(0xFFFFFFFF.toInt())
-            btnCheckin.setTextColor(0xFFC97B4A.toInt())
+            btnCheckin.setBackgroundColor(journalTheme.card)
+            btnCheckin.setTextColor(journalTheme.accent)
             btnCheckin.elevation = 6f * resources.displayMetrics.density
+            btnCheckin.text = "记录"
         }
         renderMonth()
         renderToday()
+        // v1.4.0：最后再覆盖一次日记模式按钮样式（renderToday里会setTint主题色）
+        if (cfg.journalMode && !cfg.moodMode) {
+            btnCheckin.background?.setTint(journalTheme.card)
+            btnCheckin.setTextColor(journalTheme.accent)
+            btnCheckin.elevation = 6f * resources.displayMetrics.density
+            btnCheckin.text = "记录"
+        }
         // 记录栏随快捷项/刷新重置为今日，避免残留上一项
         showDayDetail(DateUtils.today())
     }
@@ -188,6 +221,17 @@ class QuickCheckinFragment : Fragment() {
         c.add(Calendar.MONTH, delta)
         showYear = c.get(Calendar.YEAR); showMonth = c.get(Calendar.MONTH)
         renderMonth()
+    }
+
+    /** v1.4.0：动态设置日历高度（ScrollView里布局写死300dp需代码覆盖） */
+    private fun updateCalendarHeight() {
+        val d = resources.displayMetrics.density
+        val h = when {
+            calendar.weekMode -> (34 + 44)  // 周视图78dp
+            calendar.compactMonth -> 220     // 日记模式月视图220dp
+            else -> 300                     // 普通项月视图300dp
+        }
+        calendar.layoutParams = calendar.layoutParams.apply { height = (h * d).toInt() }
     }
 
     private fun renderMonth() {
@@ -770,21 +814,82 @@ class QuickCheckinFragment : Fragment() {
         return iv
     }
 
-    /** 语音播放/停止按钮 */
+    /** 语音播放/停止按钮（v1.4.0：带进度条轨道+全局状态，和编辑页一致） */
     private fun voicePlayButton(path: String): View {
-        val btn = Button(requireContext())
-        btn.text = "🎤 播放"; btn.textSize = 12f
-        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF39C5BB.toInt())
-        btn.setTextColor(android.graphics.Color.WHITE)
-        btn.setPadding(28, 14, 28, 14)
-        btn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { marginEnd = 8; gravity = Gravity.CENTER_VERTICAL }
-        btn.setOnClickListener {
+        val ctx = requireContext()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setBackgroundColor(0xFFF0E8DC.toInt())
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }
+        }
+        val playBtn = TextView(ctx).apply {
+            text = "▶"
+            setTextColor(android.graphics.Color.WHITE)
+            setBackgroundColor(0xFFC97B4A.toInt())
+            gravity = Gravity.CENTER
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(8) }
+        }
+        val dur = TextView(ctx).apply {
+            text = "语音"
+            setTextColor(0xFF8A7B6B.toInt())
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) }
+        }
+        // 进度条容器（背景轨道）+ 进度填充
+        val trackBg = android.widget.FrameLayout(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(3), 1f).apply { marginEnd = dp(8) }
+            setBackgroundColor(0xFFE8D5C0.toInt())
+        }
+        val trackProgress = View(ctx).apply {
+            setBackgroundColor(0xFFC97B4A.toInt())
+            layoutParams = android.widget.FrameLayout.LayoutParams(0, dp(3))
+        }
+        trackBg.addView(trackProgress)
+        row.addView(playBtn); row.addView(dur); row.addView(trackBg)
+
+        fun stopProgress() {
+            progressRunnable?.let { progressHandler?.removeCallbacks(it) }
+            progressRunnable = null
+            progressHandler = null
+        }
+        fun startProgress(mp: MediaPlayer) {
+            stopProgress()
+            val h = android.os.Handler(android.os.Looper.getMainLooper())
+            progressHandler = h
+            val total = mp.duration.coerceAtLeast(1)
+            val r = object : Runnable {
+                override fun run() {
+                    try {
+                        if (mp.isPlaying) {
+                            val pos = mp.currentPosition
+                            val w = (trackBg.width * pos / total).toInt()
+                            trackProgress.layoutParams = android.widget.FrameLayout.LayoutParams(w, dp(3))
+                            h.postDelayed(this, 200)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            progressRunnable = r
+            h.postDelayed(r, 200)
+        }
+
+        playBtn.setOnClickListener {
             val mp = mediaPlayer
             if (mp != null && mp.isPlaying) {
                 try { mp.stop(); mp.release() } catch (_: Exception) {}
-                mediaPlayer = null; btn.text = "🎤 播放"
+                mediaPlayer = null; playBtn.text = "▶"
+                playingVoiceBtn = null
+                stopProgress()
             } else {
+                // 先停止前一个播放
+                playingVoiceBtn?.let { try { mediaPlayer?.stop(); mediaPlayer?.release() } catch (_: Exception) {} }
+                mediaPlayer = null
+                stopProgress()
                 try {
                     val np = MediaPlayer()
                     np.setDataSource(path)
@@ -792,15 +897,19 @@ class QuickCheckinFragment : Fragment() {
                     np.setOnCompletionListener {
                         try { it.release() } catch (_: Exception) {}
                         if (mediaPlayer === it) mediaPlayer = null
-                        btn.text = "🎤 播放"
+                        playBtn.text = "▶"
+                        playingVoiceBtn = null
+                        stopProgress()
                     }
                     np.start()
                     mediaPlayer = np
-                    btn.text = "⏹ 停止"
-                } catch (e: Exception) { Toast.makeText(requireContext(), "语音播放失败：${e.message}", Toast.LENGTH_SHORT).show() }
+                    playBtn.text = "⏸"
+                    playingVoiceBtn = playBtn
+                    startProgress(np)
+                } catch (e: Exception) { Toast.makeText(ctx, "语音播放失败：${e.message}", Toast.LENGTH_SHORT).show() }
             }
         }
-        return btn
+        return row
     }
 
     /** v1.4.0：随心记块流渲染——按 extraJson.blocks[] 顺序渲染所有块 */
@@ -838,19 +947,24 @@ class QuickCheckinFragment : Fragment() {
                 "photos" -> {
                     val arr = b.optJSONArray("paths") ?: continue
                     if (arr.length() == 0) continue
-                    // 三列宫格
-                    val grid = android.widget.GridLayout(ctx).apply {
-                        columnCount = 3
-                        setPadding(0, dp(4), 0, dp(4))
-                    }
-                    val cellW = ((resources.displayMetrics.widthPixels - dp(40)) / 3.0f).toInt()
+                    // 三列宫格 v1.4.0：修复第三张截断
+                    val grid = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
+                    val gap = dp(6)
+                    val cellW = (resources.displayMetrics.widthPixels - dp(32) - gap * 2) / 3
+                    var row: android.widget.LinearLayout? = null
                     for (j in 0 until arr.length()) {
+                        if (j % 3 == 0) {
+                            row = android.widget.LinearLayout(ctx).apply {
+                                orientation = android.widget.LinearLayout.HORIZONTAL
+                                setPadding(0, 0, 0, gap)
+                            }
+                            grid.addView(row)
+                        }
                         val path = arr.optString(j)
                         if (!java.io.File(path).exists()) continue
                         val iv = android.widget.ImageView(ctx).apply {
-                            layoutParams = android.widget.GridLayout.LayoutParams().apply {
-                                width = cellW; height = cellW
-                                marginEnd = dp(4); bottomMargin = dp(4)
+                            layoutParams = android.widget.LinearLayout.LayoutParams(cellW, cellW).apply {
+                                marginEnd = if (j % 3 < 2) gap else 0
                             }
                             scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
                             setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
@@ -864,7 +978,7 @@ class QuickCheckinFragment : Fragment() {
                                     .setPositiveButton("关闭", null).show()
                             }
                         }
-                        grid.addView(iv)
+                        row?.addView(iv)
                     }
                     wrap.addView(grid)
                 }
