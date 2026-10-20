@@ -187,10 +187,10 @@ class MonthCalendarView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_UP) {
             val colW = width / 7f
-            // v1.4.0：周模式下行号需要偏移
+            // v1.4.0：周模式下行号需要偏移，必须与 onDraw 一致用 weekAnchor，不能用 today
             val rowOffset = if (weekMode) {
-                val todayIdx = grid.indexOfFirst { it.first == DateUtils.today() }
-                if (todayIdx >= 0) todayIdx / 7 else 0
+                val anchorIdx = grid.indexOfFirst { it.first == weekAnchor }
+                if (anchorIdx >= 0) anchorIdx / 7 else 0
             } else 0
             val rowH = (height - headerH) / (if (weekMode) 1f else 6f)
             val col = (event.x / colW).toInt()
