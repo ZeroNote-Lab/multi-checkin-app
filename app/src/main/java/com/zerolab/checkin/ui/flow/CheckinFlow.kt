@@ -69,7 +69,9 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
     private var comboDialog: AlertDialog? = null
 
     // 收集到的材料
-    private var photoPath: String? = null
+    // v1.4.0：拍照打卡支持多图（上限 9），photoPaths 为本次已选全部图片；提交时第一张写入 photoPath 字段（兼容旧版本）
+    private val photoPaths = mutableListOf<String>()
+    private var photoPreviewDlg: AlertDialog? = null
     private var textContent: String? = null
     private var voicePath: String? = null
     private var lat: Double? = null
@@ -120,34 +122,45 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 }
                 main.post {
                     if (compressed != null) {
-                        photoPath = compressed.absolutePath
-                        toast("照片已保存")
+                        addPhotoAndPreview(listOf(compressed.absolutePath))
                     } else {
-                        toast("照片保存失败，已按打卡成功处理")
+                        toast("照片保存失败")
+                        if (photoPaths.isNotEmpty()) showPhotoPreview()
                     }
-                    stepSuccess()
                 }
             }
         } else {
-            // v1.1.8：相机取消直接返回（不降级相册，保证拍照实时性）
-            toast("拍照未完成")
+            // v1.1.8：相机取消直接返回；v1.4.0：连拍模式下已有图片则回到预览，不丢弃
+            if (photoPaths.isEmpty()) toast("拍照未完成") else showPhotoPreview()
         }
     }
-    private val pickImage = fragment.registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) thread {
-            val src = File(ctx.cacheDir, "album_tmp.jpg")
-            try { ctx.contentResolver.openInputStream(uri).use { it?.copyTo(FileOutputStreamSafe(src)) } } catch (_: Exception) {}
+    // v1.4.0：相册多选（上限 9）
+    private val pickImages = fragment.registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNullOrEmpty()) {
+            if (photoPaths.isEmpty()) toast("已取消选择图片") else showPhotoPreview()
+            return@registerForActivityResult
+        }
+        val picked = uris.take(9 - photoPaths.size)
+        thread {
             val outDir = File(ctx.filesDir, "checkin_photos/${item?.id ?: 0}")
-            val c = ImageUtil.compressWebp(src, outDir)
-            main.post { if (c != null) { photoPath = c.absolutePath; stepSuccess() } else toast("图片读取失败") }
-        } else toast("已取消选择图片")
+            val saved = mutableListOf<String>()
+            picked.forEachIndexed { i, uri ->
+                try {
+                    val src = File(ctx.cacheDir, "album_tmp_$i.jpg")
+                    ctx.contentResolver.openInputStream(uri).use { it?.copyTo(FileOutputStream(src)) }
+                    ImageUtil.compressWebp(src, outDir)?.let { saved.add(it.absolutePath) }
+                } catch (_: Exception) {}
+            }
+            main.post {
+                if (saved.isEmpty()) toast("图片读取失败")
+                else addPhotoAndPreview(saved)
+            }
+        }
     }
-
-    private fun FileOutputStreamSafe(f: File) = java.io.FileOutputStream(f)
 
     fun start(item: CheckinItem, cfg: ItemConfig) {
         this.item = item; this.cfg = cfg
-        photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
+        photoPaths.clear(); textContent = null; voicePath = null; lat = null; lng = null
         timerExtra = null; moodValue = null; locName = null
         timerForceOn = false
         doneMethods.clear(); queue.clear()
@@ -201,7 +214,10 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 while (keys.hasNext()) { val k = keys.next(); jo.put(k, o.get(k)) }
             } catch (_: Exception) {} }
             locName?.let { jo.put("locName", it) }
-            val r = CheckinEngine.perform(it, repo, photoPath, textContent, voicePath, lat, lng,
+            if (photoPaths.isNotEmpty()) {
+                val pa = org.json.JSONArray(); photoPaths.forEach { pa.put(it) }; jo.put("photoPaths", pa)
+            }
+            val r = CheckinEngine.perform(it, repo, photoPaths.firstOrNull(), textContent, voicePath, lat, lng,
                 extra = jo.toString())
             main.post {
                 when (r) {
@@ -272,7 +288,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             }
         }
         comboCurrent = m
-        photoPath = null; textContent = null; voicePath = null; lat = null; lng = null
+        photoPaths.clear(); textContent = null; voicePath = null; lat = null; lng = null
         timerExtra = null; moodValue = null; locName = null
         when (m) {
             Method.TEXT.key -> doText()
@@ -391,10 +407,106 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         if (c.photoFromCamera && hasCamera) opts.add("拍照")
         if (c.photoFromAlbum) opts.add("从相册选择")
         if (opts.isEmpty()) { toast("该打卡项未配置图片来源，请在编辑页设置"); return }
-        if (opts.size == 1) { if (opts[0] == "拍照") openCamera() else pickImage.launch("image/*"); return }
+        if (opts.size == 1) { if (opts[0] == "拍照") openCamera() else pickImages.launch("image/*"); return }
         AlertDialog.Builder(ctx).setTitle("选择图片来源").setItems(opts.toTypedArray()) { _, i ->
-            if (opts[i] == "拍照") openCamera() else pickImage.launch("image/*")
+            if (opts[i] == "拍照") openCamera() else pickImages.launch("image/*")
         }.setNegativeButton("取消", null).show()
+    }
+
+    /** v1.4.0：把新图加入列表并弹出/刷新三列宫格预览（可删除、继续添加、完成） */
+    private fun addPhotoAndPreview(newPaths: List<String>) {
+        newPaths.forEach { if (photoPaths.size < 9 && it !in photoPaths) photoPaths.add(it) }
+        showPhotoPreview()
+    }
+
+    private fun showPhotoPreview() {
+        val density = ctx.resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val grid = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), 0)
+        }
+        val tip = TextView(ctx).apply {
+            gravity = Gravity.CENTER
+            setTextColor(0xFF8A7B6B.toInt())
+            textSize = 13f
+            setPadding(0, dp(8), 0, 0)
+        }
+        val gap = dp(6)
+        val cellW = (ctx.resources.displayMetrics.widthPixels - dp(24) - gap * 2) / 3
+        fun rebuild() {
+            grid.removeAllViews()
+            var row: LinearLayout? = null
+            photoPaths.forEachIndexed { j, p ->
+                if (j % 3 == 0) {
+                    row = LinearLayout(ctx).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(0, 0, 0, gap)
+                    }
+                    grid.addView(row)
+                }
+                val container = FrameLayout(ctx).apply {
+                    layoutParams = LinearLayout.LayoutParams(cellW, cellW).apply {
+                        marginEnd = if (j % 3 < 2) gap else 0
+                    }
+                }
+                val iv = ImageView(ctx).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    setImageBitmap(android.graphics.BitmapFactory.decodeFile(p))
+                    layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+                }
+                val del = TextView(ctx).apply {
+                    text = "✕"
+                    setTextColor(android.graphics.Color.WHITE)
+                    setBackgroundColor(0xAA000000.toInt())
+                    gravity = Gravity.CENTER
+                    textSize = 13f
+                    layoutParams = FrameLayout.LayoutParams(dp(22), dp(22)).apply {
+                        gravity = Gravity.TOP or Gravity.END
+                    }
+                    setOnClickListener { photoPaths.removeAt(j); rebuild() }
+                }
+                container.addView(iv); container.addView(del)
+                row?.addView(container)
+            }
+            // v1.4.0：删除后同步刷新标题与计数
+            tip.text = "已选 ${photoPaths.size}/9 张"
+            val titleId = ctx.resources.getIdentifier("alertTitle", "id", "android")
+            if (titleId != 0) photoPreviewDlg?.findViewById<TextView>(titleId)?.text = "图片（${photoPaths.size}）"
+        }
+        rebuild()
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(grid); addView(tip)
+        }
+        photoPreviewDlg?.dismiss()
+        val dlg = AlertDialog.Builder(ctx)
+            .setTitle("图片（${photoPaths.size}）")
+            .setView(box)
+            .setCancelable(false)
+            .setNeutralButton("继续添加", null)
+            .setNegativeButton("取消") { _, _ ->
+                photoPaths.clear()
+                photoPreviewDlg = null
+            }
+            .setPositiveButton("完成", null)
+            .show()
+        photoPreviewDlg = dlg
+        // v1.4.0：拦截默认 dismiss——满 9 提示、空选提示均保持弹窗，不丢已选图片
+        dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+            if (photoPaths.size >= 9) {
+                toast("最多 9 张")
+            } else {
+                dlg.dismiss(); photoPreviewDlg = null; doPhoto()
+            }
+        }
+        dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (photoPaths.isEmpty()) {
+                toast("请至少选择一张图片")
+            } else {
+                dlg.dismiss(); photoPreviewDlg = null; stepSuccess()
+            }
+        }
     }
 
     private fun openCamera() {
@@ -860,10 +972,13 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             } catch (_: Exception) {} }
             moodValue?.let { jo.put("mood", it) }
             locName?.let { jo.put("locName", it) }
+            if (photoPaths.isNotEmpty()) {
+                val pa = org.json.JSONArray(); photoPaths.forEach { pa.put(it) }; jo.put("photoPaths", pa)
+            }
             val extra = if (jo.length() > 0) jo.toString() else null
             val r = CheckinEngine.perform(
                 it, repo,
-                photoPath = photoPath, text = textContent, voicePath = voicePath,
+                photoPath = photoPaths.firstOrNull(), text = textContent, voicePath = voicePath,
                 lat = lat, lng = lng, extra = extra
             )
             main.post {

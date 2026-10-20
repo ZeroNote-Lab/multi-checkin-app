@@ -27,16 +27,23 @@ object ZipExporter {
         // 收集素材（数据库存绝对路径，导出 JSON 时才改写为相对路径）
         val items = repo.getItems().filter { it.id in ids }
         val entries = ArrayList<Pair<String, File>>()   // zip 相对路径 -> 源文件
+        val seen = HashSet<String>()
         var missing = 0
+        fun collect(abs: String?, kind: String, itemId: Long) {
+            if (abs.isNullOrBlank()) return
+            val f = File(abs)
+            if (!f.exists() || !f.isFile) { missing++; return }
+            val rel = "$kind/$itemId/${f.name}"
+            if (seen.add(rel)) entries.add(rel to f)
+        }
         for (it in items) {
             for (r in repo.allRecords(it.id)) {
-                r.photoPath?.let { p ->
-                    val f = File(p)
-                    if (f.exists() && f.isFile) entries.add("photos/${it.id}/${f.name}" to f) else missing++
-                }
-                r.voicePath?.let { v ->
-                    val f = File(v)
-                    if (f.exists() && f.isFile) entries.add("voices/${it.id}/${f.name}" to f) else missing++
+                collect(r.photoPath, "photos", it.id)
+                collect(r.voicePath, "voices", it.id)
+                // v1.4.0：多图 photoPaths 与随心记 blocks 中的图片/语音
+                RecordMedia.extract(r.extraJson).forEach { (kind, p) ->
+                    // 仅收集绝对路径；已经是相对路径（纯JSON导入产生的记录）无源文件
+                    if (p.startsWith("/") || p.contains(":/")) collect(p, kind, it.id)
                 }
             }
         }

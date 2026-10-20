@@ -33,6 +33,7 @@ import com.zerolab.checkin.ui.settings.AdminMode
 import com.zerolab.checkin.ui.detail.ItemDetailActivity
 import com.zerolab.checkin.ui.flow.CheckinFlow
 import com.zerolab.checkin.util.DateUtils
+import com.zerolab.checkin.util.ImageUtil
 import com.zerolab.checkin.util.formatLatLng
 import java.io.File
 import java.util.Calendar
@@ -55,6 +56,34 @@ class QuickCheckinFragment : Fragment() {
     private var playingVoice: VoicePlayUi? = null  // v1.4.0：详情页语音播放全局状态（按钮+进度条）
     private var progressHandler: android.os.Handler? = null
     private var progressRunnable: Runnable? = null
+
+    // v1.4.0：管理员「添加图片」必须在 STARTED 前注册 launcher，用目标记录挂起
+    private var addPhotoTarget: CheckinRecord? = null
+    private val addPhotosLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()) { uris ->
+        val r = addPhotoTarget
+        addPhotoTarget = null
+        if (r == null || uris.isNullOrEmpty()) return@registerForActivityResult
+        val existing = recordPhotoList(r)
+        val picked = uris.take((9 - existing.size).coerceAtLeast(0))
+        if (picked.isEmpty()) { toast("最多 9 张"); return@registerForActivityResult }
+        Thread {
+            val outDir = File(requireContext().filesDir, "checkin_photos/${r.itemId}")
+            val saved = mutableListOf<String>()
+            picked.forEachIndexed { i, uri ->
+                try {
+                    val src = File(requireContext().cacheDir, "admin_album_${System.currentTimeMillis()}_$i.jpg")
+                    requireContext().contentResolver.openInputStream(uri).use { it?.copyTo(src.outputStream()) }
+                    ImageUtil.compressWebp(src, outDir)?.let { saved.add(it.absolutePath) }
+                } catch (_: Exception) {}
+            }
+            requireActivity().runOnUiThread {
+                if (saved.isEmpty()) { toast("图片读取失败"); return@runOnUiThread }
+                applyPhotoList(r, existing + saved)
+                toast("已添加 ${saved.size} 张")
+                refresh()
+            }
+        }.start()
+    }
 
     override fun onDestroyView() {
         super.onDestroyView()
@@ -860,12 +889,13 @@ class QuickCheckinFragment : Fragment() {
             } else {
                 row.addView(tv)
             }
-            // 媒体内联：该条照片缩略图 + 语音按钮（位于本条文字下方，与其他记录对齐）
+            // 媒体内联：v1.4.0 多图三列宫格（全宽）+ 语音按钮（位于本条文字下方）
+            val photos = recordPhotoList(r)
+            if (photos.isNotEmpty()) row.addView(photoGridView(photos))
             val mediaRow = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, 6, 0, 0)
             }
-            if (r.photoPath?.isNotBlank() == true && File(r.photoPath).exists()) mediaRow.addView(thumbView(File(r.photoPath)))
             if (r.voicePath?.isNotBlank() == true && File(r.voicePath).exists()) mediaRow.addView(voicePlayButton(r.voicePath!!, 0))
             if (mediaRow.childCount > 0) row.addView(mediaRow)
             recordsBox.addView(row)
@@ -876,24 +906,65 @@ class QuickCheckinFragment : Fragment() {
         }
     }
 
-    /** 图片缩略图，点击弹大图 */
-    private fun thumbView(f: File): View {
-        val iv = ImageView(requireContext())
-        val bmp = try { BitmapFactory.decodeFile(f.absolutePath) } catch (_: Exception) { null }
-        iv.setImageBitmap(bmp)
-        iv.scaleType = ImageView.ScaleType.CENTER_CROP
-        val px = (92 * resources.displayMetrics.density).toInt()
-        iv.layoutParams = LinearLayout.LayoutParams(px, px).apply { marginEnd = 8; gravity = Gravity.CENTER_VERTICAL }
-        iv.setOnClickListener {
-            if (bmp == null) { Toast.makeText(requireContext(), "图片无法解码", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            val big = ImageView(requireContext()).apply {
-                setImageBitmap(bmp); adjustViewBounds = true
-                maxHeight = (860 * resources.displayMetrics.density).toInt(); maxWidth = (700 * resources.displayMetrics.density).toInt()
+    /** v1.4.0：读取一条记录的全部图片（extraJson.photoPaths，回退 photoPath），只返回文件存在的 */
+    private fun recordPhotoList(r: com.zerolab.checkin.data.entity.CheckinRecord): List<String> {
+        val list = mutableListOf<String>()
+        try {
+            val o = org.json.JSONObject(r.extraJson ?: "{}")
+            val arr = o.optJSONArray("photoPaths")
+            if (arr != null) for (i in 0 until arr.length()) {
+                arr.optString(i).takeIf { it.isNotBlank() }?.let { list.add(it) }
             }
-            AlertDialog.Builder(requireContext()).setTitle("打卡照片").setView(big)
-                .setPositiveButton("关闭", null).show()
+        } catch (_: Exception) {}
+        if (list.isEmpty() && !r.photoPath.isNullOrBlank()) list.add(r.photoPath)
+        return list.filter { File(it).exists() }
+    }
+
+    /** v1.4.0：朋友圈式三列宫格（全宽，按容器宽度自适应；点任意一张全屏查看）。onLongClick 可选（管理模式长按删除）。 */
+    private fun photoGridView(paths: List<String>, onLongClick: ((String) -> Unit)? = null): View {
+        val ctx = requireContext()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val grid = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(6), 0, 0)
         }
-        return iv
+        val gap = dp(6)
+        // 详情页容器两侧留白合计约 68dp（外层16+卡片14+wrap4）
+        val cellW = (resources.displayMetrics.widthPixels - dp(68) - gap * 2) / 3
+        var row: LinearLayout? = null
+        paths.forEachIndexed { j, path ->
+            if (j % 3 == 0) {
+                row = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 0, 0, gap)
+                }
+                grid.addView(row)
+            }
+            val bmp = try { BitmapFactory.decodeFile(path) } catch (_: Exception) { null }
+            val iv = ImageView(ctx).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setImageBitmap(bmp)
+                layoutParams = LinearLayout.LayoutParams(cellW, cellW).apply {
+                    marginEnd = if (j % 3 < 2) gap else 0
+                }
+                setOnClickListener {
+                    if (onLongClick != null) {
+                        // v1.4.0：管理删除模式下点图片即弹出删除确认（与"点图片删除"提示一致）
+                        onLongClick.invoke(path)
+                    } else {
+                        val big = ImageView(ctx).apply {
+                            setImageBitmap(bmp); adjustViewBounds = true
+                            maxHeight = dp(600); maxWidth = dp(320)
+                        }
+                        AlertDialog.Builder(ctx).setView(big).setPositiveButton("关闭", null).show()
+                    }
+                }
+                if (onLongClick != null) setOnLongClickListener { onLongClick.invoke(path); true }
+            }
+            row?.addView(iv)
+        }
+        return grid
     }
 
     /** 语音播放UI holder：同时记住按钮和进度条，切换时旧UI能复位 */
@@ -1048,15 +1119,21 @@ class QuickCheckinFragment : Fragment() {
                         wrap.addView(tv)
                     }
                 }
-                "photos" -> {
-                    val arr = b.optJSONArray("paths") ?: continue
-                    if (arr.length() == 0) continue
+                "photos", "photo" -> {
+                    // 兼容旧格式：paths[] 数组（新）或直接 path（旧单图）
+                    val pathsArr = b.optJSONArray("paths")
+                    val raw: List<String> = when {
+                        pathsArr != null -> (0 until pathsArr.length()).map { pathsArr.optString(it) }
+                        !b.isNull("path") -> listOf(b.optString("path"))
+                        else -> emptyList()
+                    }
+                    if (raw.isEmpty()) continue
                     // 三列宫格 v1.4.0：按详情页实际容器宽度（外层16+卡片14+wrap4=两侧68dp）计算
                     val grid = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
                     val gap = dp(6)
                     val cellW = (resources.displayMetrics.widthPixels - dp(68) - gap * 2) / 3
                     var row: android.widget.LinearLayout? = null
-                    for (j in 0 until arr.length()) {
+                    for (j in raw.indices) {
                         if (j % 3 == 0) {
                             row = android.widget.LinearLayout(ctx).apply {
                                 orientation = android.widget.LinearLayout.HORIZONTAL
@@ -1064,7 +1141,7 @@ class QuickCheckinFragment : Fragment() {
                             }
                             grid.addView(row)
                         }
-                        val path = arr.optString(j)
+                        val path = raw[j]
                         if (!java.io.File(path).exists()) continue
                         val iv = android.widget.ImageView(ctx).apply {
                             layoutParams = android.widget.LinearLayout.LayoutParams(cellW, cellW).apply {
@@ -1087,14 +1164,20 @@ class QuickCheckinFragment : Fragment() {
                     wrap.addView(grid)
                 }
                 "voice" -> {
-                    val arr = b.optJSONArray("voices") ?: continue
-                    if (arr.length() == 0) continue
-                    for (j in 0 until arr.length()) {
-                        val v = arr.optJSONObject(j) ?: continue
-                        val path = v.optString("path")
-                        if (!java.io.File(path).exists()) continue
-                        val secs = v.optInt("seconds", 0)
-                        wrap.addView(voicePlayButton(path, secs))
+                    // 兼容旧格式：voices[] 数组（新）或直接 path+seconds（旧单条）
+                    val arr = b.optJSONArray("voices")
+                    if (arr != null && arr.length() > 0) {
+                        for (j in 0 until arr.length()) {
+                            val v = arr.optJSONObject(j) ?: continue
+                            val path = v.optString("path")
+                            if (!java.io.File(path).exists()) continue
+                            wrap.addView(voicePlayButton(path, v.optInt("seconds", 0)))
+                        }
+                    } else if (!b.isNull("path")) {
+                        val path = b.optString("path")
+                        if (java.io.File(path).exists()) {
+                            wrap.addView(voicePlayButton(path, b.optInt("seconds", 0)))
+                        }
                     }
                 }
                 "location" -> {
@@ -1157,7 +1240,7 @@ class QuickCheckinFragment : Fragment() {
         opts += "修改状态"
         opts += "修改打卡时间"
         if (!r.textContent.isNullOrBlank()) opts += "修改文字"
-        if (r.photoPath?.isNotBlank() == true) { opts += "更换照片"; opts += "删除图片" }
+        if (recordPhotoList(r).isNotEmpty()) { opts += "添加图片"; opts += "删除图片" }
         if (r.voicePath?.isNotBlank() == true) opts += "删除语音"
         if (r.latitude != null && r.longitude != null) opts += "删除位置"
         opts += "删除整条记录"
@@ -1168,18 +1251,13 @@ class QuickCheckinFragment : Fragment() {
                     "修改状态" -> changeRecordStatus(r)
                     "修改打卡时间" -> editRecordTime(r, date)
                     "修改文字" -> editRecordText(r)
-                    "更换照片" -> replaceRecordPhoto(r)
+                    "添加图片" -> addRecordPhotos(r)
                     "删除位置" -> {
                         repo.updateRecord(r.copy(latitude = null, longitude = null, extraJson = clearLocName(r.extraJson)))
                         toast("已删除位置信息")
                         refresh()
                     }
-                    "删除图片" -> {
-                        try { File(r.photoPath!!).delete() } catch (_: Exception) {}
-                        repo.updateRecord(r.copy(photoPath = null))
-                        toast("已删除该条记录的图片")
-                        refresh()
-                    }
+                    "删除图片" -> showDeletePhotoPicker(r)
                     "删除语音" -> {
                         try { File(r.voicePath!!).delete() } catch (_: Exception) {}
                         repo.updateRecord(r.copy(voicePath = null))
@@ -1228,25 +1306,58 @@ class QuickCheckinFragment : Fragment() {
             }.show()
     }
 
-    /** v1.3.18：管理员——从相册更换该条记录的打卡照片（复制进应用目录，原图删除） */
-    private fun replaceRecordPhoto(r: CheckinRecord) {
-        val launcher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
-            if (uri == null) return@registerForActivityResult
-            try {
-                val dir = File(requireContext().filesDir, "checkin").apply { mkdirs() }
-                val target = File(dir, "admin_${System.currentTimeMillis()}.jpg")
-                requireContext().contentResolver.openInputStream(uri)?.use { ins ->
-                    target.outputStream().use { outs -> ins.copyTo(outs) }
-                }
-                if (target.length() <= 0) { toast("图片读取失败"); return@registerForActivityResult }
-                val old = r.photoPath
-                repo.updateRecord(r.copy(photoPath = target.absolutePath))
-                if (old?.isNotBlank() == true) { try { File(old).delete() } catch (_: Exception) {} }
-                toast("照片已更换")
-                refresh()
-            } catch (e: Exception) { toast("更换照片失败：${e.message}") }
+    /** v1.4.0：把记录的图片列表写回 extraJson.photoPaths + photoPath（第一张，兼容旧版本）；空列表清空全部图片 */
+    private fun applyPhotoList(r: CheckinRecord, paths: List<String>) {
+        val jo = try { org.json.JSONObject(r.extraJson ?: "{}") } catch (_: Exception) { org.json.JSONObject() }
+        if (paths.isEmpty()) {
+            jo.remove("photoPaths")
+            repo.updateRecord(r.copy(photoPath = null, extraJson = if (jo.length() > 0) jo.toString() else null))
+        } else {
+            val arr = org.json.JSONArray(); paths.forEach { arr.put(it) }
+            jo.put("photoPaths", arr)
+            repo.updateRecord(r.copy(photoPath = paths.first(), extraJson = jo.toString()))
         }
-        launcher.launch("image/*")
+    }
+
+    /** v1.4.0：管理员——相册多选追加图片（最多 9 张），压缩后写回 */
+    private fun addRecordPhotos(r: CheckinRecord) {
+        val existing = recordPhotoList(r)
+        if (existing.size >= 9) { toast("最多 9 张"); return }
+        addPhotoTarget = r
+        addPhotosLauncher.launch("image/*")
+    }
+
+    /** v1.4.0：管理员——宫格点选删除某张图片 */
+    private fun showDeletePhotoPicker(r: CheckinRecord) {
+        var photos = recordPhotoList(r)
+        if (photos.isEmpty()) { toast("该记录没有图片"); return }
+        val container = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        fun rebuild() {
+            container.removeAllViews()
+            if (photos.isEmpty()) { container.addView(TextView(requireContext()).apply {
+                text = "（图片已全部删除）"; gravity = Gravity.CENTER; setPadding(0, 40, 0, 40)
+            }); return }
+            container.addView(photoGridView(photos) { path ->
+                AlertDialog.Builder(requireContext())
+                    .setTitle("删除该张图片？")
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("删除") { _, _ ->
+                        try { File(path).delete() } catch (_: Exception) {}
+                        photos = photos.filter { it != path }
+                        applyPhotoList(r, photos)
+                        if (photos.isEmpty()) refresh()
+                        rebuild()
+                    }.show()
+            })
+        }
+        rebuild()
+        AlertDialog.Builder(requireContext())
+            .setTitle("删除图片（点图片删除）")
+            .setView(container)
+            .setPositiveButton("关闭") { _, _ -> refresh() }
+            .show()
     }
 
     /** 修改记录状态（成功 / 补签 / 破戒） */

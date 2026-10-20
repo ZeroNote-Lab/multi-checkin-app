@@ -174,6 +174,15 @@ object JsonImporter {
                 voice = restoreMedia(jo.getString("voicePath"), newItemId, mediaRoot, appFilesDir, "voices")
                 if (voice != null) restoredMedia++ else if (mediaRoot != null) missingMedia++
             }
+            // v1.4.0：extraJson 中的 photoPaths / blocks 图片语音一并恢复，相对路径重写为本机绝对路径
+            val rawExtra = if (jo.isNull("extraJson")) null else jo.getString("extraJson")
+            val restoredExtra = if (rawExtra != null && mediaRoot != null) {
+                RecordMedia.rewrite(rawExtra) { kind, rel ->
+                    val restored = restoreMedia(rel, newItemId, mediaRoot, appFilesDir, kind)
+                    if (restored != null) { restoredMedia++ } else { missingMedia++ }
+                    restored
+                }
+            } else rawExtra
 
             repo.insertRecord(CheckinRecord(
                 itemId = newItemId,
@@ -186,7 +195,7 @@ object JsonImporter {
                 voicePath = voice,
                 latitude = if (jo.isNull("latitude")) null else jo.getDouble("latitude"),
                 longitude = if (jo.isNull("longitude")) null else jo.getDouble("longitude"),
-                extraJson = if (jo.isNull("extraJson")) null else jo.getString("extraJson")
+                extraJson = restoredExtra
             ))
             newRecords++
         }

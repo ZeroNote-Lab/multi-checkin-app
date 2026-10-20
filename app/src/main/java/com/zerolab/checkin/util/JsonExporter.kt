@@ -52,7 +52,8 @@ object JsonExporter {
                 .put("voicePath", r.voicePath?.let { relMediaPath(it, "voices", r.itemId) } ?: JSONObject.NULL)
                 .put("latitude", r.latitude ?: JSONObject.NULL)
                 .put("longitude", r.longitude ?: JSONObject.NULL)
-                .put("extraJson", r.extraJson ?: JSONObject.NULL))
+                // v1.4.0：extraJson 中的 photoPaths / blocks 图片语音也改写为 ZIP 内相对路径
+                .put("extraJson", rewriteExtraForExport(r.extraJson, r.itemId) ?: JSONObject.NULL))
         }
         root.put("checkinRecords", recs)
 
@@ -72,6 +73,14 @@ object JsonExporter {
         val name = abs.substringAfterLast('/')
         if (name.isBlank()) return null
         return "$kind/$itemId/$name"
+    }
+
+    /** v1.4.0：extraJson 中所有媒体绝对路径改写为 ZIP 相对路径；缺失/非绝对路径原样保留。 */
+    private fun rewriteExtraForExport(extraJson: String?, itemId: Long): String? {
+        if (extraJson.isNullOrBlank()) return null
+        return RecordMedia.rewrite(extraJson) { kind, p ->
+            if (p.contains('/')) relMediaPath(p, kind, itemId) ?: p else p
+        }
     }
 
     fun fileName(): String {
