@@ -352,6 +352,8 @@ gradle assembleRelease
 ```
 
 > 本项目未内置 Gradle Wrapper，需使用本机 Gradle 8.5 执行。
+>
+> 签名密码不写入仓库：在本机 `local.properties`（已 gitignore）中配置 `ZEROLAB_STORE_PASSWORD` / `ZEROLAB_KEY_PASSWORD`，或使用同名环境变量；缺失时构建会直接提示缺少签名密码。
 
 ### 安装
 

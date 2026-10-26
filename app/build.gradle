@@ -4,6 +4,25 @@ plugins {
     id 'com.google.devtools.ksp'
 }
 
+// v1.4.2 优化：签名密码不再写进仓库，改从 local.properties（已 gitignore）或环境变量读取。
+// 本机 local.properties 需包含：
+//   ZEROLAB_STORE_PASSWORD=***
+//   ZEROLAB_KEY_PASSWORD=***
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('local.properties')
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def zerolabStorePassword = keystoreProps.getProperty('ZEROLAB_STORE_PASSWORD')
+        ?: System.getenv('ZEROLAB_STORE_PASSWORD') ?: ''
+def zerolabKeyPassword = keystoreProps.getProperty('ZEROLAB_KEY_PASSWORD')
+        ?: System.getenv('ZEROLAB_KEY_PASSWORD') ?: ''
+if (zerolabStorePassword.isEmpty() || zerolabKeyPassword.isEmpty()) {
+    throw new GradleException(
+            "缺少签名密码：请在 local.properties 或环境变量中配置 " +
+                    "ZEROLAB_STORE_PASSWORD / ZEROLAB_KEY_PASSWORD（参考 README 构建说明）")
+}
+
 android {
     namespace 'com.zerolab.checkin'
     compileSdk 34
@@ -20,9 +39,9 @@ android {
     signingConfigs {
         zerolab {
             storeFile file("../zerolab.keystore")
-            storePassword "zerolab2026"
+            storePassword zerolabStorePassword
             keyAlias "zerolab"
-            keyPassword "zerolab2026"
+            keyPassword zerolabKeyPassword
         }
     }
 
