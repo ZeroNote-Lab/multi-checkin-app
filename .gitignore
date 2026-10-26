@@ -37,3 +37,7 @@ design/
 # 根目录临时测试截图
 _test_*.png
 test_*.png
+
+
+# 本地工具脚本（发版冒烟等），不入库；统一放 test/scripts/
+/scripts/
