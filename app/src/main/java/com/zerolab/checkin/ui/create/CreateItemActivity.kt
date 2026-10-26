@@ -67,34 +67,34 @@ class CreateItemActivity : AppCompatActivity() {
         const val EXTRA_CREATED = "created"
     }
 
-    private val repo get() = (application as CheckinApp).repository
+    internal val repo get() = (application as CheckinApp).repository
     private var editId: Long = -1
-    private var editing: CheckinItem? = null
-    private val cfg = ItemConfig()
+    internal var editing: CheckinItem? = null
+    internal val cfg = ItemConfig()
     // v1.4.2 优化：方式参数面板构建器（从本类抽出，定位/NFC/Toast 能力回注）
     // v1.4.2 优化：图标 + 打卡项主题选择器（从本类抽出）
     // v1.4.2 优化：打卡组子项编辑（列表 + 弹层）从本类抽出
-    private lateinit var groupEditor: GroupMemberEditor
+    internal lateinit var groupEditor: GroupMemberEditor
     // v1.4.2 优化：打卡日期区块（状态与渲染）从本类抽出
-    private lateinit var schedule: ScheduleSection
+    internal lateinit var schedule: ScheduleSection
 
     /** 子项列表刷新：编辑器初始化前的早期调用直接跳过 */
-    private fun renderGroupMembersSafe() {
+    internal fun renderGroupMembersSafe() {
         if (::groupEditor.isInitialized) groupEditor.render()
     }
-    private val iconPicker by lazy {
+    internal val iconPicker by lazy {
         IconPicker(this, findViewById(R.id.theme_container)).also { p ->
             p.themeId = selectedTheme
             p.onThemeChanged = { id -> selectedTheme = id }
         }
     }
-    private val methodPanelBuilder by lazy {
+    internal val methodPanelBuilder by lazy {
         MethodPanelBuilder(this, ::toast, ::fetchLocationInDialog, ::bindNfcInDialog)
     }
-    private var selectedTheme = "sakura"
+    internal var selectedTheme = "sakura"
 
-    private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout, val gear: TextView? = null, var built: Boolean = false)
-    private val rows = LinkedHashMap<String, MethodRow>()
+    internal data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout, val gear: TextView? = null, var built: Boolean = false)
+    internal val rows = LinkedHashMap<String, MethodRow>()
     // v1.3.3：日记 tab 把 PHOTO/TEXT/VOICE 的 card 动态移到记录类型之间，记录它们在普通 method_container 里的原 index
     private val journalMethodOrigIndex = HashMap<String, Int>()
     private val journalMethods = setOf(Method.PHOTO.key, Method.TEXT.key, Method.VOICE.key, Method.LOCATION.key)
@@ -105,12 +105,12 @@ class CreateItemActivity : AppCompatActivity() {
     private var etTextMin: EditText? = null
     private var cbTextNoRepeat: CheckBox? = null
     private var cbLocNeg: CheckBox? = null
-    private var tvLocPoints: TextView? = null
+    internal var tvLocPoints: TextView? = null
     private var etSteps: EditText? = null
     private var etTimer: EditText? = null
-    private var tvQr: TextView? = null
-    private var ivQr: ImageView? = null
-    private var tvNfc: TextView? = null
+    internal var tvQr: TextView? = null
+    internal var ivQr: ImageView? = null
+    internal var tvNfc: TextView? = null
     private var etVoice: EditText? = null
     // v1.1.4：需在 lockRules 中一并置灰的控件引用
     private var btnLocFetch: Button? = null
@@ -120,31 +120,31 @@ class CreateItemActivity : AppCompatActivity() {
     private var qrBindBtn: Button? = null
 
     // v1.2.0 随心记模式：普通打卡 / 随心记 chip
-    private var journalMode = false
+    internal var journalMode = false
     // v1.3.22 自定义打卡「更多选项」折叠：false=只显示 名称/图标/方式；true=展开 频率/日期/抵消/锁定
     private var moreExpanded = false
     // v1.3.0 心情日记（日记 tab 内记录类型：false=随心记 true=心情日记）
-    private var moodMode = false
+    internal var moodMode = false
     // v1.3.13 打卡组 / N天打卡 模式状态
-    private var groupMode = false
-    private var ndaysMode = false
-    private var ndaysTarget = 21
+    internal var groupMode = false
+    internal var ndaysMode = false
+    internal var ndaysTarget = 21
     // v1.3.14 打卡组子项：仅支持新增（id 非空=已入库子项，编辑时更新而非新建）
     // v1.3.15：子项携带完整 ItemConfig（每日次数/负打卡/时间规则/抵消/方式参数/自动打卡，弹层更多区编辑）
     // v1.3.14 N天打卡：新建时可选打卡方式（多选组合）
-    private val ndaysMethods = linkedSetOf(Method.NORMAL.key)
+    internal val ndaysMethods = linkedSetOf(Method.NORMAL.key)
     private var modeHint: TextView? = null
     private var comboNRow: LinearLayout? = null
     private var comboNLabel: TextView? = null
     private var comboNMinus: Button? = null
     private var comboNPlus: Button? = null
-    private var comboRequired = 0   // 组合打卡：完成 N 个即完成（0=全部）
+    internal var comboRequired = 0   // 组合打卡：完成 N 个即完成（0=全部）
     // v1.2.0 时间打卡模式：倒计时 / 正计时 / 允许暂停
-    private var rbTimerCountdown: RadioButton? = null
-    private var rbTimerCountup: RadioButton? = null
-    private var cbTimerPausable: CheckBox? = null
+    internal var rbTimerCountdown: RadioButton? = null
+    internal var rbTimerCountup: RadioButton? = null
+    internal var cbTimerPausable: CheckBox? = null
     // v1.3.6 时间打卡强制模式：离开本页（非熄屏）本次计时作废
-    private var cbTimerForce: CheckBox? = null
+    internal var cbTimerForce: CheckBox? = null
     // v1.2.0 扫码绑定现有二维码
     private val qrBindLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         if (res.resultCode == RESULT_OK) {
@@ -162,7 +162,7 @@ class CreateItemActivity : AppCompatActivity() {
     private var nfcAdapter: NfcAdapter? = null
     private var nfcReader: NfcAdapter.ReaderCallback? = null
 
-    private var dailyLimit = 1
+    internal var dailyLimit = 1
 
 
 
@@ -223,7 +223,7 @@ class CreateItemActivity : AppCompatActivity() {
 
         moreExpanded = editing != null   // v1.3.22：编辑默认展开高级卡，新建默认折叠
         if (editing != null) {
-            loadEditing()
+            loadForm()
         } else {
             // v1.3.9：新建按类型选择页传入的模式初始化（普通 / 日记）
             when (createMode) {
@@ -252,7 +252,7 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     // ---------- v1.3.13 打卡组 / N天打卡 ----------
-    private fun applySpecialModeVisibility() {
+    internal fun applySpecialModeVisibility() {
         if (!groupMode && !ndaysMode) return
         findViewById<View>(R.id.journal_panel).visibility = View.GONE
         findViewById<View>(R.id.method_card).visibility = View.GONE
@@ -295,7 +295,7 @@ class CreateItemActivity : AppCompatActivity() {
     // v1.3.19：renderChips / addChipsToGrid 已由 GearChip 机制取代，移除
 
     /** v1.3.23 习惯打卡方式选择：竖排方式行（对齐自定义打卡布局，无⚙），替代 3×3 GearChips 网格 */
-    private fun buildNdaysMethods() {
+    internal fun buildNdaysMethods() {
         val container = findViewById<LinearLayout>(R.id.ndays_method_container)
         container.removeAllViews()
         val candidates = listOf(Method.NORMAL, Method.PHOTO, Method.TEXT, Method.VOICE, Method.LOCATION, Method.STEPS, Method.TIMER, Method.QRCODE, Method.NFC)
@@ -390,7 +390,7 @@ class CreateItemActivity : AppCompatActivity() {
         renderModeChips()
     }
 
-    private fun renderModeChips() {
+    internal fun renderModeChips() {
         val normalTab = findViewById<View>(R.id.tab_normal)
         val journalTab = findViewById<View>(R.id.tab_journal)
         val normalTv = findViewById<TextView>(R.id.tv_tab_normal)
@@ -411,7 +411,7 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     /** v1.3.0：日记 tab 下按记录类型/模式刷新区块与方式行可见性（纯视图，不改配置） */
-    private fun refreshJournalVisibility() {
+    internal fun refreshJournalVisibility() {
         if (groupMode || ndaysMode) return
         val journal = journalMode
         findViewById<View>(R.id.tv_method_title).visibility = if (journal) View.GONE else View.VISIBLE
@@ -630,7 +630,7 @@ class CreateItemActivity : AppCompatActivity() {
         container.addView(comboNRow, 0)
     }
 
-    private fun refreshComboNRow() {
+    internal fun refreshComboNRow() {
         val row = comboNRow ?: return
         val interactive = cfg.methods.filter { it != Method.AUTO.key }
         val n = interactive.size
@@ -731,7 +731,7 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     /** v1.3.24：方式参数内联面板（方案B）——首次开启时构建配置视图 */
-    private fun ensurePanel(m: Method) {
+    internal fun ensurePanel(m: Method) {
         val row = rows[m.key] ?: return
         if (row.built) return
         row.built = true
@@ -934,7 +934,7 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     /** 互斥置灰（v6.1.0：保持可点击，点击时在监听器里弹温馨提示） */
-    private fun refreshConflicts() {
+    internal fun refreshConflicts() {
         val blocked = Method.conflictsWith(cfg.methods)
         val twOn = findViewById<CompoundButton>(R.id.cb_time_window).isChecked
         // v1.2.1：随心记额外禁用 NORMAL/AUTO/NFC/STEPS/TIMER/QRCODE
@@ -1113,7 +1113,7 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     /** v1.2.0：负打卡开启时，时间打卡只保留倒计时（隐藏正计时/暂停选项） */
-    private fun hideTimerAdvancedOptions() {
+    internal fun hideTimerAdvancedOptions() {
         rbTimerCountup?.isChecked = false
         rbTimerCountdown?.isChecked = true
         cbTimerPausable?.isChecked = false
@@ -1201,162 +1201,6 @@ class CreateItemActivity : AppCompatActivity() {
         }
     }
     // ---------- 编辑加载 ----------
-    private fun loadEditing() {
-        val it = editing ?: return
-        val loaded = ItemConfig.parse(it.configJson)
-        // 拷贝到工作 cfg
-        cfg.methods.clear(); cfg.methods.addAll(loaded.methods)
-        cfg.dailyLimit = loaded.dailyLimit; cfg.negative = loaded.negative
-        cfg.dailyAllRequired = loaded.dailyAllRequired // v1.4.0：编辑回显"全部完成"开关
-        cfg.timeWindowEnabled = loaded.timeWindowEnabled; cfg.twStart = loaded.twStart; cfg.twEnd = loaded.twEnd
-        cfg.photoFromCamera = loaded.photoFromCamera; cfg.photoFromAlbum = loaded.photoFromAlbum
-        cfg.textMinWords = loaded.textMinWords; cfg.textNoRepeat = loaded.textNoRepeat
-        cfg.locNegative = loaded.locNegative; cfg.locPoints.clear(); cfg.locPoints.addAll(loaded.locPoints)
-        cfg.stepTarget = loaded.stepTarget; cfg.timerMinutes = loaded.timerMinutes
-        cfg.qrContent = loaded.qrContent.ifBlank { "uuid:" + java.util.UUID.randomUUID() }
-        cfg.nfcTagId = loaded.nfcTagId; cfg.voiceMaxSeconds = loaded.voiceMaxSeconds
-        cfg.offset = loaded.offset
-        // v6.1.0 日期配置回显
-        schedule.mode = loaded.scheduleMode
-        schedule.weekDays.clear(); schedule.weekDays.addAll(loaded.weekDays)
-        if (schedule.weekDays.isEmpty()) schedule.weekDays.addAll(1..5) // 兜底：WEEKDAYS 模式默认周一~五
-        schedule.bigSmallStart = loaded.bigSmallStart
-        // v1.2.0 新字段回显：随心记 / 组合完成数 / 时间打卡模式
-        journalMode = loaded.journalMode
-        // v1.3.0 心情日记回显；v1.3.3：显式同时设置两个 RadioButton，避免 XML 默认 checked 残留
-        moodMode = loaded.moodMode
-        findViewById<RadioButton>(R.id.rb_journal_suixinsui).isChecked = !loaded.moodMode
-        findViewById<RadioButton>(R.id.rb_journal_mood).isChecked = loaded.moodMode
-        findViewById<CheckBox>(R.id.cb_mood_chart).isChecked = loaded.moodChart
-        comboRequired = loaded.comboRequired
-        // v1.3.19：弹窗化后控件不再常驻，配置直接回写 cfg（弹窗打开时读取展示）
-        cfg.timerMode = loaded.timerMode
-        cfg.timerPausable = loaded.timerPausable
-        cfg.timerForce = loaded.timerForce
-        if (loaded.timerMode == "COUNTUP") {
-            rbTimerCountup?.isChecked = true
-            rbTimerCountdown?.isChecked = false
-        } else {
-            rbTimerCountdown?.isChecked = true
-            rbTimerCountup?.isChecked = false
-        }
-        cbTimerPausable?.isChecked = loaded.timerPausable
-        // v1.3.6：强制模式回显；开启时隐藏暂停保存（互斥）
-        cbTimerForce?.isChecked = loaded.timerForce
-        if (loaded.timerForce) {
-            cbTimerPausable?.isChecked = false
-            cbTimerPausable?.visibility = View.GONE
-        }
-        // 负打卡开启时隐藏正计时/暂停选项（保持原倒计时）
-        if (loaded.negative) hideTimerAdvancedOptions()
-
-        // v1.3.12 时间分割回显
-        findViewById<CompoundButton>(R.id.cb_day_cutoff).isChecked = loaded.dayCutoff > 0
-        findViewById<View>(R.id.cutoff_panel).visibility = if (loaded.dayCutoff > 0) View.VISIBLE else View.GONE
-        if (loaded.dayCutoff > 0) {
-            findViewById<Button>(R.id.btn_day_cutoff).text = "%02d:%02d".format(loaded.dayCutoff / 60, loaded.dayCutoff % 60)
-        }
-        findViewById<EditText>(R.id.et_name).setText(it.name)
-        selectedTheme = it.theme
-        iconPicker.selected = if (com.zerolab.checkin.theme.IconManager.isKnown(it.icon)) it.icon else null
-        iconPicker.expanded = false
-        // v1.3.13 打卡组 / N天打卡 回显
-        if (loaded.groupMode) {
-            groupMode = true
-            applySpecialModeVisibility()
-            groupEditor.subs.clear()
-            loaded.groupMembers.forEachIndexed { i, mid ->
-                val m = repo.getItem(mid)
-                val nm = m?.name ?: loaded.groupMemberNames.getOrNull(i) ?: "子项"
-                // v1.3.15：子项携带完整 ItemConfig 回显（后续点击行可直接编辑全部规则）
-                // v1.3.29：回显子项图标（isKnown 校验，未知保持 null → default）
-                val mc = m?.let { ItemConfig.parse(it.configJson) } ?: ItemConfig()
-                if (mc.methods.isEmpty()) mc.methods.add(Method.NORMAL.key)
-                groupEditor.subs.add(GroupMemberEditor.GroupSub(mid, nm, mc, m?.icon?.let { k -> if (com.zerolab.checkin.theme.IconManager.isKnown(k)) k else null }))
-            }
-            renderGroupMembersSafe()
-        }
-        if (loaded.ndaysMode) {
-            ndaysMode = true
-            applySpecialModeVisibility()
-            ndaysTarget = loaded.ndaysTarget.coerceAtLeast(1)
-            findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
-            ndaysMethods.clear()
-            val nms = loaded.methods.filter { it != Method.MOOD.key && it != Method.AUTO.key }.toMutableList()
-            if (nms.isEmpty()) nms.add(Method.NORMAL.key)
-            ndaysMethods.addAll(nms)
-            buildNdaysMethods()
-        }
-        dailyLimit = cfg.dailyLimit
-        findViewById<TextView>(R.id.tv_limit).text = if (dailyLimit < 0) "不限" else dailyLimit.toString()
-        findViewById<CheckBox>(R.id.cb_all_required).isChecked = cfg.dailyAllRequired   // v1.4.0：每日全部完成开关回显
-        findViewById<CompoundButton>(R.id.cb_negative).isChecked = cfg.negative
-        findViewById<CompoundButton>(R.id.cb_time_window).isChecked = cfg.timeWindowEnabled
-        findViewById<View>(R.id.tw_panel).visibility = if (cfg.timeWindowEnabled) View.VISIBLE else View.GONE
-        findViewById<Button>(R.id.btn_tw_start).text = cfg.twStart
-        findViewById<Button>(R.id.btn_tw_end).text = cfg.twEnd
-        findViewById<CheckBox>(R.id.cb_offset).isChecked = cfg.offset.enabled
-        findViewById<View>(R.id.offset_panel).visibility = if (cfg.offset.enabled) View.VISIBLE else View.GONE
-        findViewById<EditText>(R.id.et_offset_n).setText(cfg.offset.nDays.toString())
-        findViewById<EditText>(R.id.et_offset_k).setText(cfg.offset.k.toString())
-        findViewById<CheckBox>(R.id.cb_offset_auto).isChecked = cfg.offset.autoConsume
-        when (cfg.offset.mode) {
-            "B" -> findViewById<RadioButton>(R.id.rb_mode_b).isChecked = true
-            "C" -> findViewById<RadioButton>(R.id.rb_mode_c).isChecked = true
-            else -> findViewById<RadioButton>(R.id.rb_mode_a).isChecked = true
-        }
-        // 修改策略不可改，按已有值展示并锁定
-        findViewById<RadioButton>(R.id.rb_locked).isChecked = it.editPolicy == "LOCKED"
-        findViewById<RadioButton>(R.id.rb_interval).isChecked = it.editPolicy == "INTERVAL_N"
-        findViewById<View>(R.id.interval_panel).visibility = if (it.editPolicy == "INTERVAL_N") View.VISIBLE else View.GONE
-        findViewById<RadioButton>(R.id.rb_locked).isEnabled = false
-        findViewById<RadioButton>(R.id.rb_interval).isEnabled = false
-        findViewById<EditText>(R.id.et_interval).setText((it.editInterval ?: 7).toString())
-
-        // v1.3.11：编辑回显前先懒加载构建所有已开启方式的参数面板
-        cfg.methods.forEach { k -> Method.of(k)?.let { ensurePanel(it) } }
-        // 方式开关回显
-        rows.forEach { (key, row) ->
-            val on = key in cfg.methods
-            row.switch.isChecked = on
-            row.panel.visibility = if (on && !journalMode) View.VISIBLE else View.GONE
-            row.gear?.visibility = if (on && !journalMode && methodPanelBuilder.hasConfig(Method.of(key) ?: Method.NORMAL)) View.VISIBLE else View.GONE
-        }
-        fillParamUi()
-        tvLocPoints?.text = if (cfg.locPoints.isEmpty()) "" else
-            "已设定 ${cfg.locPoints.size} 个标准点：\n" + cfg.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
-        tvQr?.text = "长按上方二维码可保存到相册，用于打印张贴。\n专属内容：${cfg.qrContent}"
-        ivQr?.setImageBitmap(com.zerolab.checkin.util.QrCode.bitmap(cfg.qrContent))
-        tvNfc?.text = if (cfg.nfcTagId.isBlank()) "尚未绑定标签" else "已绑定标签：${cfg.nfcTagId}"
-
-        // v1.3.0：日记项不设修改策略（始终可修改），即使历史 LOCKED 也放行
-        val isDiary = cfg.journalMode || cfg.moodMode
-        // v1.3.17：超级管理员模式放行所有锁定（改内容不改 editPolicy，退出后仍按原策略）
-        // 不可修改策略：规则整体锁定（bug8：之前 LOCKED 仍可改，现在强制生效）
-        if (it.editPolicy == "LOCKED" && !isDiary && !AdminMode.isOn) {
-            lockRules("规则已锁定（创建后不可修改），仅可修改名称/主题")
-        }
-        // INTERVAL_N 锁定期：仅名称/主题可改，其余规则禁用
-        if (it.editPolicy == "INTERVAL_N" && !isDiary && !AdminMode.isOn && it.lastEditDate != null &&
-            DateUtils.daysSince(it.lastEditDate) < (it.editInterval ?: 0)) {
-            lockRules("距上次修改不足 ${it.editInterval} 天，规则暂不可改")
-        }
-        // 自动方式核心规则锁定
-        if (Method.AUTO.key in cfg.methods && !AdminMode.isOn) lockRules("自动打卡类型创建后核心规则不可改")
-        // v6.1.0 日期区块回显
-        schedule.render()
-        iconPicker.themeId = selectedTheme; iconPicker.render()
-        // v1.2.0：随心记模式回显 + 禁用态
-        renderModeChips()
-        refreshJournalVisibility()   // v1.3.0 双 tab 可见性
-        refreshConflicts()
-        refreshComboNRow()
-        // v1.3.3：编辑已有日记项时，记录类型（随心记/心情日记）锁定不可切换；方式开关仍可改
-        if (journalMode) {
-            findViewById<RadioButton>(R.id.rb_journal_suixinsui).isEnabled = false
-            findViewById<RadioButton>(R.id.rb_journal_mood).isEnabled = false
-        }
-    }
 
     private var locked = false
 
@@ -1364,7 +1208,7 @@ class CreateItemActivity : AppCompatActivity() {
     // 供 lockRules 一并锁定（此前仅锁定自定义方式行 rows，习惯/组面板在 LOCKED 下仍可改）
     private val switchSwitches = LinkedHashMap<String, SwitchCompat>()
     private val switchPanels = LinkedHashMap<String, LinearLayout>()
-    private fun lockRules(msg: String) {
+    internal fun lockRules(msg: String) {
         locked = true
         toast(msg)
         // v1.3.27：内联方式面板内部控件一并锁定（v1.3.24 内联化后 panel 内控件此前未被锁定，
@@ -1427,7 +1271,7 @@ class CreateItemActivity : AppCompatActivity() {
         }
     }
 
-    private fun fillParamUi() {
+    internal fun fillParamUi() {
         cbPhotoCamera?.isChecked = cfg.photoFromCamera
         cbPhotoAlbum?.isChecked = cfg.photoFromAlbum
         etTextMin?.setText(cfg.textMinWords.toString())
