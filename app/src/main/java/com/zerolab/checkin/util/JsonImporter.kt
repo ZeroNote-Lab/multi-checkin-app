@@ -89,7 +89,10 @@ object JsonImporter {
                         groupTag = if (jo.isNull("groupTag")) null else jo.optString("groupTag", "").ifEmpty { null },
                         editPolicy = jo.optString("editPolicy", local.editPolicy),
                         editInterval = if (jo.isNull("editInterval")) null else jo.optLong("editInterval").toInt(),
-                        lastEditDate = if (jo.isNull("lastEditDate")) null else jo.optString("lastEditDate", "")
+                        // v1.4.2 优化：导出文件没带 lastEditDate 时保留本机值，
+                        // 避免导入把「N 天可改一次」的最后修改日清空、锁定期被重置
+                        lastEditDate = if (jo.has("lastEditDate") && !jo.isNull("lastEditDate"))
+                            jo.optString("lastEditDate", "") else local.lastEditDate
                     ))
                 }
                 newId = local.id
@@ -103,6 +106,11 @@ object JsonImporter {
                     theme = jo.optString("theme", "sakura"),
                     groupTag = if (jo.isNull("groupTag")) null else jo.optString("groupTag", "").ifEmpty { null },
                     sortOrder = (locals.maxOfOrNull { it.sortOrder } ?: 0) + 1,
+                    // v1.4.2 优化：新建项恢复导出文件里的置顶 / 暂停状态（此前暂停项导入后会变回启用）
+                    isPinned = if (jo.optBoolean("isPinned", false)) 1 else 0,
+                    pinnedAt = if (jo.isNull("pinnedAt")) null
+                        else jo.optLong("pinnedAt", 0L).takeIf { it > 0L },
+                    isActive = if (jo.optBoolean("isActive", true)) 1 else 0,
                     editPolicy = jo.optString("editPolicy", "LOCKED"),
                     editInterval = if (jo.isNull("editInterval")) null else jo.optLong("editInterval").toInt(),
                     lastEditDate = if (jo.isNull("lastEditDate")) null else jo.optString("lastEditDate", ""),

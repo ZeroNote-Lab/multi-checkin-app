@@ -46,6 +46,8 @@ android {
     }
     buildFeatures {
         viewBinding false
+        // v1.4.2 优化：导出 JSON 的 appVersion 需要读取 BuildConfig.VERSION_NAME
+        buildConfig true
     }
     packaging {
         resources {

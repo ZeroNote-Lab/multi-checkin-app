@@ -18,7 +18,8 @@ object JsonExporter {
         root.put("exportVersion", "1.2")
         root.put("exportTime", System.currentTimeMillis())
         root.put("appName", "打卡APP")
-        root.put("appVersion", "6.0.0")
+        // v1.4.2 优化：版本号不再硬编码，跟随构建配置
+        root.put("appVersion", com.zerolab.checkin.BuildConfig.VERSION_NAME)
         val items = if (ids == null) repo.getItems()
             else repo.getItems().filter { it.id in ids }
         val quickId = repo.getQuickId()
@@ -37,6 +38,8 @@ object JsonExporter {
                 .put("isActive", it.isActive == 1)
                 .put("editPolicy", it.editPolicy)
                 .put("editInterval", it.editInterval ?: JSONObject.NULL)
+                // v1.4.2 优化：补上最后修改日期，导入后「N 天可改一次」的锁定期不会丢
+                .put("lastEditDate", it.lastEditDate ?: JSONObject.NULL)
                 .put("createdAt", it.createdAt)
                 .put("updatedAt", it.updatedAt))
         }
