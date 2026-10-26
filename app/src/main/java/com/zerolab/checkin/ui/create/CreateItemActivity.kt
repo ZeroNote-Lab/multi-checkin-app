@@ -1,4 +1,4 @@
-package com.zerolab.checkin.ui.create
+﻿package com.zerolab.checkin.ui.create
 
 import android.Manifest
 import android.app.TimePickerDialog
@@ -68,10 +68,25 @@ class CreateItemActivity : AppCompatActivity() {
     private var editId: Long = -1
     private var editing: CheckinItem? = null
     private val cfg = ItemConfig()
+    // v1.4.2 优化：方式参数面板构建器（从本类抽出，定位/NFC/Toast 能力回注）
+    // v1.4.2 优化：图标 + 打卡项主题选择器（从本类抽出）
+    // v1.4.2 优化：打卡组子项编辑（列表 + 弹层）从本类抽出
+    private lateinit var groupEditor: GroupMemberEditor
+
+    /** 子项列表刷新：编辑器初始化前的早期调用直接跳过 */
+    private fun renderGroupMembersSafe() {
+        if (::groupEditor.isInitialized) groupEditor.render()
+    }
+    private val iconPicker by lazy {
+        IconPicker(this, findViewById(R.id.theme_container)).also { p ->
+            p.themeId = selectedTheme
+            p.onThemeChanged = { id -> selectedTheme = id }
+        }
+    }
+    private val methodPanelBuilder by lazy {
+        MethodPanelBuilder(this, ::toast, ::fetchLocationInDialog, ::bindNfcInDialog)
+    }
     private var selectedTheme = "sakura"
-    // v1.3.18：图标选择（独立于配色主题）；null=未选（编辑旧数据时无高亮）
-    private var selectedIcon: String? = null
-    private var iconExpanded = false
 
     private data class MethodRow(val switch: SwitchCompat, val panel: LinearLayout, val card: LinearLayout, val gear: TextView? = null, var built: Boolean = false)
     private val rows = LinkedHashMap<String, MethodRow>()
@@ -111,8 +126,6 @@ class CreateItemActivity : AppCompatActivity() {
     private var ndaysTarget = 21
     // v1.3.14 打卡组子项：仅支持新增（id 非空=已入库子项，编辑时更新而非新建）
     // v1.3.15：子项携带完整 ItemConfig（每日次数/负打卡/时间规则/抵消/方式参数/自动打卡，弹层更多区编辑）
-    private data class GroupSub(var id: Long?, var name: String, val config: ItemConfig, var icon: String? = null)
-    private val groupSubs = mutableListOf<GroupSub>()
     // v1.3.14 N天打卡：新建时可选打卡方式（多选组合）
     private val ndaysMethods = linkedSetOf(Method.NORMAL.key)
     private var modeHint: TextView? = null
@@ -134,7 +147,7 @@ class CreateItemActivity : AppCompatActivity() {
             if (!content.isNullOrBlank()) {
                 cfg.qrContent = content
                 tvQr?.text = "已绑定现有二维码：\n${content.take(48)}${if (content.length > 48) "…" else ""}"
-                ivQr?.setImageBitmap(makeQrBitmap(content))
+                ivQr?.setImageBitmap(com.zerolab.checkin.util.QrCode.bitmap(content))
                 toast("二维码绑定成功 ✓")
             } else toast("未读取到二维码内容")
         } else toast("已取消扫码绑定")
@@ -186,8 +199,17 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.rb_journal_mood).visibility = if (showRecordType) View.VISIBLE else View.GONE
         findViewById<View>(R.id.tv_journal_type_label).visibility = if (showRecordType) View.VISIBLE else View.GONE
 
-        buildThemeChips()
-        initGroupMemberList()   // v1.3.28：打卡组子项列表 RecyclerView（长按手柄拖动排序），须在 applySpecialModeVisibility 前初始化
+        iconPicker.render()   // v1.4.2 优化：图标 / 主题选择器
+        // v1.4.2 优化：打卡组子项编辑（列表 + 弹层）抽到 GroupMemberEditor
+        groupEditor = GroupMemberEditor(
+            host = this,
+            themeProvider = { selectedTheme },
+            toast = ::toast,
+            buildSwitchRows = { c, cand, sel, target, onChanged ->
+                buildSwitchMethodRows(c, cand, sel, target, onChanged)
+            }
+        )
+        groupEditor.init()   // 须在 applySpecialModeVisibility 前初始化
         // v1.3.11：同步构建；方式行外壳轻量构建 + 参数面板懒加载，保证页面快速且一次性完整出现
         buildModeSection()   // v1.3.0 打卡类型双 tab（普通打卡 / 日记打卡），在方式开关之前构建
         buildMethodRows()
@@ -245,7 +267,7 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<View>(R.id.group_card).visibility = if (groupMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.btn_group_more).visibility = if (groupMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.btn_more).visibility = if (ndaysMode) View.VISIBLE else View.GONE   // v1.3.30：习惯打卡更多可用（每日次数/时间规则）；组仍隐藏
-        if (groupMode) renderGroupMembers()
+        if (groupMode) renderGroupMembersSafe()
     }
 
     private fun bindSpecialModeControls() {
@@ -257,7 +279,7 @@ class CreateItemActivity : AppCompatActivity() {
             ndaysTarget = (ndaysTarget + 1).coerceAtMost(999)
             findViewById<TextView>(R.id.tv_ndays_target).text = "$ndaysTarget 天"
         }
-        findViewById<View>(R.id.btn_group_add_new).setOnClickListener { showGroupSubSheet(null) }
+        findViewById<View>(R.id.btn_group_add_new).setOnClickListener { groupEditor.showSheet(null) }
         // v1.3.16：更多选项（卡片外左下角链接）→ 展开/收起打卡日期卡
         findViewById<View>(R.id.btn_group_more).setOnClickListener {
             val card = findViewById<View>(R.id.schedule_card)
@@ -268,481 +290,8 @@ class CreateItemActivity : AppCompatActivity() {
         buildNdaysMethods()
     }
 
-    // ---------- v1.3.28：打卡组子项列表 RecyclerView + 长按手柄拖动排序（对齐打卡选择页；顺序随 groupSubs 落库到 groupMembers） ----------
-    private lateinit var groupAdapter: GroupSubAdapter
-    private lateinit var groupTouch: ItemTouchHelper
+    // ---------- v1.4.2：打卡组子项编辑委托给 GroupMemberEditor（顺序随 groupMembers 落库） ----------
 
-    private fun initGroupMemberList() {
-        val list = findViewById<RecyclerView>(R.id.group_member_list)
-        list.layoutManager = LinearLayoutManager(this)
-        groupAdapter = GroupSubAdapter()
-        list.adapter = groupAdapter
-        groupTouch = ItemTouchHelper(object : ItemTouchHelper.Callback() {
-            override fun getMovementFlags(rv: RecyclerView, vh: RecyclerView.ViewHolder): Int =
-                makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
-            override fun onMove(rv: RecyclerView, src: RecyclerView.ViewHolder, dst: RecyclerView.ViewHolder): Boolean {
-                val from = src.bindingAdapterPosition; val to = dst.bindingAdapterPosition
-                if (from < 0 || to < 0 || from == to) return false
-                val s = groupSubs.removeAt(from); groupSubs.add(to, s)
-                groupAdapter.notifyItemMoved(from, to)
-                return true
-            }
-            override fun onSwiped(vh: RecyclerView.ViewHolder, direction: Int) {}
-            override fun isLongPressDragEnabled() = false // 由子项行拖动手柄触发
-        })
-        groupTouch.attachToRecyclerView(list)
-    }
-
-    private fun renderGroupMembers() {
-        if (!::groupAdapter.isInitialized) return
-        groupAdapter.notifyDataSetChanged()
-    }
-
-    private inner class GroupSubAdapter : RecyclerView.Adapter<GroupSubAdapter.VH>() {
-        /** 子项行：拖动手柄 ≡ + 主题色图标底 + 名称 + 规则摘要 + ✕ 删除；点击整行编辑 */
-        inner class VH(
-            val row: View,
-            val icon: TextView,
-            val name: TextView,
-            val summary: TextView,
-            val handle: TextView,
-            val del: TextView
-        ) : RecyclerView.ViewHolder(row)
-
-        override fun getItemCount() = groupSubs.size
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-            fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-            val theme = ThemeManager.of(selectedTheme)
-            val row = LinearLayout(this@CreateItemActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                background = getDrawable(R.drawable.bg_input)
-                setPadding(10, 10, 8, 10)
-                val lp = RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT)
-                lp.topMargin = 6
-                layoutParams = lp
-            }
-            val handle = TextView(this@CreateItemActivity).apply {
-                text = "≡"
-                textSize = 18f
-                setTextColor(0xFF9AA5B0.toInt())
-                setPadding(0, 0, 8, 0)
-            }
-            row.addView(handle)
-            val iconWrap = LinearLayout(this@CreateItemActivity).apply {
-                gravity = Gravity.CENTER
-                background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(theme.soft) }
-                layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
-            }
-            val icon = TextView(this@CreateItemActivity).apply { textSize = 17f }
-            iconWrap.addView(icon)
-            row.addView(iconWrap)
-            val col = LinearLayout(this@CreateItemActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                lp.marginStart = dp(10)
-                layoutParams = lp
-            }
-            val name = TextView(this@CreateItemActivity).apply {
-                textSize = 14f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(0xFF1F2430.toInt())
-            }
-            val summary = TextView(this@CreateItemActivity).apply {
-                textSize = 11f
-                setTextColor(0xFF6E7F78.toInt())
-                setPadding(0, dp(2), 0, 0)
-            }
-            col.addView(name); col.addView(summary)
-            row.addView(col)
-            val del = TextView(this@CreateItemActivity).apply {
-                text = " ✕"
-                textSize = 14f
-                setTextColor(0xFFB0534C.toInt())
-                setPadding(16, 0, 6, 0)
-            }
-            row.addView(del)
-            return VH(row, icon, name, summary, handle, del)
-        }
-
-        override fun onBindViewHolder(h: VH, position: Int) {
-            val s = groupSubs[position]
-            // v1.3.29：子项行显示子项自身图标（未选 default → 主题 emoji 回退）
-            h.icon.text = com.zerolab.checkin.theme.IconManager.emojiFor(s.icon ?: "default", selectedTheme)
-            h.name.text = s.name
-            val c = s.config
-            val base = methodLabel(c.methods)
-            val extra = mutableListOf<String>()
-            if (c.dailyLimit > 1) extra.add("每日${c.dailyLimit}次")
-            if (c.negative) extra.add("负打卡")
-            if (c.timeWindowEnabled) extra.add("时段")
-            if (c.dayCutoff >= 0) extra.add("时间分割")
-            if (c.offset.enabled) extra.add("🛡️抵消")
-            if (Method.AUTO.key in c.methods) extra.add("自动")
-            h.summary.text = if (extra.isEmpty()) base else "$base   ·  ${extra.joinToString(" / ")}"
-            h.row.setOnClickListener { showGroupSubSheet(s) }
-            h.handle.setOnLongClickListener { groupTouch.startDrag(h); true }
-            h.del.setOnClickListener {
-                val p = h.bindingAdapterPosition
-                if (p >= 0) { groupSubs.removeAt(p); notifyItemRemoved(p) }
-            }
-        }
-    }
-
-    private fun methodLabel(methods: Set<String>): String =
-        methods.mapNotNull { Method.of(it) }.joinToString("  ") { "${it.emoji} ${it.label}" }
-
-    /** v1.3.14 新增/编辑子项底部弹层：名称 + 打卡方式多选（互斥置灰） */
-    /** v1.3.15：方式区下方加「更多选项」展开普通打卡除日期外的全部功能；步数方式禁用 */
-    private fun showGroupSubSheet(s: GroupSub?) {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
-        // v1.3.16：禁 BottomSheet 拖拽手势，滚动完全交给内部 ScrollView（修复拉到底再回拉顶部空白消失）
-        try {
-            sheet.behavior.isDraggable = false
-            sheet.behavior.skipCollapsed = true
-            sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
-        } catch (_: Exception) {}
-        // v1.3.15：编辑已有子项直接操作 s.config；新建用局部 ItemConfig，确定时写入 groupSubs
-        val cfgSub = s?.config ?: ItemConfig()
-        val cur = cfgSub.methods
-        if (cur.isEmpty()) cur.add(Method.NORMAL.key)
-        // v1.3.15：弹层内容超高（更多选项展开）时需可滚动，外层套 ScrollView
-        val scroll = ScrollView(this).apply { isFillViewport = false }
-        val wrap = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(24))
-        }
-        wrap.addView(TextView(this).apply {
-            text = if (s == null) "新增打卡项" else "编辑打卡项"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF1F2430.toInt())
-        })
-        val et = EditText(this).apply {
-            hint = "子项名称，如：喝水"
-            textSize = 14f
-            setPadding(24, 18, 24, 18)
-            background = getDrawable(R.drawable.bg_input)
-            setTextColor(0xFF1F2430.toInt())
-            filters = arrayOf(android.text.InputFilter.LengthFilter(12))
-            if (s != null) setText(s.name)
-        }
-        et.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        (et.layoutParams as LinearLayout.LayoutParams).topMargin = dp(12)
-        wrap.addView(et)
-        // v1.3.29：子项自主图标——名称下方图标网格（收起常用 5 个 + 展开全部；复用普通项 iconCell/iconMoreCell）
-        wrap.addView(TextView(this).apply {
-            text = "图标"
-            textSize = 12f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF6E7F78.toInt())
-            setPadding(0, dp(14), 0, dp(8))
-        })
-        var subIcon = s?.icon
-        var iconExpanded = false
-        val iconGrid = android.widget.GridLayout(this).apply {
-            columnCount = 6
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        fun renderSubIcons() {
-            iconGrid.removeAllViews()
-            val shown = if (iconExpanded) com.zerolab.checkin.theme.IconManager.all
-                        else {
-                            val commons = com.zerolab.checkin.theme.IconManager.common.take(5).toMutableList()
-                            val selIcon = subIcon?.let { k -> com.zerolab.checkin.theme.IconManager.all.firstOrNull { it.key == k } }
-                            if (selIcon != null && commons.none { it.key == selIcon.key }) commons[4] = selIcon
-                            commons
-                        }
-            shown.forEach { ic ->
-                val cell = iconCell(ic, subIcon)
-                cell.setOnClickListener { subIcon = ic.key; renderSubIcons() }
-                iconGrid.addView(cell)
-            }
-            val more = iconMoreCell(iconExpanded)
-            more.setOnClickListener { iconExpanded = !iconExpanded; renderSubIcons() }
-            iconGrid.addView(more)
-        }
-        renderSubIcons()
-        wrap.addView(iconGrid)
-        wrap.addView(TextView(this).apply {
-            text = "打卡方式"
-            textSize = 12f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF6E7F78.toInt())
-            setPadding(0, dp(14), 0, dp(8))
-        })
-        val methodBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        val candidates = listOf(Method.NORMAL, Method.PHOTO, Method.TEXT, Method.VOICE, Method.LOCATION, Method.STEPS, Method.TIMER, Method.QRCODE, Method.NFC)
-        // v1.3.23：竖排方式行（对齐自定义打卡布局，无⚙）；勾选可配置方式立即弹配置弹窗
-        buildSwitchMethodRows(methodBox, candidates, cur, cfgSub) {
-            chipsClickListenerRefresh?.invoke()
-        }
-        wrap.addView(methodBox)
-        // v1.3.15：更多选项入口（展开高级功能）
-        val moreBtn = TextView(this).apply {
-            text = "更多选项 ▾"
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF6E7F78.toInt())
-            setPadding(0, dp(10), 0, dp(2))
-        }
-        wrap.addView(moreBtn)
-        val moreBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-        }
-        buildGroupMoreSection(moreBox, cfgSub, cur)
-        wrap.addView(moreBox)
-        moreBtn.setOnClickListener {
-            val showing = moreBox.visibility == View.VISIBLE
-            moreBox.visibility = if (showing) View.GONE else View.VISIBLE
-            moreBtn.text = if (showing) "更多选项 ▾" else "收起 ▴"
-        }
-        val btnRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) }
-        }
-        btnRow.addView(TextView(this).apply {
-            text = "取消"
-            textSize = 14f
-            gravity = Gravity.CENTER
-            setPadding(0, dp(12), 0, dp(12))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setOnClickListener { sheet.dismiss() }
-        })
-        btnRow.addView(TextView(this).apply {
-            text = "确定"
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setPadding(0, dp(12), 0, dp(12))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setOnClickListener {
-                val nm = et.text.toString().trim()
-                if (nm.isBlank()) { toast("子项名称不能为空"); return@setOnClickListener }
-                if (groupSubs.any { it !== s && it.name == nm }) { toast("组内已有同名子项"); return@setOnClickListener }
-                if (Method.LOCATION.key in cfgSub.methods && cfgSub.locPoints.isEmpty()) { toast("位置打卡需先配置一个标准位置"); return@setOnClickListener }
-                if (Method.NFC.key in cfgSub.methods && cfgSub.nfcTagId.isBlank()) { toast("NFC打卡需先绑定 NFC 标签"); return@setOnClickListener }
-                if (Method.QRCODE.key in cfgSub.methods && cfgSub.qrContent.isBlank()) { toast("扫码打卡需先生成专属二维码"); return@setOnClickListener }
-                if (Method.PHOTO.key in cfgSub.methods && !cfgSub.photoFromCamera && !cfgSub.photoFromAlbum) { toast("拍照打卡需至少勾选一种图片来源"); return@setOnClickListener }
-                if (s == null) groupSubs.add(GroupSub(null, nm, cfgSub, subIcon)) else { s.name = nm; s.icon = subIcon }
-                renderGroupMembers()
-                sheet.dismiss()
-            }
-        })
-        wrap.addView(btnRow)
-        scroll.addView(wrap)
-        sheet.setContentView(scroll)
-        sheet.show()
-    }
-
-    /** v1.3.15：子项弹层更多区——普通打卡除「日期选择」外的全部功能（每日次数/负打卡/时间规则/抵消/自动/方式参数） */
-    private fun buildGroupMoreSection(box: LinearLayout, c: ItemConfig, cur: MutableSet<String>) {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        // v1.3.16：更多区可用性刷新（对齐普通打卡页：负打卡/自动打卡锁次数，次数<2 禁用全部完成）
-        var refreshMoreConflicts: () -> Unit = {}
-        fun divider() { box.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) }
-            background = getDrawable(R.color.divider)
-        }) }
-        fun sectionTitle(t: String) { box.addView(TextView(this).apply {
-            text = t; textSize = 12f; typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF6E7F78.toInt())
-            setPadding(0, dp(10), 0, dp(4))
-        }) }
-        fun toggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit): CheckBox {
-            val cb = CheckBox(this).apply {
-                text = label; textSize = 13f; setTextColor(0xFF1F2430.toInt())
-                isChecked = checked
-                setOnCheckedChangeListener { _, on -> onChange(on) }
-            }
-            box.addView(cb)
-            return cb
-        }
-        divider()
-        // —— 频率 ——
-        sectionTitle("频率与规则")
-        val limitRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        }
-        limitRow.addView(TextView(this).apply {
-            text = "每日打卡次数"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        val tvLimit = TextView(this).apply {
-            text = "${c.dailyLimit}"; textSize = 14f; gravity = Gravity.CENTER; typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF1F2430.toInt())
-            layoutParams = LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        val btnLimitMinus = Button(this).apply {
-            text = "-"; textSize = 14f; setPadding(0, 0, 0, 0)
-            setOnClickListener { c.dailyLimit = (c.dailyLimit - 1).coerceAtLeast(1); tvLimit.text = "${c.dailyLimit}"; refreshMoreConflicts() }
-        }
-        limitRow.addView(btnLimitMinus)
-        limitRow.addView(tvLimit)
-        val btnLimitPlus = Button(this).apply {
-            text = "+"; textSize = 14f; setPadding(0, 0, 0, 0)
-            setOnClickListener { c.dailyLimit = (c.dailyLimit + 1).coerceAtMost(99); tvLimit.text = "${c.dailyLimit}"; refreshMoreConflicts() }
-        }
-        limitRow.addView(btnLimitPlus)
-        box.addView(limitRow)
-        // v1.3.16：全部完成开关——对齐普通打卡页可用性（次数>=2 且 单方式 且 非负打卡 且 非自动打卡），否则整行置灰
-        val cbAll = CheckBox(this).apply {
-            text = "需完成全部次数才算打卡成功"
-            textSize = 13f; setTextColor(0xFF1F2430.toInt())
-            isChecked = c.dailyAllRequired
-            setOnCheckedChangeListener { _, on -> c.dailyAllRequired = on }
-        }
-        box.addView(cbAll)
-        divider()
-        // —— 负打卡 ——
-        toggleRow("负打卡：无操作=成功，主动记录=破戒失败", c.negative) { on ->
-            c.negative = on
-            if (on && Method.AUTO.key in c.methods) {
-                c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key)
-                toast("负打卡与自动打卡互斥，已关闭自动")
-            }
-            refreshMoreConflicts()
-        }
-        divider()
-        // —— 时间规则（先建两个面板与开关，再统一绑定互斥监听，避免前向引用） ——
-        sectionTitle("时间规则（二选一）")
-        val twPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            visibility = if (c.timeWindowEnabled) View.VISIBLE else View.GONE
-            setPadding(dp(12), 0, 0, 0)
-        }
-        twPanel.addView(TextView(this).apply { text = "开始 "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        twPanel.addView(Button(this).apply {
-            text = c.twStart; textSize = 13f
-            setOnClickListener {
-                val hm = c.twStart.split(":")
-                TimePickerDialog(this@CreateItemActivity, { _, h, m ->
-                    c.twStart = "%02d:%02d".format(h, m); (this as Button).text = c.twStart
-                }, hm[0].toInt(), hm[1].toInt(), true).show()
-            }
-        })
-        twPanel.addView(TextView(this).apply { text = " 结束 "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        twPanel.addView(Button(this).apply {
-            text = c.twEnd; textSize = 13f
-            setOnClickListener {
-                val hm = c.twEnd.split(":")
-                TimePickerDialog(this@CreateItemActivity, { _, h, m ->
-                    c.twEnd = "%02d:%02d".format(h, m); (this as Button).text = c.twEnd
-                }, hm[0].toInt(), hm[1].toInt(), true).show()
-            }
-        })
-        box.addView(twPanel)
-        val cutoffPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            visibility = if (c.dayCutoff >= 0) View.VISIBLE else View.GONE
-            setPadding(dp(12), 0, 0, 0)
-        }
-        cutoffPanel.addView(TextView(this).apply { text = "分割时间 00:00 – "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        cutoffPanel.addView(Button(this).apply {
-            text = "%02d:%02d".format(if (c.dayCutoff >= 0) c.dayCutoff / 60 else 3, if (c.dayCutoff >= 0) c.dayCutoff % 60 else 0)
-            textSize = 13f
-            setOnClickListener {
-                val h = if (c.dayCutoff >= 0) c.dayCutoff / 60 else 3
-                val m = if (c.dayCutoff >= 0) c.dayCutoff % 60 else 0
-                TimePickerDialog(this@CreateItemActivity, { _, hh, mm ->
-                    c.dayCutoff = hh * 60 + mm; (this as Button).text = "%02d:%02d".format(hh, mm)
-                }, h, m, true).show()
-            }
-        })
-        cutoffPanel.addView(TextView(this).apply { text = " 打卡算前一天"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        box.addView(cutoffPanel)
-        val twCb = CheckBox(this).apply {
-            text = "固定时间段打卡"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
-            isChecked = c.timeWindowEnabled
-        }
-        val cbCutoff = CheckBox(this).apply {
-            text = "时间分割：该时间前打卡算前一天"; textSize = 13f; setTextColor(0xFF1F2430.toInt())
-            isChecked = c.dayCutoff >= 0
-        }
-        box.addView(twCb); box.addView(cbCutoff)
-        twCb.setOnCheckedChangeListener { _, on ->
-            c.timeWindowEnabled = on
-            if (on) { c.dayCutoff = -1; cbCutoff.isChecked = false; cutoffPanel.visibility = View.GONE }
-            if (on && Method.AUTO.key in c.methods) {
-                c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key)
-                toast("固定时间段与自动打卡互斥，已关闭自动")
-            }
-            twPanel.visibility = if (on) View.VISIBLE else View.GONE
-        }
-        cbCutoff.setOnCheckedChangeListener { _, on ->
-            c.dayCutoff = if (on) 180 else -1
-            if (on) { c.timeWindowEnabled = false; twCb.isChecked = false; twPanel.visibility = View.GONE }
-            cutoffPanel.visibility = if (on) View.VISIBLE else View.GONE
-        }
-        divider()
-        // —— 抵消机制 ——
-        val offPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            visibility = if (c.offset.enabled) View.VISIBLE else View.GONE
-            setPadding(dp(12), 0, 0, 0)
-        }
-        val etOffN = EditText(this).apply {
-            setText("${c.offset.nDays}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            textSize = 13f; background = getDrawable(R.drawable.bg_input)
-            layoutParams = LinearLayout.LayoutParams(dp(56), LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        val etOffK = EditText(this).apply {
-            setText("${c.offset.k}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            textSize = 13f; background = getDrawable(R.drawable.bg_input)
-            layoutParams = LinearLayout.LayoutParams(dp(56), LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        offPanel.addView(TextView(this).apply { text = "连续"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        offPanel.addView(etOffN)
-        offPanel.addView(TextView(this).apply { text = " 天得 "; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        offPanel.addView(etOffK)
-        offPanel.addView(TextView(this).apply { text = " 次（可累积）"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        box.addView(offPanel)
-        // v1.3.15：合并为单一监听（visibility 与数字回写同在一个 onChange，避免被后设 listener 覆盖）
-        toggleRow("连续打卡抵消机制（🛡️可补漏签）", c.offset.enabled) { on ->
-            c.offset.enabled = on
-            offPanel.visibility = if (on) View.VISIBLE else View.GONE
-            if (on) {
-                val n = etOffN.text.toString().toIntOrNull() ?: 7
-                val k = etOffK.text.toString().toIntOrNull() ?: 1
-                c.offset.nDays = n; c.offset.k = k
-            } else { etOffN.clearFocus(); etOffK.clearFocus() }
-        }
-        // —— 自动打卡 ——
-        toggleRow("自动打卡（前台打开 App 自动完成）", Method.AUTO.key in c.methods) { on ->
-            if (on) {
-                if (c.negative) { toast("负打卡与自动打卡互斥，无法开启自动") }
-                else if (c.timeWindowEnabled) { toast("固定时间段与自动打卡互斥，无法开启自动") }
-                else { c.methods.add(Method.AUTO.key); cur.add(Method.AUTO.key) }
-            } else { c.methods.remove(Method.AUTO.key); cur.remove(Method.AUTO.key) }
-            refreshMoreConflicts()
-        }
-        divider()
-        // v1.3.19：方式参数改弹窗式（点已选方式上的 ⚙ 配置），不再内嵌参数区
-        // v1.3.16：可用性刷新实现（负打卡/自动打卡 → 次数锁定；次数<2/多方式/负/自动 → 全部完成禁用）
-        refreshMoreConflicts = {
-            val negOn = c.negative
-            val autoOn = Method.AUTO.key in c.methods
-            val limitLocked = negOn || autoOn
-            btnLimitMinus.isEnabled = !limitLocked; btnLimitPlus.isEnabled = !limitLocked
-            btnLimitMinus.alpha = if (limitLocked) 0.4f else 1f; btnLimitPlus.alpha = if (limitLocked) 0.4f else 1f
-            val singleMethod = c.methods.count { it != Method.AUTO.key } <= 1
-            val canAllReq = !negOn && !autoOn && singleMethod && c.dailyLimit >= 2
-            cbAll.isEnabled = canAllReq
-            cbAll.alpha = if (canAllReq) 1f else 0.4f
-            if (!canAllReq) { cbAll.isChecked = false; c.dailyAllRequired = false }
-        }
-        refreshMoreConflicts()
-        // 方式 chips 变化时刷新可用性
-        chipsClickListenerRefresh = { refreshMoreConflicts() }
-    }
-
-    /** v1.3.15：子项弹层方式点击后刷新参数区（由 buildGroupMoreSection 注入） */
-    private var chipsClickListenerRefresh: (() -> Unit)? = null
 
     // v1.3.19：renderChips / addChipsToGrid 已由 GearChip 机制取代，移除
 
@@ -757,7 +306,7 @@ class CreateItemActivity : AppCompatActivity() {
     private fun saveGroup() {
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
         if (name.isBlank()) { toast("请填写打卡组名称"); return }
-        if (groupSubs.isEmpty()) { toast("请至少添加一个子项"); return }
+        if (groupEditor.subs.isEmpty()) { toast("请至少添加一个子项"); return }
         val now = System.currentTimeMillis()
         cfg.groupMode = true
         cfg.methods.clear(); cfg.methods.add(Method.NORMAL.key)
@@ -772,7 +321,7 @@ class CreateItemActivity : AppCompatActivity() {
             if (editing != null) {
                 gid = editing!!.id
                 // v1.3.14：编辑时不再保留的旧成员解除 groupTag，恢复为独立普通打卡项
-                val keepIds = groupSubs.mapNotNull { it.id }.toSet()
+                val keepIds = groupEditor.subs.mapNotNull { it.id }.toSet()
                 cfg.groupMembers.filter { it !in keepIds }.forEach { mid ->
                     repo.getItem(mid)?.let { repo.updateItem(it.copy(groupTag = null, updatedAt = now)) }
                 }
@@ -786,7 +335,7 @@ class CreateItemActivity : AppCompatActivity() {
                 gid = repo.insertItem(group)
             }
             val memberIds = mutableListOf<Long>()
-            groupSubs.forEach { s ->
+            groupEditor.subs.forEach { s ->
                 if (s.id != null && repo.getItem(s.id!!) != null) {
                     // v1.3.15：编辑已有子项——全量覆盖配置（每日次数/负打卡/时间规则/抵消/方式参数/自动），不限于方式
                     // v1.3.29：子项图标跟随弹窗选择（未选保持 default）
@@ -809,7 +358,7 @@ class CreateItemActivity : AppCompatActivity() {
                 }
             }
             cfg.groupMembers.clear(); cfg.groupMembers.addAll(memberIds)
-            cfg.groupMemberNames.clear(); cfg.groupMemberNames.addAll(groupSubs.map { it.name })
+            cfg.groupMemberNames.clear(); cfg.groupMemberNames.addAll(groupEditor.subs.map { it.name })
             if (editing != null) {
                 repo.updateItem(editing!!.copy(name = name, theme = selectedTheme, icon = finalIconKey(), configJson = cfg.toJson(), updatedAt = now))
                 runOnUiThread { finish() }
@@ -827,139 +376,9 @@ class CreateItemActivity : AppCompatActivity() {
     }
 
     // ---------- v1.3.13 打卡组 / N天打卡 ----------
-    // ---------- 主题 ----------
-    private fun buildThemeChips() {
-        // v1.3.19：图标选择（六列；收起态一行 5 常用 + 更多格；展开全部 21）
-        val container = findViewById<LinearLayout>(R.id.theme_container)
-        renderIconGrid(container)
-    }
-
-    private fun renderIconGrid(container: LinearLayout) {
-        container.removeAllViews()
-        val grid = android.widget.GridLayout(this).apply {
-            columnCount = 6
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        // v1.3.19：收起态只显示前 5 个常用图标 + 更多格（一行六列）；扩展图标不提前露出
-        // 编辑回显：当前图标不在常用 5 个时，替换第 5 格使其可见（保证用户能看到已选图标）
-        val shown = if (iconExpanded) com.zerolab.checkin.theme.IconManager.all
-                    else {
-                        val commons = com.zerolab.checkin.theme.IconManager.common.take(5).toMutableList()
-                        val selIcon = selectedIcon?.let { s -> com.zerolab.checkin.theme.IconManager.all.firstOrNull { it.key == s } }
-                        if (selIcon != null && commons.none { it.key == selIcon.key }) commons[4] = selIcon
-                        commons
-                    }
-        shown.forEach { ic ->
-            val cell = iconCell(ic, selectedIcon)
-            cell.setOnClickListener {
-                selectedIcon = ic.key
-                renderIconGrid(container)
-            }
-            grid.addView(cell)
-        }
-        val more = iconMoreCell(iconExpanded)
-        more.setOnClickListener {
-            iconExpanded = !iconExpanded
-            renderIconGrid(container)
-        }
-        grid.addView(more)
-        container.addView(grid)
-
-        // v1.3.24：图标下方新增主题选择（8 套点缀色；打卡按钮跟随全局主题，主题仅做卡片/点缀）
-        fun tdp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        container.addView(TextView(this).apply {
-            text = "主题"
-            textSize = 12f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF6E7F78.toInt())
-            setPadding(0, tdp(12), 0, tdp(6))
-        })
-        val themeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        }
-        com.zerolab.checkin.theme.ThemeManager.themes.forEach { t ->
-            val cell = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                lp.bottomMargin = tdp(4)
-                layoutParams = lp
-            }
-            val dot = View(this).apply {
-                val d = tdp(26)
-                layoutParams = LinearLayout.LayoutParams(d, d)
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(t.primary)
-                    setStroke(tdp(2), if (t.id == selectedTheme) 0xFF1F2430.toInt() else 0x00000000)
-                }
-            }
-            cell.addView(dot)
-            cell.addView(TextView(this).apply {
-                text = t.name; textSize = 10f; gravity = Gravity.CENTER
-                setTextColor(if (t.id == selectedTheme) 0xFF1F2430.toInt() else 0xFF9AA1B2.toInt())
-            })
-            cell.setOnClickListener {
-                selectedTheme = t.id
-                renderIconGrid(container)
-            }
-            themeRow.addView(cell)
-        }
-        container.addView(themeRow)
-    }
-
-    /** v1.3.19：图标格——纯图标居中、无文字；selKey 为当前选中 key（v1.3.29 泛化供子项弹窗复用） */
-    private fun iconCell(ic: com.zerolab.checkin.theme.ItemIcon, selKey: String?): View {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        val sel = ic.key == selKey
-        val v = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            val lp = android.widget.GridLayout.LayoutParams().apply {
-                width = 0; height = dp(48)   // v1.3.22：圆角正方形；v1.3.23：列宽均分随容器自适应，防溢出
-                setMargins(dp(4), dp(4), dp(4), dp(4))
-                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
-            }
-            layoutParams = lp
-        }
-        v.background = GradientDrawable().apply {
-            cornerRadius = dp(12).toFloat()
-            setColor(if (sel) 0xFFE4F6EC.toInt() else 0xFFFFFFFF.toInt())
-            setStroke(if (sel) dp(2) else dp(1), if (sel) 0xFF2FBF71.toInt() else 0xFFE3EAE5.toInt())
-        }
-        v.addView(TextView(this).apply { text = ic.emoji; textSize = 22f; gravity = Gravity.CENTER })
-        return v
-    }
-
-    /** v1.3.19：更多/收起格——纯图标无文字 */
-    private fun iconMoreCell(expanded: Boolean): View {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        val v = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            val lp = android.widget.GridLayout.LayoutParams().apply {
-                width = 0; height = dp(48)   // v1.3.22：圆角正方形；v1.3.23：列宽均分随容器自适应，防溢出
-                setMargins(dp(4), dp(4), dp(4), dp(4))
-                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
-            }
-            layoutParams = lp
-        }
-        v.background = GradientDrawable().apply {
-            cornerRadius = dp(12).toFloat()
-            setColor(if (expanded) 0xFFFFFFFF.toInt() else 0x00000000)
-            setStroke(dp(1), 0xFFC4D2CA.toInt())
-        }
-        v.addView(TextView(this).apply {
-            text = if (expanded) "▴" else "+"; textSize = 22f
-            setTextColor(0xFF7E9188.toInt()); gravity = Gravity.CENTER
-        })
-        return v
-    }
-
     /** 最终保存的 icon key：优先选中项；编辑未重选时保持原值；新建未选择时随机挑一个（v1.3.19） */
     private fun finalIconKey(): String =
-        selectedIcon ?: editing?.icon ?: com.zerolab.checkin.theme.IconManager.all.random().key
+        iconPicker.selected ?: editing?.icon ?: com.zerolab.checkin.theme.IconManager.all.random().key
 
     /** v1.3.24：按列表序轮转 FloraTheme——仅用于打卡组子项的自动配色（组子项无独立主题选择） */
     private fun autoThemeFor(): String = ThemeManager.themes[(repo.itemCount()) % ThemeManager.themes.size].id
@@ -1295,7 +714,7 @@ class CreateItemActivity : AppCompatActivity() {
                         rows[k]?.let { r -> r.switch.isChecked = false; r.panel.visibility = View.GONE }
                     }
                     cfg.methods.add(m.key)
-                    if (!journalMode && hasMethodConfig(m)) { ensurePanel(m); panel.visibility = View.VISIBLE }
+                    if (!journalMode && methodPanelBuilder.hasConfig(m)) { ensurePanel(m); panel.visibility = View.VISIBLE }
                     val names = cancel.mapNotNull { Method.of(it)?.label }.joinToString("、")
                     toast(if (names.isEmpty()) "已切换为「${m.label}」" else "已切换为「${m.label}」，${names}已关闭")
                     refreshConflicts()
@@ -1317,7 +736,7 @@ class CreateItemActivity : AppCompatActivity() {
         val row = rows[m.key] ?: return
         if (row.built) return
         row.built = true
-        row.panel.addView(buildMethodPanel(m, cfg))
+        row.panel.addView(methodPanelBuilder.build(m, cfg))
     }
 
     private fun sectionLabel(text: String): TextView = TextView(this).apply {
@@ -1475,194 +894,6 @@ class CreateItemActivity : AppCompatActivity() {
         setTextColor(0xFF1F2430.toInt()); background = getDrawable(R.drawable.bg_input); setPadding(24, 18, 24, 18)
     }
 
-    /** 是否有可配置项（决定 ⚙ 是否显示） */
-    private fun hasMethodConfig(m: Method): Boolean = when (m) {
-        Method.PHOTO, Method.TEXT, Method.LOCATION, Method.TIMER, Method.QRCODE, Method.NFC, Method.VOICE -> true
-        else -> false
-    }
-
-    /** v1.3.24：方式规则配置内联面板（方案B，替代弹窗）；直接读写 target（cfg / cfgSub），返回视图由调用方挂载 */
-    private fun buildMethodPanel(m: Method, target: ItemConfig): LinearLayout {
-        fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 8, 0, 0)
-        }
-        when (m) {
-            Method.PHOTO -> {
-                box.addView(CheckBox(this).apply {
-                    text = "允许拍照"; isChecked = target.photoFromCamera; setTextColor(0xFF1F2430.toInt())
-                    setOnCheckedChangeListener { _, on -> target.photoFromCamera = on }
-                })
-                box.addView(CheckBox(this).apply {
-                    text = "允许相册"; isChecked = target.photoFromAlbum; setTextColor(0xFF1F2430.toInt())
-                    setOnCheckedChangeListener { _, on -> target.photoFromAlbum = on }
-                })
-            }
-            Method.TEXT -> {
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                row.addView(TextView(this).apply { text = "最低字数 "; textSize = 14f; setTextColor(0xFF1F2430.toInt()) })
-                val et = EditText(this).apply {
-                    setText("${target.textMinWords}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                    textSize = 14f; background = getDrawable(R.drawable.bg_input)
-                    layoutParams = LinearLayout.LayoutParams(dp(80), LinearLayout.LayoutParams.WRAP_CONTENT)
-                }
-                et.setOnFocusChangeListener(null)
-                // v1.3.30：TextWatcher 实时写入（同时长参数修复）
-                et.addTextChangedListener(object : android.text.TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-                    override fun onTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-                    override fun afterTextChanged(s: android.text.Editable?) {
-                        s?.toString()?.toIntOrNull()?.let { target.textMinWords = it.coerceIn(1, 99) }
-                    }
-                })
-                row.addView(et)
-                row.addView(TextView(this).apply { text = " 字"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
-                box.addView(row)
-                box.addView(CheckBox(this).apply {
-                    text = "不可与上次内容重复"; isChecked = target.textNoRepeat; setTextColor(0xFF1F2430.toInt())
-                    setOnCheckedChangeListener { _, on -> target.textNoRepeat = on }
-                })
-            }
-            Method.LOCATION -> {
-                box.addView(CheckBox(this).apply {
-                    text = "负打卡：离开标准点即破戒"; isChecked = target.locNegative; setTextColor(0xFF1F2430.toInt())
-                    setOnCheckedChangeListener { _, on -> target.locNegative = on }
-                })
-                val tv = TextView(this).apply {
-                    textSize = 12f; setTextColor(0xFF6E7F78.toInt()); setPadding(0, 4, 0, 0)
-                }
-                fun refreshLoc() {
-                    tv.text = if (target.locPoints.isEmpty()) "尚未设定标准位置"
-                        else "已设定 ${target.locPoints.size} 个标准点：\n" + target.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
-                }
-                refreshLoc()
-                box.addView(tv)
-                box.addView(Button(this).apply {
-                    text = "获取当前位置作为标准点"; textSize = 13f
-                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) }
-                    setOnClickListener { fetchLocationInDialog(target, tv) { refreshLoc() } }
-                })
-            }
-            Method.TIMER -> {
-                box.addView(TextView(this).apply { text = "计时方式"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()); setPadding(0, 8, 0, 4) })
-                val rbCount = RadioButton(this).apply {
-                    id = android.view.View.generateViewId()   // v1.3.30：必须显式 id，否则 RadioGroup 互斥失效（NO_ID 时 check(-1) 短路，两个可同选）
-                    text = "倒计时"; isChecked = target.timerMode != "COUNTUP"; setTextColor(0xFF1F2430.toInt())
-                }
-                val rbUp = RadioButton(this).apply {
-                    id = android.view.View.generateViewId()
-                    text = "正计时"; isChecked = target.timerMode == "COUNTUP"; setTextColor(0xFF1F2430.toInt())
-                }
-                // v1.3.30：倒计时/正计时包进 RadioGroup 保证互斥（此前直接 addView 可同时勾选）
-                val rg = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-                rg.addView(rbCount); rg.addView(rbUp)
-                box.addView(rg)
-                rbCount.setOnCheckedChangeListener { _, on -> if (on) target.timerMode = "COUNTDOWN" }
-                rbUp.setOnCheckedChangeListener { _, on -> if (on) target.timerMode = "COUNTUP" }
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                row.addView(TextView(this).apply { text = "时长 "; textSize = 14f; setTextColor(0xFF1F2430.toInt()) })
-                val et = EditText(this).apply {
-                    setText("${target.timerMinutes}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                    textSize = 14f; background = getDrawable(R.drawable.bg_input)
-                    layoutParams = LinearLayout.LayoutParams(dp(80), LinearLayout.LayoutParams.WRAP_CONTENT)
-                }
-                // v1.3.30：TextWatcher 实时写入（原失焦写入——收键盘/直接保存时不触发失焦导致值丢失，显示回默认）
-                et.addTextChangedListener(object : android.text.TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-                    override fun onTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-                    override fun afterTextChanged(s: android.text.Editable?) {
-                        s?.toString()?.toIntOrNull()?.let { target.timerMinutes = it.coerceAtLeast(1) }
-                    }
-                })
-                row.addView(et)
-                row.addView(TextView(this).apply { text = " 分钟"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
-                box.addView(row)
-                val cbPause = CheckBox(this).apply {
-                    text = "可暂停保存（仅正计时）"; isChecked = target.timerPausable; setTextColor(0xFF1F2430.toInt())
-                }
-                val cbForce = CheckBox(this).apply {
-                    text = "强制模式（离开本页即失败，熄屏除外）"; isChecked = target.timerForce; setTextColor(0xFF1F2430.toInt())
-                }
-                box.addView(cbPause); box.addView(cbForce)
-                cbPause.setOnCheckedChangeListener { _, on ->
-                    if (on && target.timerMode != "COUNTUP") { cbPause.isChecked = false; toast("暂停保存仅支持正计时") }
-                    else target.timerPausable = on
-                }
-                cbForce.setOnCheckedChangeListener { _, on ->
-                    target.timerForce = on
-                    if (on) { target.timerPausable = false; cbPause.isChecked = false; cbPause.visibility = View.GONE }
-                    else cbPause.visibility = View.VISIBLE
-                }
-                if (target.timerForce) { cbPause.isChecked = false; cbPause.visibility = View.GONE }
-                // 负打卡开启时强制倒计时（对齐主页面 hideTimerAdvancedOptions）
-                if (target.negative) { rbUp.isChecked = false; rbUp.isEnabled = false; cbPause.visibility = View.GONE }
-            }
-            Method.QRCODE -> {
-                val iv = ImageView(this).apply {
-                    layoutParams = LinearLayout.LayoutParams(dp(220), dp(220)).apply { gravity = Gravity.CENTER_HORIZONTAL }
-                }
-                fun renderQr() { iv.setImageBitmap(makeQrBitmap(target.qrContent.ifBlank { "uuid:" + java.util.UUID.randomUUID() })) }
-                renderQr()
-                box.addView(iv, 0)
-                box.addView(TextView(this).apply {
-                    text = "长按二维码保存到相册，可打印张贴"; textSize = 12f; setTextColor(0xFF6E7F78.toInt()); gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, 6, 0, 0)
-                })
-                iv.setOnLongClickListener {
-                    val content = target.qrContent.ifBlank { "uuid:" + java.util.UUID.randomUUID() }
-                    if (target.qrContent.isBlank()) { target.qrContent = content }
-                    makeQrBitmap(content)?.let { saveQrToGallery(it, content) }
-                    true
-                }
-                box.addView(Button(this).apply {
-                    text = "重新绑定新二维码"; textSize = 13f
-                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) }
-                    setOnClickListener {
-                        target.qrContent = "uuid:" + java.util.UUID.randomUUID()
-                        renderQr()
-                        toast("已生成新二维码")
-                    }
-                })
-            }
-            Method.NFC -> {
-                val tv = TextView(this).apply {
-                    textSize = 13f; setTextColor(0xFF1F2430.toInt()); setPadding(0, 4, 0, 0)
-                    text = if (target.nfcTagId.isBlank()) "尚未绑定 NFC 标签" else "已绑定标签：${target.nfcTagId}"
-                }
-                box.addView(tv)
-                box.addView(Button(this).apply {
-                    text = if (target.nfcTagId.isBlank()) "绑定 NFC 标签" else "重新绑定 NFC 标签"; textSize = 13f
-                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) }
-                    setOnClickListener { bindNfcInDialog(target, tv) }
-                })
-            }
-            Method.VOICE -> {
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                row.addView(TextView(this).apply { text = "最长 "; textSize = 14f; setTextColor(0xFF1F2430.toInt()) })
-                val et = EditText(this).apply {
-                    setText("${target.voiceMaxSeconds}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                    textSize = 14f; background = getDrawable(R.drawable.bg_input)
-                    layoutParams = LinearLayout.LayoutParams(dp(80), LinearLayout.LayoutParams.WRAP_CONTENT)
-                }
-                et.setOnFocusChangeListener(null)
-                // v1.3.30：TextWatcher 实时写入（同时长参数修复）
-                et.addTextChangedListener(object : android.text.TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-                    override fun onTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-                    override fun afterTextChanged(s: android.text.Editable?) {
-                        s?.toString()?.toIntOrNull()?.let { target.voiceMaxSeconds = it.coerceAtLeast(1) }
-                    }
-                })
-                row.addView(et)
-                row.addView(TextView(this).apply { text = " 秒"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
-                box.addView(row)
-            }
-            else -> box.addView(TextView(this).apply { text = "点击打卡即完成，无需额外设置。"; textSize = 13f; setTextColor(0xFF6E7F78.toInt()) })
-        }
-        // v1.3.24：内联面板无保存按钮——配置即写；完整性校验由 save()/子项确定时兜底
-        return box
-    }
-
     // ---------- v1.3.23 竖排方式选择行（对齐自定义打卡布局，替代 GearChip 3×3 网格） ----------
     /**
      * 每个打卡方式一张卡片、一行（左 emoji+名称，右 Switch），竖排；无 ⚙。
@@ -1703,12 +934,12 @@ class CreateItemActivity : AppCompatActivity() {
                     // v1.3.24：配置面板随选中状态展开/收起
                     // v1.3.31：编辑回显/程序刷新时懒构建面板内容（同自定义打卡 ensurePanel 逻辑，
                     // 此前只切 VISIBLE 不构建内容 → 编辑已开启方式时面板空白，需关→开才显示）
-                    if (selected && hasMethodConfig(m) && panels[m.key]?.childCount == 0) {
-                        panels[m.key]?.addView(buildMethodPanel(m, target))
+                    if (selected && methodPanelBuilder.hasConfig(m) && panels[m.key]?.childCount == 0) {
+                        panels[m.key]?.addView(methodPanelBuilder.build(m, target))
                         // v1.3.32：懒构建的面板内容在已锁定时立即禁用
                         if (locked) disableSubtree(panels[m.key]!!)
                     }
-                    panels[m.key]?.visibility = if (selected && hasMethodConfig(m)) View.VISIBLE else View.GONE
+                    panels[m.key]?.visibility = if (selected && methodPanelBuilder.hasConfig(m)) View.VISIBLE else View.GONE
                 }
             } finally { refreshing = false }
         }
@@ -1769,8 +1000,8 @@ class CreateItemActivity : AppCompatActivity() {
                         }
                         sel.add(mk)
                         // v1.3.24：配置内联展开在方式卡片下方（方案B，不再弹窗）
-                        if (hasMethodConfig(m)) {
-                            if (panels[mk]?.childCount == 0) panels[mk]?.addView(buildMethodPanel(m, target))
+                        if (methodPanelBuilder.hasConfig(m)) {
+                            if (panels[mk]?.childCount == 0) panels[mk]?.addView(methodPanelBuilder.build(m, target))
                             panels[mk]?.visibility = View.VISIBLE
                         }
                     }
@@ -2176,13 +1407,13 @@ class CreateItemActivity : AppCompatActivity() {
         }
         findViewById<EditText>(R.id.et_name).setText(it.name)
         selectedTheme = it.theme
-        selectedIcon = if (com.zerolab.checkin.theme.IconManager.isKnown(it.icon)) it.icon else null
-        iconExpanded = false
+        iconPicker.selected = if (com.zerolab.checkin.theme.IconManager.isKnown(it.icon)) it.icon else null
+        iconPicker.expanded = false
         // v1.3.13 打卡组 / N天打卡 回显
         if (loaded.groupMode) {
             groupMode = true
             applySpecialModeVisibility()
-            groupSubs.clear()
+            groupEditor.subs.clear()
             loaded.groupMembers.forEachIndexed { i, mid ->
                 val m = repo.getItem(mid)
                 val nm = m?.name ?: loaded.groupMemberNames.getOrNull(i) ?: "子项"
@@ -2190,9 +1421,9 @@ class CreateItemActivity : AppCompatActivity() {
                 // v1.3.29：回显子项图标（isKnown 校验，未知保持 null → default）
                 val mc = m?.let { ItemConfig.parse(it.configJson) } ?: ItemConfig()
                 if (mc.methods.isEmpty()) mc.methods.add(Method.NORMAL.key)
-                groupSubs.add(GroupSub(mid, nm, mc, m?.icon?.let { k -> if (com.zerolab.checkin.theme.IconManager.isKnown(k)) k else null }))
+                groupEditor.subs.add(GroupMemberEditor.GroupSub(mid, nm, mc, m?.icon?.let { k -> if (com.zerolab.checkin.theme.IconManager.isKnown(k)) k else null }))
             }
-            renderGroupMembers()
+            renderGroupMembersSafe()
         }
         if (loaded.ndaysMode) {
             ndaysMode = true
@@ -2238,13 +1469,13 @@ class CreateItemActivity : AppCompatActivity() {
             val on = key in cfg.methods
             row.switch.isChecked = on
             row.panel.visibility = if (on && !journalMode) View.VISIBLE else View.GONE
-            row.gear?.visibility = if (on && !journalMode && hasMethodConfig(Method.of(key) ?: Method.NORMAL)) View.VISIBLE else View.GONE
+            row.gear?.visibility = if (on && !journalMode && methodPanelBuilder.hasConfig(Method.of(key) ?: Method.NORMAL)) View.VISIBLE else View.GONE
         }
         fillParamUi()
         tvLocPoints?.text = if (cfg.locPoints.isEmpty()) "" else
             "已设定 ${cfg.locPoints.size} 个标准点：\n" + cfg.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
         tvQr?.text = "长按上方二维码可保存到相册，用于打印张贴。\n专属内容：${cfg.qrContent}"
-        ivQr?.setImageBitmap(makeQrBitmap(cfg.qrContent))
+        ivQr?.setImageBitmap(com.zerolab.checkin.util.QrCode.bitmap(cfg.qrContent))
         tvNfc?.text = if (cfg.nfcTagId.isBlank()) "尚未绑定标签" else "已绑定标签：${cfg.nfcTagId}"
 
         // v1.3.0：日记项不设修改策略（始终可修改），即使历史 LOCKED 也放行
@@ -2266,7 +1497,7 @@ class CreateItemActivity : AppCompatActivity() {
         renderSchedulePanels()
         renderWeekDayChips()
         renderBigSmallChips()
-        findViewById<LinearLayout>(R.id.theme_container)?.let { renderIconGrid(it) }
+        iconPicker.themeId = selectedTheme; iconPicker.render()
         // v1.2.0：随心记模式回显 + 禁用态
         renderModeChips()
         refreshJournalVisibility()   // v1.3.0 双 tab 可见性
@@ -2396,39 +1627,6 @@ class CreateItemActivity : AppCompatActivity() {
         val comboTotal = cfg.methods.filter { it != Method.AUTO.key }.size
         cfg.comboRequired = if (comboTotal <= 1) 0 else if (comboRequired !in 1 until comboTotal) 0 else comboRequired
         // v1.3.19：计时模式/暂停保存/强制模式由配置弹窗直接写入 cfg，此处不再读取面板控件
-    }
-
-    /** 生成二维码位图（ZXing，600x600） */
-    private fun makeQrBitmap(content: String): Bitmap? = try {
-        val size = 600
-        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size,
-            mapOf(EncodeHintType.MARGIN to 1))
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        for (x in 0 until size) for (y in 0 until size)
-            bmp.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
-        bmp
-    } catch (e: Exception) { null }
-
-    /** 长按二维码保存到相册（API 29+ 走 MediaStore 无权限；API 24-28 走 insertImage） */
-    private fun saveQrToGallery(bmp: Bitmap, content: String) {
-        try {
-            val name = "checkin_qr_${System.currentTimeMillis()}.png"
-            if (Build.VERSION.SDK_INT >= 29) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/打卡APP")
-                }
-                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                if (uri != null) {
-                    contentResolver.openOutputStream(uri)?.use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                    toast("二维码已保存到相册（Pictures/打卡APP）")
-                } else toast("保存失败")
-            } else {
-                val url = MediaStore.Images.Media.insertImage(contentResolver, bmp, name, content)
-                toast(if (url != null) "二维码已保存到相册" else "保存失败")
-            }
-        } catch (e: Exception) { toast("保存失败：${e.message}") }
     }
 
     private fun save() {
