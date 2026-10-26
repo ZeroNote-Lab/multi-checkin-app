@@ -72,6 +72,8 @@ class CreateItemActivity : AppCompatActivity() {
     // v1.4.2 优化：图标 + 打卡项主题选择器（从本类抽出）
     // v1.4.2 优化：打卡组子项编辑（列表 + 弹层）从本类抽出
     private lateinit var groupEditor: GroupMemberEditor
+    // v1.4.2 优化：打卡日期区块（状态与渲染）从本类抽出
+    private lateinit var schedule: ScheduleSection
 
     /** 子项列表刷新：编辑器初始化前的早期调用直接跳过 */
     private fun renderGroupMembersSafe() {
@@ -159,14 +161,7 @@ class CreateItemActivity : AppCompatActivity() {
 
     private var dailyLimit = 1
 
-    // v6.1.0 打卡日期配置
-    private var scheduleMode = "DAILY"               // DAILY / WEEKDAYS / DOUBLE_REST / BIGSMALL
-    private val weekDays = linkedSetOf<Int>()        // 1=周一 … 7=周日
-    private var bigSmallStart = "BIG"                // BIG / SMALL
-    private lateinit var weekDaysPanel: LinearLayout
-    private lateinit var bigSmallPanel: LinearLayout
-    private lateinit var scheduleHint: TextView
-    private val weekDayChips = LinkedHashMap<Int, TextView>()
+
 
     private val locPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) fetchLocation() else toast("需要定位权限获取当前位置")
@@ -216,7 +211,8 @@ class CreateItemActivity : AppCompatActivity() {
         // v1.3.3：记录日记方式在普通列表里的原 index
         val mc = findViewById<LinearLayout>(R.id.method_container)
         journalMethods.forEach { k -> journalMethodOrigIndex[k] = mc.indexOfChild(rows[k]!!.card) }
-        buildScheduleSection()
+        schedule = ScheduleSection(this, { journalMode }, ::toast)
+        schedule.build(findViewById(R.id.schedule_container))
         bindRuleControls()
         bindOffset()
         bindPolicy()
@@ -312,9 +308,9 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.methods.clear(); cfg.methods.add(Method.NORMAL.key)
         cfg.dailyLimit = 1
         // v1.3.15：组可设置打卡日期（模式A每天/B每周几/C双休/D大小周），不再固定每日
-        cfg.scheduleMode = scheduleMode
-        cfg.weekDays.clear(); cfg.weekDays.addAll(weekDays)
-        cfg.bigSmallStart = bigSmallStart
+        cfg.scheduleMode = schedule.mode
+        cfg.weekDays.clear(); cfg.weekDays.addAll(schedule.weekDays)
+        cfg.bigSmallStart = schedule.bigSmallStart
         cfg.negative = false; cfg.timeWindowEnabled = false; cfg.offset.enabled = false; cfg.dayCutoff = -1
         thread {
             val gid: Long
@@ -743,151 +739,6 @@ class CreateItemActivity : AppCompatActivity() {
         this.text = text; textSize = 12f; setTextColor(0xFF6B7280.toInt()); setPadding(0, 16, 0, 6)
     }
 
-    // ---------- 打卡日期（v6.1.0 新增） ----------
-    private val scheduleModeChips = LinkedHashMap<String, TextView>()
-    private lateinit var bigChip: TextView
-    private lateinit var smallChip: TextView
-    private lateinit var bsHint: TextView
-
-    private fun scheduleChip(text: String, selected: Boolean, onClick: () -> Unit): TextView =
-        TextView(this).apply {
-            this.text = text; textSize = 13f; gravity = Gravity.CENTER
-            setPadding(24, 12, 24, 12)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.marginEnd = 10
-            layoutParams = lp
-            setOnClickListener {
-                // v1.2.0：随心记不设排期，点击弹提示
-                if (journalMode) {
-                    toast("随心记不设排期，暂不支持调整打卡日期")
-                    return@setOnClickListener
-                }
-                onClick()
-            }
-            applyScheduleChipStyle(this, selected)
-        }
-
-    private fun applyScheduleChipStyle(tv: TextView, selected: Boolean) {
-        val bg = GradientDrawable()
-        bg.cornerRadius = 20f
-        bg.setColor(if (selected) 0xFF3A4152.toInt() else 0xFFEEF1F6.toInt())
-        tv.background = bg
-        tv.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
-        tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-    }
-
-    private fun buildScheduleSection() {
-        val container = findViewById<LinearLayout>(R.id.schedule_container)
-        // 模式选择行
-        val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val modes = listOf(
-            "DAILY" to "每天",
-            "WEEKDAYS" to "每周固定几天",
-            "DOUBLE_REST" to "双休",
-            "BIGSMALL" to "大小周"
-        )
-        modes.forEach { (mode, label) ->
-            val tv = scheduleChip(label, mode == scheduleMode) {
-                scheduleMode = mode
-                scheduleModeChips.forEach { (k, v) -> applyScheduleChipStyle(v, k == mode) }
-                renderSchedulePanels()
-            }
-            modeRow.addView(tv)
-            scheduleModeChips[mode] = tv
-        }
-        container.addView(modeRow)
-
-        scheduleHint = TextView(this).apply {
-            textSize = 12f; setTextColor(0xFF6B7280.toInt()); setPadding(0, 10, 0, 0)
-        }
-        container.addView(scheduleHint)
-
-        // 每周固定几天：7 个圆形多选（选中绿色）
-        weekDaysPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 12, 0, 2)
-            visibility = View.GONE
-        }
-        listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { idx, label ->
-            val day = idx + 1
-            val tv = TextView(this).apply {
-                text = label; textSize = 14f; gravity = Gravity.CENTER
-                val lp = LinearLayout.LayoutParams(0, (44 * resources.displayMetrics.density).toInt(), 1f)
-                lp.marginEnd = 8
-                layoutParams = lp
-                setOnClickListener {
-                    // v1.2.0：随心记不设排期
-                    if (journalMode) {
-                        toast("随心记不设排期，暂不支持选择星期")
-                        return@setOnClickListener
-                    }
-                    if (day in weekDays) weekDays.remove(day) else weekDays.add(day)
-                    renderWeekDayChips()
-                }
-            }
-            weekDaysPanel.addView(tv)
-            weekDayChips[day] = tv
-        }
-        container.addView(weekDaysPanel)
-        renderWeekDayChips()
-
-        // 大小周：选本周是大周还是小周（含解释）
-        bigSmallPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 12, 0, 0)
-            visibility = View.GONE
-        }
-        val bsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        bigChip = scheduleChip("大周（单休）", bigSmallStart == "BIG") {
-            bigSmallStart = "BIG"; renderBigSmallChips()
-        }
-        smallChip = scheduleChip("小周（双休）", bigSmallStart == "SMALL") {
-            bigSmallStart = "SMALL"; renderBigSmallChips()
-        }
-        bsRow.addView(bigChip); bsRow.addView(smallChip)
-        bigSmallPanel.addView(bsRow)
-        bsHint = TextView(this).apply {
-            textSize = 12f; setTextColor(0xFF6B7280.toInt()); setPadding(0, 8, 0, 0)
-        }
-        bigSmallPanel.addView(bsHint)
-        container.addView(bigSmallPanel)
-        renderBigSmallChips()
-
-        renderSchedulePanels()
-    }
-
-    private fun renderSchedulePanels() {
-        scheduleHint.text = when (scheduleMode) {
-            "WEEKDAYS" -> "仅选中的日期需要打卡，其余自动标记为「无需打卡」"
-            "DOUBLE_REST" -> "周一至周五打卡，周六、周日休息（无需打卡）"
-            "BIGSMALL" -> "大周=单休（周六也需打卡，周日休息）；小周=双休（周六、周日都休息），两种周交替"
-            else -> "每天都需要打卡"
-        }
-        weekDaysPanel.visibility = if (scheduleMode == "WEEKDAYS") View.VISIBLE else View.GONE
-        bigSmallPanel.visibility = if (scheduleMode == "BIGSMALL") View.VISIBLE else View.GONE
-    }
-
-    private fun renderWeekDayChips() {
-        weekDayChips.forEach { (day, tv) ->
-            val on = day in weekDays
-            val bg = GradientDrawable()
-            bg.shape = GradientDrawable.OVAL
-            bg.setColor(if (on) 0xFF2FBF71.toInt() else 0xFFEEF1F6.toInt())
-            tv.background = bg
-            tv.setTextColor(if (on) 0xFFFFFFFF.toInt() else 0xFF4A5160.toInt())
-            tv.typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-        }
-    }
-
-    private fun renderBigSmallChips() {
-        applyScheduleChipStyle(bigChip, bigSmallStart == "BIG")
-        applyScheduleChipStyle(smallChip, bigSmallStart == "SMALL")
-        bsHint.text = if (bigSmallStart == "BIG")
-            "当前周为大周：周六也需打卡，仅周日休息"
-        else
-            "当前周为小周：周六、周日都休息（下周六需打卡）"
-    }
-
     private fun input(default: String, number: Boolean = false): EditText = EditText(this).apply {
         setText(default); textSize = 14f
         if (number) inputType = android.text.InputType.TYPE_CLASS_NUMBER
@@ -1144,10 +995,8 @@ class CreateItemActivity : AppCompatActivity() {
         findViewById<EditText>(R.id.et_offset_n).isEnabled = !locked
         findViewById<EditText>(R.id.et_offset_k).isEnabled = !locked
         findViewById<CheckBox>(R.id.cb_offset_auto).isEnabled = !locked
-        scheduleModeChips.values.forEach { it.isEnabled = !locked; it.alpha = if (ruleGrey) 0.4f else 1f }
-        weekDayChips.values.forEach { it.isEnabled = !locked; it.alpha = if (ruleGrey) 0.4f else 1f }
-        bigChip.isEnabled = !locked; bigChip.alpha = if (ruleGrey) 0.4f else 1f
-        smallChip.isEnabled = !locked; smallChip.alpha = if (ruleGrey) 0.4f else 1f
+        schedule.setEnabled(!locked)
+        schedule.setAlpha(if (ruleGrey) 0.4f else 1f)
         // v1.4.0：每日"全部完成"开关可用性：单方式 + 每日次数>=2 + 非负打卡 + 非自动打卡 + 非日记
         val canAllReq = !journalMode && !moodMode && Method.AUTO.key !in cfg.methods &&
             cfg.methods.count { it != Method.AUTO.key } <= 1 && dailyLimit >= 2 && !negOn
@@ -1366,10 +1215,10 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.nfcTagId = loaded.nfcTagId; cfg.voiceMaxSeconds = loaded.voiceMaxSeconds
         cfg.offset = loaded.offset
         // v6.1.0 日期配置回显
-        scheduleMode = loaded.scheduleMode
-        weekDays.clear(); weekDays.addAll(loaded.weekDays)
-        if (weekDays.isEmpty()) weekDays.addAll(1..5) // 兜底：WEEKDAYS 模式默认周一~五
-        bigSmallStart = loaded.bigSmallStart
+        schedule.mode = loaded.scheduleMode
+        schedule.weekDays.clear(); schedule.weekDays.addAll(loaded.weekDays)
+        if (schedule.weekDays.isEmpty()) schedule.weekDays.addAll(1..5) // 兜底：WEEKDAYS 模式默认周一~五
+        schedule.bigSmallStart = loaded.bigSmallStart
         // v1.2.0 新字段回显：随心记 / 组合完成数 / 时间打卡模式
         journalMode = loaded.journalMode
         // v1.3.0 心情日记回显；v1.3.3：显式同时设置两个 RadioButton，避免 XML 默认 checked 残留
@@ -1493,10 +1342,7 @@ class CreateItemActivity : AppCompatActivity() {
         // 自动方式核心规则锁定
         if (Method.AUTO.key in cfg.methods && !AdminMode.isOn) lockRules("自动打卡类型创建后核心规则不可改")
         // v6.1.0 日期区块回显
-        scheduleModeChips.forEach { (k, v) -> applyScheduleChipStyle(v, k == scheduleMode) }
-        renderSchedulePanels()
-        renderWeekDayChips()
-        renderBigSmallChips()
+        schedule.render()
         iconPicker.themeId = selectedTheme; iconPicker.render()
         // v1.2.0：随心记模式回显 + 禁用态
         renderModeChips()
@@ -1556,10 +1402,8 @@ class CreateItemActivity : AppCompatActivity() {
         etVoice?.isEnabled = false
         btnLocFetch?.isEnabled = false
         btnNfcBind?.isEnabled = false
-        scheduleModeChips.values.forEach { it.isEnabled = false; it.alpha = 0.4f }
-        weekDayChips.values.forEach { it.isEnabled = false; it.alpha = 0.4f }
-        bigChip.isEnabled = false; bigChip.alpha = 0.4f
-        smallChip.isEnabled = false; smallChip.alpha = 0.4f
+        schedule.setEnabled(false)
+        schedule.setAlpha(0.4f)
         // v1.2.0：模式切换、组合完成数、时间打卡选项、扫码绑定一并锁定
         findViewById<View>(R.id.tab_normal).isEnabled = false; findViewById<View>(R.id.tab_journal).isEnabled = false
         comboNMinus?.isEnabled = false
@@ -1615,9 +1459,9 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.dayCutoff = if (findViewById<CompoundButton>(R.id.cb_day_cutoff).isChecked)
             DateUtils.parseHHmm(findViewById<Button>(R.id.btn_day_cutoff).text.toString()).coerceAtLeast(1) else -1
         // v6.1.0 日期配置收集
-        cfg.scheduleMode = scheduleMode
-        cfg.weekDays.clear(); cfg.weekDays.addAll(weekDays)
-        cfg.bigSmallStart = bigSmallStart
+        cfg.scheduleMode = schedule.mode
+        cfg.weekDays.clear(); cfg.weekDays.addAll(schedule.weekDays)
+        cfg.bigSmallStart = schedule.bigSmallStart
         // v1.2.0 新字段收集
         cfg.journalMode = journalMode
         // v1.3.0 心情日记字段收集（心情折线图开关随时可改）
@@ -1642,7 +1486,7 @@ class CreateItemActivity : AppCompatActivity() {
             cfg.negative = false
             cfg.offset.enabled = false
         }
-        if (!journalMode && scheduleMode == "WEEKDAYS" && weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
+        if (!journalMode && schedule.mode == "WEEKDAYS" && schedule.weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
         // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）
         collectConfigFromUi()
         // v1.3.14：N天打卡方式以 ndays 区选择为准（collectConfigFromUi 读的是普通方式行，此处覆盖）
