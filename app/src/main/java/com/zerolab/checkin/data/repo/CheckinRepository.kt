@@ -3,7 +3,7 @@
 import com.zerolab.checkin.data.AppDatabase
 import com.zerolab.checkin.data.entity.*
 
-class CheckinRepository(private val db: AppDatabase) {
+class CheckinRepository(private val db: AppDatabase) : CheckinStore {
 
     private val itemDao = db.itemDao()
     private val quickDao = db.quickDao()
@@ -12,8 +12,8 @@ class CheckinRepository(private val db: AppDatabase) {
     private val autoDao = db.autoDao()
 
     // ---------- 打卡项 ----------
-    fun getItems(): List<CheckinItem> = itemDao.getAllSorted()
-    fun getItem(id: Long): CheckinItem? = itemDao.getById(id)
+    override fun getItems(): List<CheckinItem> = itemDao.getAllSorted()
+    override fun getItem(id: Long): CheckinItem? = itemDao.getById(id)
     fun itemCount(): Int = itemDao.count()
 
     fun insertItem(item: CheckinItem): Long {
@@ -22,7 +22,7 @@ class CheckinRepository(private val db: AppDatabase) {
         return id
     }
 
-    fun updateItem(item: CheckinItem) = itemDao.update(item.copy(updatedAt = System.currentTimeMillis()))
+    override fun updateItem(item: CheckinItem) = itemDao.update(item.copy(updatedAt = System.currentTimeMillis()))
 
     fun deleteItem(id: Long) {
         // v1.3.27：删除打卡组时级联删除组内全部子项（含记录），避免子项悬挂、被快捷递补"释放"
@@ -101,10 +101,10 @@ class CheckinRepository(private val db: AppDatabase) {
     // ---------- 打卡记录 ----------
     fun recordsOfMonth(itemId: Long, startDate: String, endDate: String) =
         recordDao.between(itemId, startDate, endDate)
-    fun recordsOfDay(itemId: Long, date: String) =
+    override fun recordsOfDay(itemId: Long, date: String) =
         recordDao.between(itemId, date, date)
-    fun allRecords(itemId: Long) = recordDao.allOf(itemId)
-    fun insertRecord(r: CheckinRecord): Long = recordDao.insert(r)
+    override fun allRecords(itemId: Long) = recordDao.allOf(itemId)
+    override fun insertRecord(r: CheckinRecord): Long = recordDao.insert(r)
 
     // v1.3.8：删除单条记录（管理员记录操作）
     fun deleteRecord(id: Long) = recordDao.deleteById(id)
@@ -112,8 +112,8 @@ class CheckinRepository(private val db: AppDatabase) {
 
     // ---------- 抵消 ----------
     fun creditsOf(itemId: Long) = creditDao.ofItem(itemId)
-    fun availableCredits(itemId: Long): Int = creditDao.availableCount(itemId)
-    fun grantCredit(c: OffsetCredit): Long = creditDao.insert(c)
+    override fun availableCredits(itemId: Long): Int = creditDao.availableCount(itemId)
+    override fun grantCredit(c: OffsetCredit): Long = creditDao.insert(c)
     /** v1.4.2 管理员：手动发放 count 个盾牌 */
     fun grantCredits(itemId: Long, count: Int, date: String) {
         repeat(count.coerceAtLeast(0)) {
@@ -126,13 +126,13 @@ class CheckinRepository(private val db: AppDatabase) {
         list.forEach { creditDao.deleteById(it.id) }
         return list.size
     }
-    fun consumeOne(itemId: Long, date: String, recordId: Long?): Boolean {
+    override fun consumeOne(itemId: Long, date: String, recordId: Long?): Boolean {
         val c = creditDao.firstAvailable(itemId) ?: return false
         creditDao.update(c.copy(isUsed = 1, usedDate = date, usedRecordId = recordId))
         return true
     }
 
     // ---------- 自动打卡状态 ----------
-    fun autoState(itemId: Long) = autoDao.get(itemId)
-    fun saveAutoState(s: AutoState) = autoDao.upsert(s)
+    override fun autoState(itemId: Long) = autoDao.get(itemId)
+    override fun saveAutoState(s: AutoState) = autoDao.upsert(s)
 }
