@@ -172,6 +172,14 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             onDone()
             return
         }
+        // v1.4.2 修复：心情日记固定只走 MOOD 一种记录方式。
+        // 兼容旧版本被误存成「拍照+文字+语音+位置」的脏数据，避免打卡时弹出组合方式选择。
+        if (cfg.moodMode) {
+            comboMethods = null
+            queue.addLast(Method.MOOD.key)
+            next()
+            return
+        }
         val interactive = cfg.methods.filter { it != Method.AUTO.key }
         // 组合（多方式）：弹出方式卡片，逐个完成
         if (interactive.size > 1) {

@@ -95,9 +95,10 @@ object RecordMedia {
                                 }
                                 b.put("paths", next)
                             }
-                            // 兼容旧版照片块直接 path 字段
+                            // 兼容旧版照片块直接 path 字段；transform 返回 null 表示素材缺失 → 移除该字段
                             b.optString("path").takeIf { !it.isNullOrBlank() }?.let { p ->
-                                transform(KIND_PHOTO, p)?.let { b.put("path", it) }
+                                val np = transform(KIND_PHOTO, p)
+                                if (np != null) b.put("path", np) else b.remove("path")
                             }
                         }
                         "voice" -> {
@@ -112,9 +113,10 @@ object RecordMedia {
                                 }
                                 b.put("voices", next)
                             }
-                            // 兼容旧版语音块直接 path 字段
+                            // 兼容旧版语音块直接 path 字段；transform 返回 null 表示素材缺失 → 移除该字段
                             b.optString("path").takeIf { !it.isNullOrBlank() }?.let { p ->
-                                transform(KIND_VOICE, p)?.let { b.put("path", it) }
+                                val np = transform(KIND_VOICE, p)
+                                if (np != null) b.put("path", np) else b.remove("path")
                             }
                         }
                     }

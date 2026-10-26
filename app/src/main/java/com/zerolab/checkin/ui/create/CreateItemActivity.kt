@@ -31,6 +31,9 @@ import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
 import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.data.entity.CheckinItem
+import com.zerolab.checkin.engine.CreateInput
+import com.zerolab.checkin.engine.CreatePlan
+import com.zerolab.checkin.engine.CreatePlanner
 import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.LocatePoint
 import com.zerolab.checkin.engine.Method
@@ -1477,90 +1480,49 @@ class CreateItemActivity : AppCompatActivity() {
         // v1.3.13 打卡组走独立保存流程
         if (groupMode) { saveGroup(); return }
         val name = findViewById<EditText>(R.id.et_name).text.toString().trim()
-        if (name.isBlank()) { toast("请填写打卡名称"); return }
-        // v1.3.30：习惯打卡放开「每日次数 / 时间规则」（由更多选项配置，collectConfigFromUi 收集）；负打卡仍不提供
-        if (ndaysMode) {
-            cfg.ndaysMode = true
-            cfg.ndaysTarget = ndaysTarget
-            cfg.scheduleMode = "DAILY"
-            cfg.negative = false
-            cfg.offset.enabled = false
-        }
-        if (!journalMode && schedule.mode == "WEEKDAYS" && schedule.weekDays.isEmpty()) { toast("「每周固定几天」至少选择一天"); return }
-        // v1.1.4：先收集 UI 值再校验（此前校验读的是未同步的旧配置，导致"全取消也能保存"）
+        // v1.4.2 重构：先在页面收集 UI 值，再交给纯逻辑 CreatePlanner 做归一化与全部校验
         collectConfigFromUi()
-        // v1.3.14：N天打卡方式以 ndays 区选择为准（collectConfigFromUi 读的是普通方式行，此处覆盖）
-        if (ndaysMode) {
-            if (ndaysMethods.isEmpty()) ndaysMethods.add(Method.NORMAL.key)
-            cfg.methods.clear(); cfg.methods.addAll(ndaysMethods)
-        }
-        // v1.3.0：心情日记强制规则（只保留 MOOD，隐含日记语义）
-        if (cfg.moodMode) {
-            cfg.methods.clear(); cfg.methods.add(Method.MOOD.key)
-            cfg.journalMode = true
-        }
-        // v1.4.0：随心记四种方式全部内置（在空校验之前填充，避免被拦）
-        if (cfg.journalMode && !cfg.moodMode && cfg.methods.isEmpty()) {
-            cfg.methods.add(Method.PHOTO.key)
-            cfg.methods.add(Method.TEXT.key)
-            cfg.methods.add(Method.VOICE.key)
-            cfg.methods.add(Method.LOCATION.key)
-        }
-        if (cfg.methods.isEmpty()) { toast("请至少打开一种打卡方式"); return }
-        if (!Method.isValid(cfg.methods)) { toast("所选方式存在互斥冲突"); return }
-        // v1.2.0：随心记强制规则（兜底，防脏配置）
-        if (cfg.journalMode) {
-            cfg.negative = false
-            cfg.timeWindowEnabled = false
-            cfg.offset.enabled = false
-            cfg.offset.autoConsume = false
-            cfg.dailyLimit = -1
-            // v1.4.0：四种方式全部内置，不再让用户选
-            cfg.methods.clear()
-            cfg.methods.add(Method.PHOTO.key)
-            cfg.methods.add(Method.TEXT.key)
-            cfg.methods.add(Method.VOICE.key)
-            cfg.methods.add(Method.LOCATION.key)
-        }
-        // 组合打卡每日次数固定为 1（UI 已置灰，此处兜底）
-        if (cfg.methods.count { it != Method.AUTO.key } > 1) { dailyLimit = 1; cfg.dailyLimit = 1 }
-        if (Method.LOCATION.key in cfg.methods && !cfg.journalMode && cfg.locPoints.isEmpty()) { toast("位置打卡需先获取一个标准位置"); return }
-        if (Method.PHOTO.key in cfg.methods && !cfg.photoFromCamera && !cfg.photoFromAlbum) { toast("拍照打卡需至少勾选一种图片来源"); return }
-        if (Method.NFC.key in cfg.methods && cfg.nfcTagId.isBlank()) { toast("NFC打卡需先绑定 NFC 标签"); return }
-        if (Method.QRCODE.key in cfg.methods && cfg.qrContent.isBlank()) { toast("扫码打卡需先生成专属二维码"); return }
-        if (cfg.timeWindowEnabled) {
-            val a = DateUtils.parseHHmm(cfg.twStart); val b = DateUtils.parseHHmm(cfg.twEnd)
-            if (a < 0 || b < 0 || a >= b) { toast("时间段开始需早于结束（如 05:00 / 08:30），暂不支持跨天"); return }
-        }
-
-        val policyInterval = findViewById<RadioButton>(R.id.rb_interval).isChecked
-        val intervalN = findViewById<EditText>(R.id.et_interval).text.toString().toIntOrNull()
-        // v1.3.0：日记项不设修改策略（FLEX=可随时修改）
-        val isDiary = cfg.journalMode || cfg.moodMode
-        // v1.3.6：迁移解锁的旧项（非日记 FLEX）编辑保存后保持 FLEX，避免被写回 LOCKED
-        val editPolicy = if (isDiary) "FLEX"
-            else if (editing?.editPolicy == "FLEX") "FLEX"
-            else if (policyInterval) "INTERVAL_N" else "LOCKED"
-        val editInterval = if (!isDiary && policyInterval) (intervalN ?: 7) else null
+        val plan = CreatePlanner.plan(
+            CreateInput(
+                name = name,
+                theme = selectedTheme,
+                icon = finalIconKey(),
+                cfg = cfg,
+                journalMode = journalMode,
+                moodMode = moodMode,
+                ndaysMode = ndaysMode,
+                ndaysTarget = ndaysTarget,
+                ndaysMethods = ndaysMethods.toSet(),
+                scheduleMode = schedule.mode,
+                weekDays = schedule.weekDays.toSet(),
+                bigSmallStart = schedule.bigSmallStart,
+                editPolicyRequested =
+                    if (findViewById<RadioButton>(R.id.rb_interval).isChecked) "INTERVAL_N" else "LOCKED",
+                editIntervalRequested = findViewById<EditText>(R.id.et_interval).text.toString().toIntOrNull(),
+                editingFlexPolicy = editing?.editPolicy == "FLEX"
+            )
+        )
+        if (plan is CreatePlan.Rejected) { toast(plan.message); return }
+        val draft = (plan as CreatePlan.Ready).draft
         val now = System.currentTimeMillis()
         thread {
             if (editing != null) {
                 val old = editing!!
                 val updated = old.copy(
-                    name = name, theme = selectedTheme, icon = finalIconKey(),
-                    type = ItemConfig.mainType(cfg.methods), configJson = cfg.toJson(),
-                    editPolicy = editPolicy,
-                    editInterval = editInterval,
+                    name = draft.name, theme = draft.theme, icon = draft.icon,
+                    type = draft.type, configJson = draft.configJson,
+                    editPolicy = draft.editPolicy,
+                    editInterval = draft.editInterval,
                     lastEditDate = if (!locked || old.lastEditDate == null) DateUtils.today() else old.lastEditDate,
                     updatedAt = now
                 )
                 repo.updateItem(updated)
             } else {
                 val item = CheckinItem(
-                    name = name, type = ItemConfig.mainType(cfg.methods), configJson = cfg.toJson(),
-                    icon = finalIconKey(), theme = selectedTheme, sortOrder = repo.itemCount(),
-                    editPolicy = editPolicy,
-                    editInterval = editInterval,
+                    name = draft.name, type = draft.type, configJson = draft.configJson,
+                    icon = draft.icon, theme = draft.theme, sortOrder = repo.itemCount(),
+                    editPolicy = draft.editPolicy,
+                    editInterval = draft.editInterval,
                     lastEditDate = DateUtils.today(), createdAt = now, updatedAt = now
                 )
                 val newId = repo.insertItem(item)

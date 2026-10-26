@@ -93,6 +93,8 @@ dependencies {
     implementation 'com.google.zxing:core:3.5.3'
 
     testImplementation 'junit:junit:4.13.2'
+    // v1.4.2：JVM 单测里 Android 的 org.json 是 stub，配置/导入导出逻辑需要真实实现
+    testImplementation 'org.json:json:20240303'
 
     def room_version = "2.6.1"
     implementation "androidx.room:room-runtime:$room_version"
