@@ -15,14 +15,20 @@ interface CheckinStore {
     fun getItems(): List<CheckinItem>
     fun getItem(id: Long): CheckinItem?
     fun updateItem(item: CheckinItem)
+    fun insertItem(item: CheckinItem): Long
 
     fun recordsOfDay(itemId: Long, date: String): List<CheckinRecord>
     fun allRecords(itemId: Long): List<CheckinRecord>
     fun insertRecord(r: CheckinRecord): Long
 
     fun availableCredits(itemId: Long): Int
+    fun creditsOf(itemId: Long): List<OffsetCredit>
     fun grantCredit(c: OffsetCredit): Long
     fun consumeOne(itemId: Long, date: String, recordId: Long?): Boolean
+
+    /** 全局唯一快捷打卡项 id；null 表示未设置 */
+    fun getQuickId(): Long?
+    fun setQuick(id: Long?)
 
     fun autoState(itemId: Long): AutoState?
     fun saveAutoState(s: AutoState)

@@ -1,6 +1,6 @@
-package com.zerolab.checkin.util
+﻿package com.zerolab.checkin.util
 
-import com.zerolab.checkin.data.repo.CheckinRepository
+import com.zerolab.checkin.data.repo.CheckinStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -13,7 +13,7 @@ object JsonExporter {
     /** 按选中打卡项构建导出 JSON（ids 为空 = 全部项）。
      *  v1.4：素材路径统一改写为 ZIP 内相对路径（photos/{itemId}/{文件名} / voices/{itemId}/{文件名}），
      *  exportVersion 升 1.1；仅记录模式同样输出相对路径，导入侧对不存在的素材文件跳过即可。 */
-    fun build(repo: CheckinRepository, ids: Collection<Long>? = null): JSONObject {
+    fun build(repo: CheckinStore, ids: Collection<Long>? = null): JSONObject {
         val root = JSONObject()
         root.put("exportVersion", "1.2")
         root.put("exportTime", System.currentTimeMillis())
@@ -91,14 +91,14 @@ object JsonExporter {
         return "checkin_export_${f.format(Date())}.json"
     }
 
-    fun writeToCache(repo: CheckinRepository, dir: File): File {
+    fun writeToCache(repo: CheckinStore, dir: File): File {
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, fileName())
         f.writeText(build(repo).toString(2), Charsets.UTF_8)
         return f
     }
 
-    fun writeToCache(repo: CheckinRepository, dir: File, ids: Collection<Long>): File {
+    fun writeToCache(repo: CheckinStore, dir: File, ids: Collection<Long>): File {
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, fileName())
         f.writeText(build(repo, ids).toString(2), Charsets.UTF_8)

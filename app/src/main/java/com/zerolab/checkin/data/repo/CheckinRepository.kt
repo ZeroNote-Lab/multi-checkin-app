@@ -16,7 +16,7 @@ class CheckinRepository(private val db: AppDatabase) : CheckinStore {
     override fun getItem(id: Long): CheckinItem? = itemDao.getById(id)
     fun itemCount(): Int = itemDao.count()
 
-    fun insertItem(item: CheckinItem): Long {
+    override fun insertItem(item: CheckinItem): Long {
         val id = itemDao.insert(item)
         ensureQuickAfterCreate(id)
         return id
@@ -83,9 +83,9 @@ class CheckinRepository(private val db: AppDatabase) : CheckinStore {
         val id = quickDao.get()?.itemId ?: return null
         return itemDao.getById(id)
     }
-    fun getQuickId(): Long? = quickDao.get()?.itemId
+    override fun getQuickId(): Long? = quickDao.get()?.itemId
 
-    fun setQuick(id: Long?) {
+    override fun setQuick(id: Long?) {
         // v1.3.24：打卡组与普通项一致，均可设为快捷打卡
         quickDao.upsert(QuickConfig(1, id))
     }
@@ -111,7 +111,7 @@ class CheckinRepository(private val db: AppDatabase) : CheckinStore {
     fun updateRecord(r: CheckinRecord) = recordDao.update(r)
 
     // ---------- 抵消 ----------
-    fun creditsOf(itemId: Long) = creditDao.ofItem(itemId)
+    override fun creditsOf(itemId: Long) = creditDao.ofItem(itemId)
     override fun availableCredits(itemId: Long): Int = creditDao.availableCount(itemId)
     override fun grantCredit(c: OffsetCredit): Long = creditDao.insert(c)
     /** v1.4.2 管理员：手动发放 count 个盾牌 */

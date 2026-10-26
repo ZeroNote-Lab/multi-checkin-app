@@ -1,9 +1,9 @@
-package com.zerolab.checkin.util
+﻿package com.zerolab.checkin.util
 
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.data.entity.CheckinRecord
 import com.zerolab.checkin.data.entity.OffsetCredit
-import com.zerolab.checkin.data.repo.CheckinRepository
+import com.zerolab.checkin.data.repo.CheckinStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -35,7 +35,7 @@ object JsonImporter {
      * @param mediaRoot ZIP 解压后的目录（含 photos/、voices/）；为 null 表示仅 JSON 导入，素材不恢复。
      * @param appFilesDir 应用 filesDir（素材落盘目录）
      */
-    fun importFromJson(repo: CheckinRepository, text: String, mediaRoot: File?, appFilesDir: File): Result {
+    fun importFromJson(repo: CheckinStore, text: String, mediaRoot: File?, appFilesDir: File): Result {
         val root = JSONObject(text)
         val itemsArr = root.optJSONArray("checkinItems") ?: JSONArray()
         val recsArr = root.optJSONArray("checkinRecords") ?: JSONArray()

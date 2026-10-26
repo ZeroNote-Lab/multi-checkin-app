@@ -4,7 +4,7 @@ import com.zerolab.checkin.data.entity.AutoState
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.data.entity.CheckinRecord
 import com.zerolab.checkin.data.entity.OffsetCredit
-import com.zerolab.checkin.data.repo.CheckinStore
+import com.zerolab.checkin.testutil.FakeCheckinStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,52 +18,6 @@ import java.util.Locale
  * 时间全部注入（today / now），结果与真实运行日期无关。
  */
 class CheckinEngineTest {
-
-    private class FakeStore(items: List<CheckinItem> = emptyList()) : CheckinStore {
-        val itemList = items.toMutableList()
-        val records = mutableListOf<CheckinRecord>()
-        val credits = mutableListOf<OffsetCredit>()
-        private val autoStates = mutableMapOf<Long, AutoState>()
-        private var nextRecordId = 1000L
-        private var nextCreditId = 5000L
-
-        override fun getItems(): List<CheckinItem> = itemList.toList()
-        override fun getItem(id: Long): CheckinItem? = itemList.firstOrNull { it.id == id }
-        override fun updateItem(item: CheckinItem) {
-            val i = itemList.indexOfFirst { it.id == item.id }
-            if (i >= 0) itemList[i] = item
-        }
-
-        override fun recordsOfDay(itemId: Long, date: String): List<CheckinRecord> =
-            records.filter { it.itemId == itemId && it.checkinDate == date }
-
-        override fun allRecords(itemId: Long): List<CheckinRecord> = records.filter { it.itemId == itemId }
-
-        override fun insertRecord(r: CheckinRecord): Long {
-            val id = nextRecordId++
-            records.add(r.copy(id = id))
-            return id
-        }
-
-        override fun availableCredits(itemId: Long): Int =
-            credits.count { it.itemId == itemId && it.isUsed == 0 }
-
-        override fun grantCredit(c: OffsetCredit): Long {
-            val id = nextCreditId++
-            credits.add(c.copy(id = id))
-            return id
-        }
-
-        override fun consumeOne(itemId: Long, date: String, recordId: Long?): Boolean {
-            val i = credits.indexOfFirst { it.itemId == itemId && it.isUsed == 0 }
-            if (i < 0) return false
-            credits[i] = credits[i].copy(isUsed = 1, usedDate = date, usedRecordId = recordId)
-            return true
-        }
-
-        override fun autoState(itemId: Long): AutoState? = autoStates[itemId]
-        override fun saveAutoState(s: AutoState) { autoStates[s.itemId] = s }
-    }
 
     private val today = "2026-10-26"   // 周一
 
@@ -94,11 +48,11 @@ class CheckinEngineTest {
         status = status, extraJson = extra, isAuto = if (isAuto) 1 else 0
     )
 
-    private lateinit var store: FakeStore
+    private lateinit var store: FakeCheckinStore
 
     @Before
     fun setUp() {
-        store = FakeStore()
+        store = FakeCheckinStore()
     }
 
     private fun addItem(cfg: ItemConfig = ItemConfig(), created: String = "2026-10-01", active: Int = 1): CheckinItem {

@@ -33,7 +33,8 @@
 - 清理死代码：应用内相机实现与布局 / 资源、`MoodChartMenu`、未使用的「一键修复」入口、对应 DAO / 仓储方法与日期工具中的废弃自定义负打卡代码。
 - 单元测试扩展到 72 个：新增保存计划、`ItemConfig` 序列化与旧格式兼容解析、记录媒体路径改写（为此引入真实的 `org.json` 测试依赖）。
 - 重构打卡引擎：抽出最小数据接口 `CheckinStore`（生产实现仍为 `CheckinRepository`），`dayInfo` / `streak` / `perform` / `subDayProgress` / `groupDayInfo` / `offsetBackfill` 支持注入 `today` / `now`，状态机可用内存假仓库测试。
-- 新增 `CheckinEngineTest` 30 个用例（日状态、排期、连续天数、组合进度、打卡写入 / 次数上限 / 负打卡盾牌 / 时间窗 / 日记多次记录），单元测试总计 102 个。
+- 新增 `CheckinEngineTest` 30 个用例（日状态、排期、连续天数、组合进度、打卡写入 / 次数上限 / 负打卡盾牌 / 时间窗 / 日记多次记录）。
+- 导出 / 导入同样改为依赖 `CheckinStore`，新增 `JsonExporterTest` / `JsonImporterTest` 18 个用例（导出结构、素材相对路径、匹配合并、记录与盾牌去重、组引用重映射、素材恢复、幂等），单元测试总计 120 个。
 
 ## 1.4.1 — 2026-10-20
 

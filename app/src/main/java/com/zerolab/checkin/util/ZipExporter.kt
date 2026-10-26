@@ -1,6 +1,6 @@
-package com.zerolab.checkin.util
+﻿package com.zerolab.checkin.util
 
-import com.zerolab.checkin.data.repo.CheckinRepository
+import com.zerolab.checkin.data.repo.CheckinStore
 import java.io.File
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
@@ -19,7 +19,7 @@ object ZipExporter {
         return "checkin_export_${f.format(Date())}.zip"
     }
 
-    fun buildZip(repo: CheckinRepository, ids: Collection<Long>, dir: File): Result {
+    fun buildZip(repo: CheckinStore, ids: Collection<Long>, dir: File): Result {
         if (!dir.exists()) dir.mkdirs()
         val zipFile = File(dir, fileName())
         val jsonText = JsonExporter.build(repo, ids).toString(2)
