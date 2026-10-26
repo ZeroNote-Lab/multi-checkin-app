@@ -1,4 +1,4 @@
-package com.zerolab.checkin.engine
+﻿package com.zerolab.checkin.engine
 
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.data.entity.CheckinRecord
@@ -386,46 +386,6 @@ object CheckinEngine {
             if (!isNegative(c)) return@forEach
             settleOffset(item, repo, c, c.offset)
         }
-    }
-
-    /** v1.3.8：一键修复负打卡数据（设置页隐藏入口触发，幂等）。
-     *  1) 撤销 v1.3.7 自动消耗补签产生的 OFFSET（与 FAIL 同日的 OFFSET 视为自动补签痕迹，删记录 + 还回盾牌 + 锚点还原）；
-     *  2) 今天存在破戒（FAIL）且还有可用盾牌时，用盾牌抵消今天第一条破戒（变补卡）。
-     *  返回修复动作描述；无痕迹可修时返回空说明。 */
-    fun repairNegativeData(repo: CheckinRepository): String {
-        val done = mutableListOf<String>()
-        repo.getItems().filter { it.isActive == 1 }.forEach { item ->
-            val c = cfg(item)
-            if (!isNegative(c)) return@forEach
-            if (!c.offset.enabled) return@forEach
-            val today = effectiveToday(c)
-            var changed = false
-            // 1) 撤销自动补签：v1.3.7 的 autoBackfillMissing 只会在 FAIL 日补签，因此与 FAIL 同日的 OFFSET 即为其痕迹
-            repo.allRecords(item.id).filter { it.status == "OFFSET" }.forEach { off ->
-                val sameDay = repo.recordsOfDay(item.id, off.checkinDate)
-                if (sameDay.any { it.status == "FAIL" }) {
-                    repo.deleteRecord(off.id)
-                    repo.returnCreditByDate(item.id, off.checkinDate)
-                    changed = true
-                }
-            }
-            if (changed) {
-                if (c.offset.anchorDate.isNotBlank()) {
-                    c.offset.anchorDate = ""
-                    saveCfg(item, repo, c)
-                }
-                done.add("${item.name}：撤销自动补签")
-            }
-            // 2) 今天破戒抵消：今天有 FAIL 且可用盾牌 > 0 → 第一条 FAIL 抵消为补卡（蓝圈、不算破戒次数）
-            val todayRecs = repo.recordsOfDay(item.id, today)
-            val firstFail = todayRecs.firstOrNull { it.status == "FAIL" }
-            if (firstFail != null && repo.availableCredits(item.id) > 0) {
-                repo.updateRecordStatus(firstFail.id, "OFFSET")
-                repo.consumeOne(item.id, today, firstFail.id)
-                done.add("${item.name}：今日破戒已抵消为补卡（🛡️-1）")
-            }
-        }
-        return done.joinToString("；").ifEmpty { "未发现需要修复的数据" }
     }
 
     /** 自动模式：漏签时自动/手动消耗一次抵消补签；返回是否补签 */

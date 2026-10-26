@@ -326,8 +326,7 @@ CheckinApp6/
 │       │   │   ├── flow/                     # 打卡交互（文字 / 图片 / 位置 / 计时 / 扫码 / NFC / 语音）
 │       │   │   ├── journal/                  # 随心记块流编辑页
 │       │   │   ├── settings/                 # 设置 / 导出 / 导入 / 联网增强 / 外观主题 / 管理员模式
-│       │   │   ├── scan/                     # CameraX + ZXing 扫码
-│       │   │   └── camera/                   # 应用内相机（备用实现，当前使用系统相机）
+│       │   │   └── scan/                     # CameraX + ZXing 扫码
 │       │   └── util/                         # 日期 / 图片 / 音频 / 实时定位 / 联网增强 / 导入导出 / 媒体路径
 │       └── res/                              # drawable / layout / xml
 └── build.gradle / settings.gradle / gradle.properties

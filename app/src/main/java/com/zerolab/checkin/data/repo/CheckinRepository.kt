@@ -1,4 +1,4 @@
-package com.zerolab.checkin.data.repo
+﻿package com.zerolab.checkin.data.repo
 
 import com.zerolab.checkin.data.AppDatabase
 import com.zerolab.checkin.data.entity.*
@@ -23,18 +23,6 @@ class CheckinRepository(private val db: AppDatabase) {
     }
 
     fun updateItem(item: CheckinItem) = itemDao.update(item.copy(updatedAt = System.currentTimeMillis()))
-
-    /**
-     * v1.3.6：一次性迁移工具——把所有 LOCKED 打卡项改为 FLEX（可修改）。
-     * 仅用于旧版本（1.1.5 时代）创建的锁定项解锁，由设置页隐藏入口触发；返回迁移数量。
-     */
-    fun migrateLockedToFlex(): Int {
-        val targets = itemDao.getAllSorted().filter { it.editPolicy == "LOCKED" }
-        targets.forEach {
-            itemDao.update(it.copy(editPolicy = "FLEX", editInterval = null, lastEditDate = null))
-        }
-        return targets.size
-    }
 
     fun deleteItem(id: Long) {
         // v1.3.27：删除打卡组时级联删除组内全部子项（含记录），避免子项悬挂、被快捷递补"释放"
@@ -116,14 +104,11 @@ class CheckinRepository(private val db: AppDatabase) {
     fun recordsOfDay(itemId: Long, date: String) =
         recordDao.between(itemId, date, date)
     fun allRecords(itemId: Long) = recordDao.allOf(itemId)
-    fun countOfDay(itemId: Long, date: String) = recordDao.countOfDay(itemId, date)
     fun insertRecord(r: CheckinRecord): Long = recordDao.insert(r)
 
-    // v1.3.8：一键修复工具用——删除单条记录 / 改状态 / 还回盾牌
+    // v1.3.8：删除单条记录（管理员记录操作）
     fun deleteRecord(id: Long) = recordDao.deleteById(id)
-    fun updateRecordStatus(id: Long, status: String) = recordDao.updateStatus(id, status)
     fun updateRecord(r: CheckinRecord) = recordDao.update(r)
-    fun returnCreditByDate(itemId: Long, date: String): Int = creditDao.returnUsedByDate(itemId, date)
 
     // ---------- 抵消 ----------
     fun creditsOf(itemId: Long) = creditDao.ofItem(itemId)
@@ -149,6 +134,5 @@ class CheckinRepository(private val db: AppDatabase) {
 
     // ---------- 自动打卡状态 ----------
     fun autoState(itemId: Long) = autoDao.get(itemId)
-    fun allAutoStates() = autoDao.all()
     fun saveAutoState(s: AutoState) = autoDao.upsert(s)
 }

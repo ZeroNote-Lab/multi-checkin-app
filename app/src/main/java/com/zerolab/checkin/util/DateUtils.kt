@@ -1,4 +1,4 @@
-package com.zerolab.checkin.util
+﻿package com.zerolab.checkin.util
 
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -47,38 +47,6 @@ object DateUtils {
 
     fun nowMinutes(): Int {
         val c = Calendar.getInstance()
-        return c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
-    }
-
-    /** 双时间点自定义负打卡的一个归属结果 */
-    data class CustomSlot(val date: String, val status: String) // status: SUCCESS / FAIL
-
-    /**
-     * 双时间点自定义负打卡归属（v6.0.1 用户新定义）。
-     * 设两个分界 t1、t2（如 05:00 / 13:00）：
-     *  - [00:00, t1) 操作 → 归属昨天，记为「未打卡」(FAIL)
-     *  - [t1, t2)    操作 → 归属今天，记为「打卡成功」(SUCCESS)
-     *  - [t2, 24:00) 操作 → 归属今天，记为「未打卡」(FAIL)
-     */
-    // v1.1.8：双时间自定义负打卡已移除，customSlot 逻辑不再使用（保留注释备查）
-    // fun customSlot(nowTs: Long, t1: String, t2: String): CustomSlot {
-    //     val a = parseHHmm(t1); val b = parseHHmm(t2)
-    //     val now = nowMinutesOf(nowTs)
-    //     val cal = Calendar.getInstance()
-    //     cal.timeInMillis = nowTs
-    //     return when {
-    //         a >= 0 && b >= 0 && now in a until b -> CustomSlot(dayFmt.format(cal.time), "SUCCESS")
-    //         a >= 0 && now < a -> {
-    //             cal.add(Calendar.DAY_OF_YEAR, -1)
-    //             CustomSlot(dayFmt.format(cal.time), "FAIL")
-    //         }
-    //         else -> CustomSlot(dayFmt.format(cal.time), "FAIL")
-    //     }
-    // }
-
-    private fun nowMinutesOf(ts: Long): Int {
-        val c = Calendar.getInstance()
-        c.timeInMillis = ts
         return c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
     }
 
