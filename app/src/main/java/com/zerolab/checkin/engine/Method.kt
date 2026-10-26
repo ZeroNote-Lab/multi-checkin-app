@@ -43,9 +43,17 @@ enum class Method(val key: String, val label: String, val emoji: String) {
             return blocked - selected
         }
 
-        /** 校验一组方式是否合法（无互斥） */
+        /**
+         * 校验一组方式是否合法（无互斥）。
+         * v1.4.2 修复：不能复用 [conflictsWith]——它会把「已选中的方式」从结果里减掉，
+         * 导致任何组合都被判为合法（保存时的互斥兜底形同虚设）。
+         * 规则：普通打卡与自动打卡都是独占方式，不能与任何其他方式同时存在。
+         */
         fun isValid(set: Collection<String>): Boolean {
-            return conflictsWith(set.toSet()).none { it in set }
+            val s = set.toSet()
+            if (NORMAL.key in s && s.size > 1) return false
+            if (AUTO.key in s && s.size > 1) return false
+            return true
         }
     }
 }
