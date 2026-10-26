@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.ui.quick
+package com.zerolab.checkin.ui.quick
 
 /**
  * NFC 标签回调总线（v6.1.0）。

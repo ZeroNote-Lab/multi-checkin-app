@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.data.dao
+package com.zerolab.checkin.data.dao
 
 import androidx.room.*
 import com.zerolab.checkin.data.entity.OffsetCredit

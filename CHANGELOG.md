@@ -36,6 +36,8 @@
 - 重构打卡引擎：抽出最小数据接口 `CheckinStore`（生产实现仍为 `CheckinRepository`），`dayInfo` / `streak` / `perform` / `subDayProgress` / `groupDayInfo` / `offsetBackfill` 支持注入 `today` / `now`，状态机可用内存假仓库测试。
 - 新增 `CheckinEngineTest` 30 个用例（日状态、排期、连续天数、组合进度、打卡写入 / 次数上限 / 负打卡盾牌 / 时间窗 / 日记多次记录）。
 - 导出 / 导入同样改为依赖 `CheckinStore`，新增 `JsonExporterTest` / `JsonImporterTest` 18 个用例（导出结构、素材相对路径、匹配合并、记录与盾牌去重、组引用重映射、素材恢复、幂等），单元测试总计 120 个。
+- Room 打开 schema 导出（`app/schemas` 入库），补充 v1 → v2 迁移的仪器测试 `MigrationTest`（空库迁移、迁移后旧数据可读），`connectedDebugAndroidTest` 通过。
+- 新增发版冒烟脚本 `scripts/smoke_ui.ps1`：无头模拟器安装 / 启动 / 首页文案 / 崩溃检查 / 截图，失败自动退出码 1。
 
 ## 1.4.1 — 2026-10-20
 

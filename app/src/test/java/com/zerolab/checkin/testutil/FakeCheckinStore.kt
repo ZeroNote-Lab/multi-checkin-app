@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.testutil
+package com.zerolab.checkin.testutil
 
 import com.zerolab.checkin.data.entity.AutoState
 import com.zerolab.checkin.data.entity.CheckinItem

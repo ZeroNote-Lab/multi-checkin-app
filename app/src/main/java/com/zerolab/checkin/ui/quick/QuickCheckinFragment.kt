@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.ui.quick
+package com.zerolab.checkin.ui.quick
 
 import android.content.Intent
 import android.graphics.BitmapFactory

@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.engine
+package com.zerolab.checkin.engine
 
 import org.json.JSONArray
 import org.json.JSONObject

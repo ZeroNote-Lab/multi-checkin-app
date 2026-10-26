@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.data.repo
+package com.zerolab.checkin.data.repo
 
 import com.zerolab.checkin.data.AppDatabase
 import com.zerolab.checkin.data.entity.*

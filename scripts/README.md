@@ -1,4 +1,4 @@
-﻿# scripts
+# scripts
 
 发版 / 联调用的仓库内工具脚本（tracked）。测试产物仍放 `test/`（已 gitignore）。
 

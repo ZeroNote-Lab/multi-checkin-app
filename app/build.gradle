@@ -34,6 +34,8 @@ android {
         versionCode 132
         versionName "1.4.2"
         vectorDrawables.useSupportLibrary = true
+        // v1.4.2：Room 迁移测试（androidTest）使用 AndroidJUnitRunner
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -68,6 +70,13 @@ android {
         // v1.4.2 优化：导出 JSON 的 appVersion 需要读取 BuildConfig.VERSION_NAME
         buildConfig true
     }
+    // v1.4.2：导出 Room schema，androidTest 用 MigrationTestHelper 读取
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
+    sourceSets {
+        androidTest.assets.srcDirs += files("$projectDir/schemas")
+    }
     packaging {
         resources {
             excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*', 'META-INF/*.version']
@@ -100,4 +109,9 @@ dependencies {
     implementation "androidx.room:room-runtime:$room_version"
     implementation "androidx.room:room-ktx:$room_version"
     ksp "androidx.room:room-compiler:$room_version"
+
+    // v1.4.2：Room 迁移测试
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test:runner:1.5.2'
+    androidTestImplementation "androidx.room:room-testing:$room_version"
 }

@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.util
+package com.zerolab.checkin.util
 
 import com.zerolab.checkin.BuildConfig
 import com.zerolab.checkin.data.entity.CheckinItem

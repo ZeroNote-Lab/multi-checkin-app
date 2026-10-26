@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.ui.detail
+package com.zerolab.checkin.ui.detail
 
 import android.content.Intent
 import android.os.Bundle

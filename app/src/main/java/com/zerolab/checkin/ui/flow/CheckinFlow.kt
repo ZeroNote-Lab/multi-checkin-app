@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.ui.flow
+package com.zerolab.checkin.ui.flow
 
 import android.Manifest
 import android.annotation.SuppressLint

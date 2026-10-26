@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.engine
+package com.zerolab.checkin.engine
 
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.data.entity.CheckinRecord

@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.util
+package com.zerolab.checkin.util
 
 import com.zerolab.checkin.data.repo.CheckinStore
 import java.io.File

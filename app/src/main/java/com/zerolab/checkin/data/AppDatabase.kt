@@ -18,7 +18,8 @@ import com.zerolab.checkin.data.entity.*
         AutoState::class
     ],
     version = 2,
-    exportSchema = false
+    // v1.4.2：导出 schema 供 Room MigrationTestHelper 使用（app/schemas 入库）
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
@@ -40,7 +41,7 @@ abstract class AppDatabase : RoomDatabase() {
          *
          * 禁止使用 fallbackToDestructiveMigration()——那会在 schema 变化时静默清空用户全部打卡数据。
          */
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // v1 → v2：无表结构变更，仅把用户库版本推进到迁移链起点
             }

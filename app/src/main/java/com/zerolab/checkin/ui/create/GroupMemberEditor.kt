@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.ui.create
+package com.zerolab.checkin.ui.create
 
 import android.app.TimePickerDialog
 import android.graphics.Typeface

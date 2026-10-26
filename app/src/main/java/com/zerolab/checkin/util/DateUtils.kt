@@ -1,4 +1,4 @@
-﻿package com.zerolab.checkin.util
+package com.zerolab.checkin.util
 
 import java.text.SimpleDateFormat
 import java.util.Calendar
