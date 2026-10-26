@@ -8,6 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
+import com.zerolab.checkin.theme.IconManager
 import com.zerolab.checkin.theme.ThemeUi
 import com.zerolab.checkin.data.entity.CheckinItem
 import com.zerolab.checkin.util.JsonExporter
@@ -56,7 +57,8 @@ class ExportActivity : AppCompatActivity() {
                     ll.removeAllViews()
                     for (it in items) {
                         val cb = CheckBox(this)
-                        cb.text = "${it.icon} ${it.name}"
+                        // v1.4.2 优化：icon 存的是稳定 key（water 等），显示要走 IconManager（旧数据回退主题 emoji）
+                        cb.text = "${IconManager.emojiFor(it.icon, it.theme)} ${it.name}"
                         cb.isChecked = true
                         cb.setTextColor(resources.getColor(R.color.text_primary, null))
                         cb.textSize = 15f
