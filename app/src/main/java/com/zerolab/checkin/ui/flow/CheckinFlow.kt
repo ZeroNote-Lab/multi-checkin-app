@@ -1,4 +1,4 @@
-package com.zerolab.checkin.ui.flow
+﻿package com.zerolab.checkin.ui.flow
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -996,10 +996,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             main.post {
                 when (r) {
                     is CheckinResult.Ok -> {
-                        val c2 = cfg
                         var msg = when {
-                            c2?.customNeg == true -> if (r.status == "SUCCESS") "时段内打卡成功 ✓"
-                                else if (r.date == DateUtils.today()) "已记录：今天未打卡" else "已记录：昨天未打卡"
                             r.status == "OFFSET" -> "🛡️ 已补卡（破戒被盾牌抵消）"   // v1.3.8：负打卡破戒豁免
                             r.status == "FAIL" -> "已记录：破戒"
                             else -> "打卡成功 ✓"

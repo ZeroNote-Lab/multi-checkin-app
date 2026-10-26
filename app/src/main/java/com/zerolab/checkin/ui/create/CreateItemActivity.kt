@@ -1208,7 +1208,6 @@ class CreateItemActivity : AppCompatActivity() {
         cfg.methods.clear(); cfg.methods.addAll(loaded.methods)
         cfg.dailyLimit = loaded.dailyLimit; cfg.negative = loaded.negative
         cfg.dailyAllRequired = loaded.dailyAllRequired // v1.4.0：编辑回显"全部完成"开关
-        cfg.offsetBackfill = loaded.offsetBackfill
         cfg.timeWindowEnabled = loaded.timeWindowEnabled; cfg.twStart = loaded.twStart; cfg.twEnd = loaded.twEnd
         cfg.photoFromCamera = loaded.photoFromCamera; cfg.photoFromAlbum = loaded.photoFromAlbum
         cfg.textMinWords = loaded.textMinWords; cfg.textNoRepeat = loaded.textNoRepeat

@@ -1,4 +1,4 @@
-package com.zerolab.checkin.ui.detail
+﻿package com.zerolab.checkin.ui.detail
 
 import android.content.Intent
 import android.os.Bundle
@@ -60,7 +60,6 @@ class ItemDetailActivity : AppCompatActivity() {
         if (!cfg.journalMode && interactive.size > 1 && cfg.comboRequired in 1..interactive.size)
             sb.appendLine("完成规则：完成 ${cfg.comboRequired}/${interactive.size} 项即完成")
         if (!cfg.journalMode) sb.appendLine("负打卡（状态反转）：${if (cfg.negative) "是" else "否"}")
-        // v1.1.8：双时间自定义负打卡已移除（老数据 customNeg 不再展示）
         if (cfg.textMinWords > 0 && Method.TEXT.key in cfg.methods) sb.appendLine("文字最低字数：${cfg.textMinWords}")
         if (Method.LOCATION.key in cfg.methods) {
             sb.appendLine("位置负打卡：${if (cfg.locNegative) "是（离开范围有效）" else "否（范围内有效）"}")

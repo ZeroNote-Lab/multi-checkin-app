@@ -31,6 +31,7 @@
 - 修复新建心情日记被存成「拍照 + 文字 + 语音 + 位置」（打卡时应弹心情选择却弹组合方式）；同时兼容旧脏数据，心情日记打卡固定只走心情记录。
 - 修复旧版单媒体路径（`blocks[].path`）素材缺失时未被清理的问题。
 - 清理死代码：应用内相机实现与布局 / 资源、`MoodChartMenu`、未使用的「一键修复」入口、对应 DAO / 仓储方法与日期工具中的废弃自定义负打卡代码。
+- 清理已废弃的配置字段与分支：双时间自定义负打卡（`customNeg` / `t1` / `t2`）与未使用的 `offsetBackfill`；旧数据文件仍可正常解析（未知字段忽略）。
 - 单元测试扩展到 72 个：新增保存计划、`ItemConfig` 序列化与旧格式兼容解析、记录媒体路径改写（为此引入真实的 `org.json` 测试依赖）。
 - 重构打卡引擎：抽出最小数据接口 `CheckinStore`（生产实现仍为 `CheckinRepository`），`dayInfo` / `streak` / `perform` / `subDayProgress` / `groupDayInfo` / `offsetBackfill` 支持注入 `today` / `now`，状态机可用内存假仓库测试。
 - 新增 `CheckinEngineTest` 30 个用例（日状态、排期、连续天数、组合进度、打卡写入 / 次数上限 / 负打卡盾牌 / 时间窗 / 日记多次记录）。

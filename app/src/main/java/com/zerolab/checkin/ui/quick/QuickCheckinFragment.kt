@@ -1,4 +1,4 @@
-package com.zerolab.checkin.ui.quick
+﻿package com.zerolab.checkin.ui.quick
 
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -667,16 +667,6 @@ class QuickCheckinFragment : Fragment() {
                 btnCheckin.isEnabled = false; grayBtn()
             }
             isAuto -> { statusView.text = "状态：自动打卡"; btnCheckin.text = "⚡ 自动打卡，无需操作"; btnCheckin.isEnabled = false; grayBtn() }
-            cfg.customNeg -> {
-                val hasFail = todayRecs.any { it.status == "FAIL" }
-                val hasSucc = todayRecs.any { it.status == "SUCCESS" }
-                statusView.text = when {
-                    cnt == 0 -> "状态：坚持中（无操作=成功）"
-                    hasFail -> "状态：今天未打卡（破戒 ${todayRecs.count { it.status == "FAIL" }} 次）"
-                    else -> "状态：今天已打卡 ✓"
-                }
-                btnCheckin.text = "打卡（按当前时段判定）"
-            }
             neg -> {
                 // v1.3.8：破戒次数只数 FAIL；有盾牌抵消（OFFSET）时显示补卡状态，不算破戒
                 val fails = todayRecs.count { it.status == "FAIL" }

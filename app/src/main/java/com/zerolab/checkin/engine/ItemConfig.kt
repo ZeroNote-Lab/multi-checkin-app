@@ -1,4 +1,4 @@
-package com.zerolab.checkin.engine
+﻿package com.zerolab.checkin.engine
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,13 +26,10 @@ class ItemConfig {
     // v1.4.0：每日 N 次需全部完成才算成功（不足显示部分完成；仅单方式且 dailyLimit>=2 生效）
     var dailyAllRequired: Boolean = false
     var negative: Boolean = false           // 负打卡：状态反转（操作=失败，无操作=成功）
-    var customNeg: Boolean = false          // 已废弃 v1.1.8（仅兼容老数据解析，不再参与任何逻辑）
-    var t1: String = "05:00"                // 已废弃 v1.1.8
-    var t2: String = "15:00"                // 已废弃 v1.1.8
     var timeWindowEnabled: Boolean = false     // 固定时间段打卡（v1.1.6）：仅窗口内可打卡成功
     var twStart: String = "05:00"              // 窗口开始（不含跨天）
     var twEnd: String = "08:30"                // 窗口结束
-    var offsetBackfill: Boolean = false     // 负打卡补签
+
 
     // 各方式参数
     var photoFromCamera: Boolean = true
@@ -89,11 +86,11 @@ class ItemConfig {
         o.put("dailyLimit", dailyLimit)
         o.put("dailyAllRequired", dailyAllRequired)
         o.put("negative", negative)
-        o.put("customNeg", customNeg)
-        o.put("t1", t1); o.put("t2", t2)
+
+
         o.put("timeWindowEnabled", timeWindowEnabled)
         o.put("twStart", twStart); o.put("twEnd", twEnd)
-        o.put("offsetBackfill", offsetBackfill)
+
         o.put("photoFromCamera", photoFromCamera)
         o.put("photoFromAlbum", photoFromAlbum)
         o.put("textMinWords", textMinWords)
@@ -152,11 +149,11 @@ class ItemConfig {
                 c.dailyLimit = o.optInt("dailyLimit", 1)
                 c.dailyAllRequired = o.optBoolean("dailyAllRequired", false)
                 c.negative = o.optBoolean("negative", false)
-                c.customNeg = o.optBoolean("customNeg", false)
-                c.t1 = o.optString("t1", "05:00"); c.t2 = o.optString("t2", "15:00")
+        
+        
                 c.timeWindowEnabled = o.optBoolean("timeWindowEnabled", false)
                 c.twStart = o.optString("twStart", "05:00"); c.twEnd = o.optString("twEnd", "08:30")
-                c.offsetBackfill = o.optBoolean("offsetBackfill", false)
+        
                 c.photoFromCamera = o.optBoolean("photoFromCamera", true)
                 c.photoFromAlbum = o.optBoolean("photoFromAlbum", true)
                 c.textMinWords = o.optInt("textMinWords", 1)
