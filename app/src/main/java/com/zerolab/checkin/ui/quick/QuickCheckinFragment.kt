@@ -237,8 +237,9 @@ class QuickCheckinFragment : Fragment() {
             // 折线按钮只在随心记显示
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.VISIBLE
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.text = "⌄"
-            // v1.4.0：悬浮"写一条"按钮替代内嵌打卡按钮
-            view?.findViewById<android.view.View>(R.id.btn_journal_write)?.visibility = View.VISIBLE
+            // v1.4.0：悬浮"写一条"按钮替代内嵌打卡按钮；v1.4.2：暂停项不显示
+            view?.findViewById<android.view.View>(R.id.btn_journal_write)?.visibility =
+                if (q.isActive == 1) View.VISIBLE else View.GONE
             btnCheckin.visibility = View.GONE
             // 滚动区底部留白，避免最后一条记录被悬浮按钮挡住
             val pad = resources.displayMetrics.density.toInt()
@@ -278,8 +279,10 @@ class QuickCheckinFragment : Fragment() {
             btnCheckin.elevation = 6f * resources.displayMetrics.density
             btnCheckin.text = "记录"
         }
-        // 记录栏随快捷项/刷新重置为今日，避免残留上一项
-        showDayDetail(DateUtils.today())
+        // v1.4.2：记录栏默认选中「归属日」（时间分割时凌晨为前一天），并同步日历选中圈
+        val effToday = CheckinEngine.effectiveToday(q)
+        calendar.selectedDate = effToday
+        showDayDetail(effToday)
     }
 
     private fun shiftMonth(delta: Int) {
@@ -422,11 +425,15 @@ class QuickCheckinFragment : Fragment() {
 
     private fun renderToday() {
         val it = item ?: return
-        val today = DateUtils.today()
+        // v1.4.2：时间分割下「今天」取归属日（凌晨 0–2 点打卡归前一天），状态卡与记录都以归属日为准
+        val today = CheckinEngine.effectiveToday(it)
+        val naturalToday = DateUtils.today()
         val todayRecs = repo.recordsOfDay(it.id, today)
+        val paused = it.isActive == 0
         // v1.3.15：打卡组——隐藏日期备注栏，显示组子项区（小日历 + 子项列表，无 box）
-        val isGroup = cfg.groupMode
+        val isGroup = cfg.groupMode && !paused
         root.findViewById<View>(R.id.day_detail_bar).visibility = if (isGroup) View.GONE else View.VISIBLE
+        root.findViewById<View>(R.id.status_bar).visibility = if (isGroup) View.GONE else View.VISIBLE
         val groupTitle = root.findViewById<TextView>(R.id.group_members_title)
         val groupBox = root.findViewById<LinearLayout>(R.id.group_members_box)
         groupTitle.visibility = if (isGroup) View.VISIBLE else View.GONE
@@ -437,7 +444,6 @@ class QuickCheckinFragment : Fragment() {
         val cnt = if (mood) todayRecs.count { r -> r.status == "SUCCESS" && moodOf(r) != null } else todayRecs.size
         val neg = CheckinEngine.isNegative(cfg)
         val interactive = cfg.methods.filter { m -> m != Method.AUTO.key }
-        val paused = it.isActive == 0
         val isAuto = Method.AUTO.key in cfg.methods
         val statusView = root.findViewById<TextView>(R.id.tv_today_status)
         val streakView = root.findViewById<TextView>(R.id.tv_streak)
@@ -461,6 +467,11 @@ class QuickCheckinFragment : Fragment() {
         btnCheckin.background?.setTint(ThemeManager.of(it.theme).primary)
         btnCheckin.isEnabled = true
         when {
+            // v1.4.2：暂停项一律不可打卡，且排在所有类型判断之前（此前习惯打卡会漏判）
+            paused -> {
+                statusView.text = "状态：已暂停（恢复后才能打卡）"
+                btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn()
+            }
             // v1.3.13 打卡组：展示子项进度（点击子项进入打卡页），完成全部子项后自动记组成功
             cfg.groupMode -> {
                 val members = cfg.groupMembers
@@ -531,7 +542,6 @@ class QuickCheckinFragment : Fragment() {
                     }
                 }
             }
-            paused -> { statusView.text = "状态：已暂停"; btnCheckin.text = "已暂停"; btnCheckin.isEnabled = false; grayBtn() }
             // v1.2.0 随心记 / v1.3.0 心情日记：记录 / 继续记录（一天可多次，只记成功）
             journal || mood -> {
                 // v1.3.33：去掉记录次数（焦虑感），按钮恒为"记录"
@@ -608,7 +618,16 @@ class QuickCheckinFragment : Fragment() {
                 else { statusView.text = "状态：$cnt/${cfg.dailyLimit}"; btnCheckin.text = if (cnt == 0) "打卡" else "继续打卡 ($cnt/${cfg.dailyLimit})" }
             }
         }
+        // v1.4.2：时间分割下明确提示归属日（如凌晨 1 点打卡显示「归属 10月25日」而不是记到今天）
+        if (!paused && today != naturalToday) {
+            statusView.text = statusView.text.toString() + "（归属 ${monthDay(today)}）"
+        }
     }
+
+    /** v1.4.2：yyyy-MM-dd → M月d日 */
+    private fun monthDay(date: String): String = try {
+        "${date.substring(5, 7).toInt()}月${date.substring(8, 10).toInt()}日"
+    } catch (_: Exception) { date }
 
     private fun grayBtn() { btnCheckin.background?.setTint(0xFFB6BCC9.toInt()) }
 
@@ -708,7 +727,7 @@ class QuickCheckinFragment : Fragment() {
         col.addView(metaRow)
         row.addView(col)
         // 右侧：40dp 进度环（方案D）——已打卡=绿色满环 ✓，未完成=橙色进度 done/total
-        val pr = CheckinEngine.subDayProgress(m, DateUtils.today(), repo)
+        val pr = CheckinEngine.subDayProgress(m, CheckinEngine.effectiveToday(m), repo)
         val done = pr[0]
         val total = if (pr[1] <= 0) 1 else pr[1]
         val ring = RingView(requireContext()).apply {
@@ -747,6 +766,7 @@ class QuickCheckinFragment : Fragment() {
             else -> recs.size
         }
         val statePrefix = when {
+            recs.isEmpty() -> "○"
             recs.any { it.status == "OFFSET" } -> "↩"
             recs.any { it.isAuto == 1 } -> "⚡"
             recs.any { it.status == "FAIL" } -> "❌"
@@ -759,24 +779,25 @@ class QuickCheckinFragment : Fragment() {
             cfg.moodMode || cfg.journalMode -> "$statePrefix $date"
             else -> "$statePrefix $date  共 $shownCount 条记录"
         }
+        // v1.4.2：管理员模式下，长按日期标题或备注即可补录（已有记录的日期也能继续补多条）
+        if (AdminMode.isOn) {
+            val citem = it
+            title.text = title.text.toString() + "  🛠"
+            title.setOnLongClickListener { adminDayMenu(citem, date); true }
+            body.setOnLongClickListener { adminDayMenu(citem, date); true }
+        }
         if (recs.isEmpty()) {
             body.text = when {
                 // v1.2.0：随心记 / v1.3.0：心情日记无记录日不显示缺卡文案（不染色）
                 cfg.moodMode -> "😊 该日无记录（心情日记不记缺卡）"
                 cfg.journalMode -> "📔 该日无记录（随心记不记缺卡）"
-                date == DateUtils.today() -> if (neg) "⏳ 今天暂无操作（坚持中）" else "⏳ 今天尚未打卡"
+                date == CheckinEngine.effectiveToday(it) -> if (neg) "⏳ 今天暂无操作（坚持中）" else "⏳ 今天尚未打卡"
                 neg -> "✅ 已打卡（当天无操作）"
                 else -> "❌ 未打卡（缺卡）"
             }
             // v1.3.7：负打卡无操作日=成功日，不提供补签；正常模式缺卡日提供手动补签
             if (!neg) offerManualBackfill(it, date, neg)
-            // v1.3.18：超级管理员——未打卡日期可长按补录（成功/补签/破戒）
-            if (AdminMode.isOn) {
-                val citem = it
-                body.setOnLongClickListener {
-                    adminBackfillMenu(citem, date); true
-                }
-            }
+            if (AdminMode.isOn) recordsBox.addView(adminAddButton(it, date))
             return
         }
         // v1.3.0：心情折线图置于记录区第一行（当天 ≥2 条带心情记录且开关开启）
@@ -804,6 +825,8 @@ class QuickCheckinFragment : Fragment() {
                 }
                 row.addView(ts)
                 renderJournalBlocks(r)?.let { row.addView(it) }
+                // v1.4.2：管理员长按块流记录 → 记录级菜单（可编辑日记内容）
+                if (AdminMode.isOn) row.setOnLongClickListener { showRecordAdminMenu(r, date); true }
                 recordsBox.addView(row)
                 return@forEach
             }
@@ -900,8 +923,10 @@ class QuickCheckinFragment : Fragment() {
             if (mediaRow.childCount > 0) row.addView(mediaRow)
             recordsBox.addView(row)
         }
+        // v1.4.2：管理员补录入口固定显示在记录区底部（多次打卡项可逐条补到满足次数）
+        if (AdminMode.isOn) recordsBox.addView(adminAddButton(it, date))
         // v1.3.7：负打卡破戒日（过去 + 有 FAIL 且未补签）提供手动补签（蓝色圆圈 ↩）
-        if (neg && date < DateUtils.today() && recs.any { it.status == "FAIL" } && recs.none { it.status == "OFFSET" }) {
+        if (neg && date < CheckinEngine.effectiveToday(it) && recs.any { it.status == "FAIL" } && recs.none { it.status == "OFFSET" }) {
             offerManualBackfill(it, date, neg)
         }
     }
@@ -1199,7 +1224,7 @@ class QuickCheckinFragment : Fragment() {
 
     /** 过去缺卡/破戒日且有抵消机会时，提供手动补签（v1.3.7：负打卡破戒日也可补签） */
     private fun offerManualBackfill(it: CheckinItem, date: String, neg: Boolean) {
-        if (date >= DateUtils.today()) return
+        if (date >= CheckinEngine.effectiveToday(it)) return
         if (!cfg.offset.enabled) return
         val avail = repo.availableCredits(it.id)
         if (avail <= 0) return
@@ -1223,7 +1248,7 @@ class QuickCheckinFragment : Fragment() {
         // v1.3.8：负打卡不自动补历史破戒日——破戒当天由盾牌直接抵消（蓝卡），历史破戒只支持手动补签
         if (CheckinEngine.isNegative(cfg)) return
         val created = DateUtils.dateOf(it.createdAt)
-        var d = DateUtils.addDays(DateUtils.today(), -1)
+        var d = DateUtils.addDays(CheckinEngine.effectiveToday(it), -1)
         var guard = 0
         while (d >= created && guard++ < 400) {
             if (repo.availableCredits(it.id) <= 0) break
@@ -1233,24 +1258,38 @@ class QuickCheckinFragment : Fragment() {
             d = DateUtils.addDays(d, -1)
         }
     }
-    /** v1.3.17：超级管理员——记录操作菜单（按记录内容动态生成） */
+    /** v1.3.17：超级管理员——记录操作菜单 */
     /** v1.3.18：补充「修改打卡时间」「更换照片」，覆盖不同打卡方式的记录内容 */
+    /** v1.4.2：补齐记录级全字段（归属日期 / 心情 / 自动标记 / 日记块流 / 抵消机会 / 本日补录） */
     private fun showRecordAdminMenu(r: CheckinRecord, date: String) {
+        val citem = item ?: return
         val opts = mutableListOf<String>()
+        opts += "补录一条同日记录"
         opts += "修改状态"
         opts += "修改打卡时间"
+        opts += "修改归属日期"
         if (!r.textContent.isNullOrBlank()) opts += "修改文字"
+        if (hasJournalBlocks(r)) opts += "编辑日记内容"
+        if (cfg.moodMode || moodOf(r) != null) opts += "修改心情"
+        opts += if (r.isAuto == 1) "取消自动标记" else "标记为自动打卡"
         if (recordPhotoList(r).isNotEmpty()) { opts += "添加图片"; opts += "删除图片" }
         if (r.voicePath?.isNotBlank() == true) opts += "删除语音"
         if (r.latitude != null && r.longitude != null) opts += "删除位置"
+        opts += "增减 🛡️ 抵消机会"
         opts += "删除整条记录"
         AlertDialog.Builder(requireContext())
             .setTitle("管理员 · 记录操作（$date）")
             .setItems(opts.toTypedArray()) { _, w ->
                 when (opts[w]) {
+                    "补录一条同日记录" -> adminDayMenu(citem, date)
                     "修改状态" -> changeRecordStatus(r)
                     "修改打卡时间" -> editRecordTime(r, date)
+                    "修改归属日期" -> editRecordDate(r)
                     "修改文字" -> editRecordText(r)
+                    "编辑日记内容" -> openJournalEditor(r)
+                    "修改心情" -> editRecordMood(r)
+                    "标记为自动打卡" -> { repo.updateRecord(r.copy(isAuto = 1)); toast("已标记为自动"); refresh() }
+                    "取消自动标记" -> { repo.updateRecord(r.copy(isAuto = 0)); toast("已取消自动标记"); refresh() }
                     "添加图片" -> addRecordPhotos(r)
                     "删除位置" -> {
                         repo.updateRecord(r.copy(latitude = null, longitude = null, extraJson = clearLocName(r.extraJson)))
@@ -1264,6 +1303,7 @@ class QuickCheckinFragment : Fragment() {
                         toast("已删除该条记录的语音")
                         refresh()
                     }
+                    "增减 🛡️ 抵消机会" -> adminCreditsMenu(citem)
                     "删除整条记录" -> {
                         AlertDialog.Builder(requireContext())
                             .setTitle("删除打卡记录")
@@ -1377,22 +1417,132 @@ class QuickCheckinFragment : Fragment() {
             }.show()
     }
 
-    /** v1.3.18：管理员——未打卡日期补录（成功/补签/破戒，checkinTime 取该日 12:00:00） */
-    private fun adminBackfillMenu(it: CheckinItem, date: String) {
-        AlertDialog.Builder(requireContext())
-            .setTitle("管理员 · 补录 $date")
-            .setItems(arrayOf("补一条成功记录", "补一条补签记录", "补一条破戒记录")) { _, w ->
-                val st = when (w) { 1 -> "OFFSET"; 2 -> "FAIL"; else -> "SUCCESS" }
-                val t = try {
-                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
-                        .parse("$date 12:00:00")?.time ?: System.currentTimeMillis()
-                } catch (_: Exception) { System.currentTimeMillis() }
-                repo.insertRecord(com.zerolab.checkin.data.entity.CheckinRecord(
-                    itemId = it.id, checkinDate = date, checkinTime = t, status = st))
-                toast("已补录一条${arrayOf("成功", "补签", "破戒")[w]}记录")
-                refresh()
-            }.setNegativeButton("取消", null).show()
+    /** v1.4.2：管理员补录入口（记录区底部，点一下就能继续补录） */
+    private fun adminAddButton(it: CheckinItem, date: String): View {
+        val d = resources.displayMetrics.density
+        val citem = it
+        return TextView(requireContext()).apply {
+            text = "🛠 管理员：补录 / 修改 $date"
+            textSize = 12f
+            setTextColor(0xFF9AA1B2.toInt())
+            setPadding(0, (8 * d).toInt(), 0, 0)
+            setOnClickListener { adminDayMenu(citem, date) }
+        }
     }
+
+    /** v1.4.2：管理员——按日期补录/清理。已有多条记录的日期也能继续补，解决「多次打卡打不满」 */
+    private fun adminDayMenu(it: CheckinItem, date: String) {
+        val existing = repo.recordsOfDay(it.id, date)
+        val opts = mutableListOf<String>()
+        opts += "补录成功记录"
+        opts += "补录补签记录"
+        opts += "补录破戒记录"
+        opts += "补录并标记为「自动」"
+        opts += "增减 🛡️ 抵消机会"
+        if (existing.isNotEmpty()) opts += "清空该日全部记录"
+        AlertDialog.Builder(requireContext())
+            .setTitle("管理员 · $date（现有 ${existing.size} 条）")
+            .setItems(opts.toTypedArray()) { _, w ->
+                when (opts[w]) {
+                    "补录成功记录" -> adminInsertRecord(it, date, "SUCCESS", false)
+                    "补录补签记录" -> adminInsertRecord(it, date, "OFFSET", false)
+                    "补录破戒记录" -> adminInsertRecord(it, date, "FAIL", false)
+                    "补录并标记为「自动」" -> adminInsertRecord(it, date, "SUCCESS", true)
+                    "增减 🛡️ 抵消机会" -> adminCreditsMenu(it)
+                    "清空该日全部记录" -> confirmClearDay(it, date, existing)
+                }
+            }.show()
+    }
+
+    /** v1.4.2：管理员补录一条记录（直接入库，不受每日次数限制） */
+    private fun adminInsertRecord(it: CheckinItem, date: String, status: String, auto: Boolean) {
+        val t = if (date == DateUtils.today()) System.currentTimeMillis() else try {
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                .parse("$date 12:00:00")?.time ?: System.currentTimeMillis()
+        } catch (_: Exception) { System.currentTimeMillis() }
+        repo.insertRecord(com.zerolab.checkin.data.entity.CheckinRecord(
+            itemId = it.id, checkinDate = date, checkinTime = t,
+            status = status, isAuto = if (auto) 1 else 0))
+        // 打卡组子项补录后，尝试让组当日自动完成（幂等）
+        try { CheckinEngine.maybeAutoGroup(it, repo, date) } catch (_: Exception) {}
+        val label = when (status) { "OFFSET" -> "补签"; "FAIL" -> "破戒"; else -> "成功" }
+        toast("已补录一条${label}记录（${date}）")
+        refresh()
+    }
+
+    /** v1.4.2：管理员——清空某日全部记录（不动物料文件） */
+    private fun confirmClearDay(item: CheckinItem, date: String, recs: List<CheckinRecord>) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("清空 $date 的记录")
+            .setMessage("将删除该日 ${recs.size} 条记录（不影响其他日期），确定？")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("删除") { _, _ ->
+                recs.forEach { r -> repo.deleteRecord(r.id) }
+                toast("已清空该日记录")
+                refresh()
+            }.show()
+    }
+
+    /** v1.4.2：管理员——手动增减 🛡️ 抵消机会 */
+    private fun adminCreditsMenu(it: CheckinItem) {
+        val avail = repo.availableCredits(it.id)
+        AlertDialog.Builder(requireContext())
+            .setTitle("🛡️ 抵消机会（当前可用 $avail）")
+            .setItems(arrayOf("+1 个", "+3 个", "−1 个", "−3 个")) { _, w ->
+                when (w) {
+                    0 -> repo.grantCredits(it.id, 1, DateUtils.today())
+                    1 -> repo.grantCredits(it.id, 3, DateUtils.today())
+                    2 -> repo.revokeCredits(it.id, 1)
+                    else -> repo.revokeCredits(it.id, 3)
+                }
+                toast("已更新：可用 ${repo.availableCredits(it.id)} 个")
+                refresh()
+            }.show()
+    }
+
+    /** v1.4.2：管理员——修改记录归属日期（保留原时刻） */
+    private fun editRecordDate(r: CheckinRecord) {
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = r.checkinTime
+        android.app.DatePickerDialog(requireContext(), { _, y, m0, d ->
+            val date = "%04d-%02d-%02d".format(y, m0 + 1, d)
+            val hh = cal.get(Calendar.HOUR_OF_DAY); val mm = cal.get(Calendar.MINUTE)
+            val t = try {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+                    .parse("$date %02d:%02d".format(hh, mm))?.time
+            } catch (_: Exception) { null }
+            repo.updateRecord(r.copy(checkinDate = date, checkinTime = t ?: r.checkinTime))
+            toast("归属日期已改为 $date")
+            refresh()
+        }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+    }
+
+    /** v1.4.2：管理员——修改记录心情档位 */
+    private fun editRecordMood(r: CheckinRecord) {
+        val labels = arrayOf("😄 开心", "🙂 不错", "😐 一般", "😟 低落", "😖 很差", "清除心情")
+        AlertDialog.Builder(requireContext())
+            .setTitle("修改心情")
+            .setItems(labels) { _, w ->
+                val jo = try { org.json.JSONObject(r.extraJson ?: "{}") } catch (_: Exception) { org.json.JSONObject() }
+                if (w == 5) jo.remove("mood") else jo.put("mood", w + 1)
+                repo.updateRecord(r.copy(extraJson = if (jo.length() == 0) null else jo.toString()))
+                toast("心情已更新")
+                refresh()
+            }.show()
+    }
+
+    /** v1.4.2：管理员——编辑随心记块流内容（复用日记编辑页，覆盖原记录） */
+    private fun openJournalEditor(r: CheckinRecord) {
+        val it = item ?: return
+        startActivity(android.content.Intent(requireContext(), com.zerolab.checkin.ui.journal.JournalEditActivity::class.java)
+            .putExtra(com.zerolab.checkin.ui.journal.JournalEditActivity.EXTRA_ITEM_ID, it.id)
+            .putExtra(com.zerolab.checkin.ui.journal.JournalEditActivity.EXTRA_RECORD_ID, r.id))
+    }
+
+    /** v1.4.2：该记录是否为块流日记（有 blocks 数组） */
+    private fun hasJournalBlocks(r: CheckinRecord): Boolean = try {
+        org.json.JSONObject(r.extraJson ?: "{}").has("blocks")
+    } catch (_: Exception) { false }
 
     /** 修改记录文字内容 */
     private fun editRecordText(r: CheckinRecord) {        val et = android.widget.EditText(requireContext()).apply {

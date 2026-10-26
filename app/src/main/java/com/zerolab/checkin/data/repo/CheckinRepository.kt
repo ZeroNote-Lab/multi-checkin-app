@@ -79,6 +79,15 @@ class CheckinRepository(private val db: AppDatabase) {
     fun setActive(id: Long, active: Boolean) {
         val it = itemDao.getById(id) ?: return
         itemDao.update(it.copy(isActive = if (active) 1 else 0))
+        if (!active) {
+            // v1.4.2：暂停的快捷项自动把快捷让给下一个启用项（排除组内子项），没有则清空
+            if (quickDao.get()?.itemId == id) {
+                quickDao.upsert(QuickConfig(1, pickNextQuick(id)))
+            }
+        } else if (quickDao.get()?.itemId == null) {
+            // 恢复时若当前没有快捷项（全部暂停过），把恢复项设为快捷
+            quickDao.upsert(QuickConfig(1, id))
+        }
     }
 
     // ---------- 快捷打卡 ----------
@@ -120,6 +129,18 @@ class CheckinRepository(private val db: AppDatabase) {
     fun creditsOf(itemId: Long) = creditDao.ofItem(itemId)
     fun availableCredits(itemId: Long): Int = creditDao.availableCount(itemId)
     fun grantCredit(c: OffsetCredit): Long = creditDao.insert(c)
+    /** v1.4.2 管理员：手动发放 count 个盾牌 */
+    fun grantCredits(itemId: Long, count: Int, date: String) {
+        repeat(count.coerceAtLeast(0)) {
+            creditDao.insert(OffsetCredit(itemId = itemId, mode = "M", earnedDate = date))
+        }
+    }
+    /** v1.4.2 管理员：撤销 count 个未使用盾牌，返回实际撤销数 */
+    fun revokeCredits(itemId: Long, count: Int): Int {
+        val list = creditDao.unusedOfItem(itemId, count.coerceAtLeast(0))
+        list.forEach { creditDao.deleteById(it.id) }
+        return list.size
+    }
     fun consumeOne(itemId: Long, date: String, recordId: Long?): Boolean {
         val c = creditDao.firstAvailable(itemId) ?: return false
         creditDao.update(c.copy(isUsed = 1, usedDate = date, usedRecordId = recordId))

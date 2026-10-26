@@ -1793,37 +1793,18 @@ class CreateItemActivity : AppCompatActivity() {
         refreshAll()
     }
 
-    /** v1.3.19：弹窗内获取当前位置并加入 target 的标准点列表 */
+    /** v1.3.19：弹窗内获取当前位置并加入 target 的标准点列表；v1.4.2：实时定位，不再读历史缓存 */
     private fun fetchLocationInDialog(target: ItemConfig, tv: TextView, onDone: () -> Unit) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             toast("需要定位权限")
             return
         }
-        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        val loading = android.app.AlertDialog.Builder(this).setMessage("正在获取当前位置…").setCancelable(false).show()
-        val best = java.util.concurrent.atomic.AtomicReference<Location?>(null)
-        val providers = try {
-            lm.getProviders(true).filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
-                .ifEmpty { lm.getProviders(true) }
-        } catch (_: Exception) { emptyList() }
-        for (p in providers) {
-            try { val l = lm.getLastKnownLocation(p) ?: continue; if (best.get() == null || l.accuracy < (best.get()?.accuracy ?: 9999f)) best.set(l) } catch (_: Exception) {}
-        }
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val listener = object : LocationListener {
-            override fun onLocationChanged(l: Location) { best.set(l); latch.countDown() }
-            override fun onProviderEnabled(p: String) {}
-            override fun onProviderDisabled(p: String) {}
-            @Deprecated("deprecated") override fun onStatusChanged(p: String?, s: Int, b: Bundle?) {}
-        }
-        for (p in providers) { try { lm.requestLocationUpdates(p, 0L, 0f, listener, mainLooper) } catch (_: Exception) {} }
+        val loading = android.app.AlertDialog.Builder(this).setMessage("正在获取实时位置…").setCancelable(false).show()
         thread {
-            latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+            val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
             runOnUiThread {
-                try { lm.removeUpdates(listener) } catch (_: Exception) {}
-                loading.dismiss()
-                val l = best.get()
-                if (l == null) { toast("定位失败，请到空旷处重试"); return@runOnUiThread }
+                try { loading.dismiss() } catch (_: Exception) {}
+                if (fix == null) { toast("定位失败（未使用历史缓存），请到室外/窗边重试"); return@runOnUiThread }
                 val etR = EditText(this).apply {
                     inputType = android.text.InputType.TYPE_CLASS_NUMBER
                     setText("200"); textSize = 14f; setPadding(24, 18, 24, 18)
@@ -1833,14 +1814,14 @@ class CreateItemActivity : AppCompatActivity() {
                 box2.addView(etR)
                 android.app.AlertDialog.Builder(this)
                     .setTitle("确认作为标准位置？")
-                    .setMessage("位置：${formatLatLng(l.latitude, l.longitude)}\n允许半径（米，50-5000，默认200）")
+                    .setMessage("位置：${formatLatLng(fix.lat, fix.lng)}\n定位来源：${fix.sourceText()}\n允许半径（米，50-5000，默认200）")
                     .setView(box2)
                     .setNegativeButton("取消", null)
                     .setPositiveButton("使用该位置") { _, _ ->
                         val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
-                        target.locPoints.add(LocatePoint("位置${target.locPoints.size + 1}", l.latitude, l.longitude, r))
+                        target.locPoints.add(LocatePoint("位置${target.locPoints.size + 1}", fix.lat, fix.lng, r))
                         tv.text = "已设定 ${target.locPoints.size} 个标准点：\n" +
-                            target.locPoints.joinToString("\n") { "· ${it.name} ${formatLatLng(it.lat, it.lng)} 半径${it.radius}m" }
+                            target.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
                         onDone()
                     }.show()
             }
@@ -2105,34 +2086,12 @@ class CreateItemActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun fetchLocation() {
-        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        val loading = android.app.AlertDialog.Builder(this).setMessage("正在获取当前位置…").setCancelable(false).show()
-        val best = java.util.concurrent.atomic.AtomicReference<Location?>(null)
-        val providers = try {
-            lm.getProviders(true).filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
-                .ifEmpty { lm.getProviders(true) }
-        } catch (_: Exception) { emptyList() }
-        // 先取缓存
-        for (p in providers) {
-            try { val l = lm.getLastKnownLocation(p) ?: continue; if (best.get() == null || l.accuracy < (best.get()?.accuracy ?: 9999f)) best.set(l) } catch (_: Exception) {}
-        }
-        // 主动监听一次更新（真机/模拟器 geo fix 都会立即回调）
-        // v1.1.5：始终等待实时回调，避免误用缓存旧点（此前缓存有值直接返回旧坐标）
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val listener = object : LocationListener {
-            override fun onLocationChanged(l: Location) { best.set(l); latch.countDown() }
-            override fun onProviderEnabled(p: String) {}
-            override fun onProviderDisabled(p: String) {}
-            @Deprecated("deprecated") override fun onStatusChanged(p: String?, s: Int, b: Bundle?) {}
-        }
-        for (p in providers) { try { lm.requestLocationUpdates(p, 0L, 0f, listener, mainLooper) } catch (_: Exception) {} }
+        val loading = android.app.AlertDialog.Builder(this).setMessage("正在获取实时位置…").setCancelable(false).show()
         thread {
-            latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+            val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
             runOnUiThread {
-                try { lm.removeUpdates(listener) } catch (_: Exception) {}
-                loading.dismiss()
-                val l = best.get()
-                if (l == null) { toast("定位失败，请到空旷处重试"); return@runOnUiThread }
+                try { loading.dismiss() } catch (_: Exception) {}
+                if (fix == null) { toast("定位失败（未使用历史缓存），请到室外/窗边重试"); return@runOnUiThread }
                 val etR = EditText(this).apply {
                     inputType = android.text.InputType.TYPE_CLASS_NUMBER
                     setText("200"); textSize = 14f; setPadding(24, 18, 24, 18)
@@ -2146,16 +2105,15 @@ class CreateItemActivity : AppCompatActivity() {
                 box.addView(etR)
                 android.app.AlertDialog.Builder(this)
                     .setTitle("确认作为标准位置？")
-                    .setMessage("位置：${formatLatLng(l.latitude, l.longitude)}\n允许半径（米，50-5000，默认200）")
+                    .setMessage("位置：${formatLatLng(fix.lat, fix.lng)}\n定位来源：${fix.sourceText()}\n允许半径（米，50-5000，默认200）")
                     .setView(box)
                     .setNegativeButton("取消", null)
                     .setPositiveButton("使用该位置") { _, _ ->
                         val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
-                        cfg.locPoints.add(LocatePoint("位置${cfg.locPoints.size + 1}", l.latitude, l.longitude, r))
+                        cfg.locPoints.add(LocatePoint("位置${cfg.locPoints.size + 1}", fix.lat, fix.lng, r))
                         tvLocPoints?.text = "已设定 ${cfg.locPoints.size} 个标准点：\n" +
-                            cfg.locPoints.joinToString("\n") { "· ${it.name} ${formatLatLng(it.lat, it.lng)} 半径${it.radius}m" }
+                            cfg.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
                     }.show()
-
             }
         }
     }

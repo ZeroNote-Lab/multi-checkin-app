@@ -54,6 +54,8 @@ class ItemListFragment : Fragment() {
                 if (from < 0 || to < 0 || from == to) return false
                 // 置顶项不参与拖动（源/目标任一为置顶即拒绝）
                 if (items[from].isPinned == 1 || items[to].isPinned == 1) return false
+                // v1.4.2：暂停项固定在最底部，不参与拖动（源/目标任一为暂停即拒绝）
+                if (items[from].isActive == 0 || items[to].isActive == 0) return false
                 val moved = items.removeAt(from); items.add(to, moved)
                 adapter.moveRow(from, to)
                 persistOrder()
@@ -77,10 +79,11 @@ class ItemListFragment : Fragment() {
         reload()
     }
 
-    /** v1.1.7：拖拽后持久化未置顶项排序（置顶项不受影响） */
+    /** v1.1.7：拖拽后持久化未置顶项排序（置顶项不受影响）；v1.4.2：暂停项不写 sortOrder，恢复后仍回原位 */
     private fun persistOrder() {
         thread {
-            items.filter { it.isPinned == 0 }.forEachIndexed { idx, it -> repo.setSortOrder(it.id, idx) }
+            items.filter { it.isPinned == 0 && it.isActive == 1 }
+                .forEachIndexed { idx, it -> repo.setSortOrder(it.id, idx) }
         }
     }
 
@@ -166,8 +169,8 @@ class ItemListFragment : Fragment() {
             else { h.streak.visibility = View.VISIBLE; h.streak.text = "🔥 ${row.streak}天" }
             if (row.credits > 0 && !row.journal) { h.credits.visibility = View.VISIBLE; h.credits.text = "🛡️×${row.credits}" }
             else h.credits.visibility = View.GONE
-            // v1.1.7：拖动手柄——置顶项隐藏（不可拖动），暂停项弱化
-            h.drag.visibility = if (item.isPinned == 1) View.INVISIBLE else View.VISIBLE
+            // v1.1.7：拖动手柄——置顶/暂停项隐藏（不可拖动）
+            h.drag.visibility = if (item.isPinned == 1 || item.isActive == 0) View.INVISIBLE else View.VISIBLE
             h.drag.alpha = if (item.isActive == 0) 0.3f else 1f
             h.drag.setOnLongClickListener { touchHelper.startDrag(h); true }
             h.itemView.alpha = if (item.isActive == 0) 0.5f else 1f
@@ -197,22 +200,20 @@ class ItemListFragment : Fragment() {
             .setTitle(item.name)
             .setItems(options.toTypedArray()) { _, which ->
                 thread {
-                    val act = which
-                    when (act) {
-                        0 -> {
-                            repo.setQuick(if (isQuick) null else item.id)
-                            // 写入完成后立即通知快捷页刷新，避免切回时读到旧值（状态栏残留）
-                            activity?.runOnUiThread {
-                                (activity as? com.zerolab.checkin.ui.main.MainActivity)?.refreshQuick()
-                            }
-                        }
+                    when (which) {
+                        0 -> repo.setQuick(if (isQuick) null else item.id)
                         1 -> repo.setPinned(item.id, item.isPinned != 1)
                         2 -> repo.setActive(item.id, item.isActive == 0)
-                        3 -> {
-                            val i = Intent(requireContext(), CreateItemActivity::class.java)
-                            i.putExtra(CreateItemActivity.EXTRA_ID, item.id); startActivity(i)
+                        3 -> activity?.runOnUiThread {
+                            // v1.4.2：页面跳转回主线程执行（原实现从子线程 startActivity）
+                            startActivity(Intent(requireContext(), CreateItemActivity::class.java)
+                                .putExtra(CreateItemActivity.EXTRA_ID, item.id))
                         }
                         4 -> activity?.runOnUiThread { confirmDelete(item) }
+                    }
+                    // v1.4.2：快捷 / 暂停 / 置顶都会影响快捷页（暂停会把快捷项转移给下一项），统一刷新
+                    activity?.runOnUiThread {
+                        (activity as? com.zerolab.checkin.ui.main.MainActivity)?.refreshQuick()
                     }
                     reload()
                 }

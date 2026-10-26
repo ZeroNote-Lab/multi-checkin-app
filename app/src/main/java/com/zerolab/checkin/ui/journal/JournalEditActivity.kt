@@ -62,6 +62,9 @@ class JournalEditActivity : AppCompatActivity() {
 
     private val blocks = mutableListOf<Block>()
     private var itemId: Long = -1L
+    // v1.4.2：管理员编辑已存在的随心记记录（而不是新增一条）
+    private var recordId: Long = -1L
+    private var editingRecord: CheckinRecord? = null
     private val main = Handler(Looper.getMainLooper())
     private lateinit var container: LinearLayout
     private var audioRecorder = AudioRecorder()
@@ -75,6 +78,8 @@ class JournalEditActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_ITEM_ID = "extra_item_id"
+        /** v1.4.2：非空时编辑该条记录（管理员入口） */
+        const val EXTRA_RECORD_ID = "extra_record_id"
     }
 
     // ---- 图片多选（系统相册）----
@@ -146,7 +151,18 @@ class JournalEditActivity : AppCompatActivity() {
         window.statusBarColor = bgPaper
         setContentView(R.layout.activity_journal_edit)
         itemId = intent.getLongExtra(EXTRA_ITEM_ID, -1L)
+        recordId = intent.getLongExtra(EXTRA_RECORD_ID, -1L)
         container = findViewById(R.id.block_container)
+
+        // v1.4.2：管理员编辑已有记录——载入原块流内容，保存时覆盖该条记录
+        if (recordId > 0) {
+            editingRecord = (application as CheckinApp).repository
+                .allRecords(itemId).firstOrNull { it.id == recordId }
+            editingRecord?.let { r ->
+                findViewById<TextView>(R.id.tv_journal_title)?.text = "编辑记录"
+                loadBlocksFrom(r)
+            }
+        }
 
         findViewById<TextView>(R.id.btn_close).setOnClickListener { finish() }
         findViewById<TextView>(R.id.btn_save).setOnClickListener { save() }
@@ -154,9 +170,55 @@ class JournalEditActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.btn_add_voice).setOnClickListener { ensure(Manifest.permission.RECORD_AUDIO, permAudio) { startRecording() } }
         findViewById<TextView>(R.id.btn_add_location).setOnClickListener { ensure(Manifest.permission.ACCESS_FINE_LOCATION, permLocation) { doLocate() } }
 
-        // 初始：一个空白文字块
-        blocks.add(Block.TextBlock())
+        // 初始：编辑模式用原内容，新建模式给一个空白文字块
+        if (blocks.isEmpty()) blocks.add(Block.TextBlock())
         renderAll()
+    }
+
+    /** v1.4.2：把记录里的 blocks[] 还原成编辑块（兼容旧单字段记录） */
+    private fun loadBlocksFrom(r: CheckinRecord) {
+        blocks.clear()
+        val arr = try { JSONObject(r.extraJson ?: "{}").optJSONArray("blocks") } catch (_: Exception) { null }
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val b = arr.optJSONObject(i) ?: continue
+                when (b.optString("type")) {
+                    "text" -> b.optString("text").takeIf { it.isNotBlank() }?.let { blocks.add(Block.TextBlock(it)) }
+                    "photos", "photo" -> {
+                        val paths = mutableListOf<String>()
+                        b.optJSONArray("paths")?.let { pa ->
+                            for (j in 0 until pa.length()) pa.optString(j).takeIf { it.isNotBlank() }?.let { paths.add(it) }
+                        }
+                        if (paths.isEmpty()) b.optString("path").takeIf { it.isNotBlank() }?.let { paths.add(it) }
+                        if (paths.isNotEmpty()) blocks.add(Block.PhotoBlock(paths))
+                    }
+                    "voice" -> {
+                        val voices = mutableListOf<VoiceItem>()
+                        b.optJSONArray("voices")?.let { va ->
+                            for (j in 0 until va.length()) {
+                                val v = va.optJSONObject(j) ?: continue
+                                val p = v.optString("path")
+                                if (p.isNotBlank()) voices.add(VoiceItem(p, v.optInt("seconds", 0)))
+                            }
+                        }
+                        if (voices.isEmpty()) b.optString("path").takeIf { it.isNotBlank() }?.let {
+                            voices.add(VoiceItem(it, b.optInt("seconds", 0)))
+                        }
+                        if (voices.isNotEmpty()) blocks.add(Block.VoiceBlock(voices))
+                    }
+                    "location" -> {
+                        val name = b.optString("name")
+                        blocks.add(Block.LocationBlock(name, b.optDouble("lat", 0.0), b.optDouble("lng", 0.0)))
+                    }
+                }
+            }
+        }
+        // 旧数据（无 blocks）兜底：用顶层字段还原
+        if (blocks.isEmpty()) {
+            r.textContent?.takeIf { it.isNotBlank() }?.let { blocks.add(Block.TextBlock(it)) }
+            r.photoPath?.takeIf { it.isNotBlank() }?.let { blocks.add(Block.PhotoBlock(mutableListOf(it))) }
+            r.voicePath?.takeIf { it.isNotBlank() }?.let { blocks.add(Block.VoiceBlock(mutableListOf(VoiceItem(it, 0)))) }
+        }
     }
 
     private fun ensure(perm: String, launcher: androidx.activity.result.ActivityResultLauncher<String>, ok: () -> Unit) {
@@ -249,31 +311,23 @@ class JournalEditActivity : AppCompatActivity() {
             }.show()
     }
 
-    // ---- 定位 ----
+    // ---- 定位（v1.4.2：实时定位，不再读历史缓存） ----
     private fun doLocate() {
-        val loading = AlertDialog.Builder(this).setMessage("正在获取位置…").setCancelable(false).show()
+        val loading = AlertDialog.Builder(this).setMessage("正在获取实时位置…").setCancelable(false).show()
         thread {
-            val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
-            var best: android.location.Location? = null
-            try {
-                for (p in lm.getProviders(true)) {
-                    val l = lm.getLastKnownLocation(p) ?: continue
-                    if (best == null || l.accuracy < best!!.accuracy) best = l
-                }
-            } catch (_: SecurityException) {}
-            val l = best
+            val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
             main.post {
-                loading.dismiss()
-                if (l == null) { toast("无法获取定位"); return@post }
+                try { loading.dismiss() } catch (_: Exception) {}
+                if (fix == null) { toast("无法获取实时定位，请到室外/窗边重试"); return@post }
                 // 解析地名
                 val locLoading = AlertDialog.Builder(this).setMessage("正在解析位置名称…").setCancelable(false).show()
                 thread {
-                    val name = try { if (NetGeo.enabled(this)) NetGeo.regeo(this, l.latitude, l.longitude) else null } catch (_: Exception) { null }
+                    val name = try { if (NetGeo.enabled(this)) NetGeo.regeo(this, fix.lat, fix.lng) else null } catch (_: Exception) { null }
                     main.post {
                         locLoading.dismiss()
                         // 移除旧 LocationBlock（点第二次覆盖）
                         blocks.removeAll { it is Block.LocationBlock }
-                        blocks.add(Block.LocationBlock(name ?: "当前位置", l.latitude, l.longitude))
+                        blocks.add(Block.LocationBlock(name ?: "当前位置", fix.lat, fix.lng))
                         renderAll()
                         toast("已添加位置")
                     }
@@ -616,6 +670,28 @@ class JournalEditActivity : AppCompatActivity() {
         jo.put("method", "JOURNAL_BLOCKS")
         jo.put("blocks", arr)
         locName?.let { jo.put("locName", it) }
+
+        // v1.4.2：管理员编辑已有记录——直接覆盖该条记录的块流内容，不新增记录
+        val editing = editingRecord
+        if (editing != null) {
+            val repo = (application as CheckinApp).repository
+            thread {
+                val base = try { JSONObject(editing.extraJson ?: "{}") } catch (_: Exception) { JSONObject() }
+                base.put("method", "JOURNAL_BLOCKS")
+                base.put("blocks", arr)
+                if (locName != null) base.put("locName", locName!!) else base.remove("locName")
+                repo.updateRecord(editing.copy(
+                    photoPath = firstPhoto,
+                    textContent = firstText,
+                    voicePath = firstVoice,
+                    latitude = locLat,
+                    longitude = locLng,
+                    extraJson = base.toString()
+                ))
+                main.post { toast("已保存修改"); finish() }
+            }
+            return
+        }
 
         thread {
             val r = CheckinEngine.perform(

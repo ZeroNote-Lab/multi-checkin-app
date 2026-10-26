@@ -177,7 +177,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         if (interactive.size > 1) {
             comboMethods = interactive
             // v1.1.4：从数据库读取今日已完成方式，退出重进也能显示 ✅ 并禁止重复打卡
-            val recs = repo.recordsOfDay(item.id, DateUtils.today())
+            // v1.4.2：时间分割下按归属日读取
+            val recs = repo.recordsOfDay(item.id, CheckinEngine.effectiveToday(item))
             interactive.forEach { m ->
                 if (recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }) doneMethods.add(m)
             }
@@ -281,7 +282,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         // v1.1.4：组合模式下已完成的打卡项不可重复执行（以数据库记录为准）；v1.2.0 随心记除外
         if (comboMethods != null && !(cfg?.journalMode == true)) {
             val it = item ?: return
-            val recs = repo.recordsOfDay(it.id, DateUtils.today())
+            val recs = repo.recordsOfDay(it.id, CheckinEngine.effectiveToday(it))
             if (recs.any { r -> r.status == "SUCCESS" && r.extraJson?.contains(m) == true }) {
                 toast("今日「${Method.of(m)?.label ?: m}」已完成")
                 return
@@ -523,41 +524,35 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         }
     }
 
-    // ---------- 位置 ----------
+    // ---------- 位置（v1.4.2：只接受本次请求期间的实时定位，不再回退历史缓存） ----------
     @SuppressLint("MissingPermission")
     private fun doLocation() {
         val c = cfg ?: return
-        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val loading = AlertDialog.Builder(ctx).setMessage("正在获取当前位置…").setCancelable(false).show()
+        val loading = AlertDialog.Builder(ctx)
+            .setMessage("正在获取实时位置…\n（不使用历史缓存，最多等待 20 秒）")
+            .setCancelable(false).show()
         thread {
-            val loc = java.util.concurrent.atomic.AtomicReference<Location?>(null)
-            val providers = try {
-                lm.getProviders(true).filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
-                    .ifEmpty { lm.getProviders(true) }
-            } catch (_: Exception) { emptyList() }
-            for (p in providers) { try { val l = lm.getLastKnownLocation(p) ?: continue; if (loc.get() == null || l.accuracy < (loc.get()?.accuracy ?: 9999f)) loc.set(l) } catch (_: Exception) {} }
-            val latch = java.util.concurrent.CountDownLatch(1)
-            // 始终等待一次新的定位回调（优先实时位置，避免间隔短时误用缓存旧点）
-            val fresh = java.util.concurrent.atomic.AtomicReference<Location?>(null)
-            val listener = object : LocationListener {
-                override fun onLocationChanged(l: Location) { fresh.set(l); latch.countDown() }
-                override fun onProviderEnabled(p: String) {}
-                override fun onProviderDisabled(p: String) {}
-                @Deprecated("deprecated") override fun onStatusChanged(p: String?, s: Int, b: android.os.Bundle?) {}
-            }
-            for (p in providers) { try { lm.requestLocationUpdates(p, 0L, 0f, listener, main.looper) } catch (_: Exception) {} }
-            latch.await(12, java.util.concurrent.TimeUnit.SECONDS)
-            try { lm.removeUpdates(listener) } catch (_: Exception) {}
+            val fix = try {
+                com.zerolab.checkin.util.FreshLocation.request(ctx, 20_000L)
+            } catch (_: Exception) { null }
             main.post {
-                loading.dismiss()
-                val l = fresh.get() ?: loc.get()
-                if (l == null) { toast("无法获取定位，请到空旷处重试"); return@post }
-                lat = l.latitude; lng = l.longitude
-                judgeLocation(c, l.latitude, l.longitude)
+                try { loading.dismiss() } catch (_: Exception) {}
+                if (fix == null) {
+                    AlertDialog.Builder(ctx).setTitle("定位失败")
+                        .setMessage("没有拿到可用的实时定位（已禁用历史缓存）。\n请到室外或窗边、确认系统 GPS 已开启后重试。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("重新定位") { _, _ -> doLocation() }
+                        .show()
+                    return@post
+                }
+                lat = fix.lat; lng = fix.lng
+                judgeLocation(c, fix)
             }
         }
     }
-    private fun judgeLocation(c: ItemConfig, la: Double, ln: Double) {
+    private fun judgeLocation(c: ItemConfig, fix: com.zerolab.checkin.util.FreshLocation.Fix) {
+        val la = fix.lat; val ln = fix.lng
+        val src = fix.sourceText()
         // v1.3.4：随心记模式下位置打卡不做范围判定，只记录当前地名
         if (c.journalMode) {
             lat = la; lng = ln
@@ -577,7 +572,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                     } else {
                         locName = name
                         AlertDialog.Builder(ctx).setTitle("记录位置")
-                            .setMessage("📍 $name")
+                            .setMessage("📍 $name\n定位来源：$src")
                             .setNegativeButton("取消", null)
                             .setPositiveButton("使用该位置") { _, _ -> stepSuccess() }
                             .show()
@@ -594,13 +589,14 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             if (d < nearestDist) { nearestDist = d; nearestName = p.name }
             if (d <= p.radius) within = true
         }
-        val msg = "当前位置：${formatLatLng(la, ln)}\n最近地点：$nearestName（%.0f 米）".format(nearestDist)
+        val msg = "当前位置：${formatLatLng(la, ln)}\n最近地点：$nearestName（${"%.0f".format(nearestDist)} 米）\n定位来源：$src"
         val pass = if (c.locNegative) !within else within
         if (!pass) {
             AlertDialog.Builder(ctx).setTitle("位置不符合要求").setMessage(
                 msg + if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
                 else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
-            ).setPositiveButton("知道了", null).show()
+            ).setNegativeButton("重新定位") { _, _ -> doLocation() }
+                .setPositiveButton("知道了", null).show()
             return
         }
         val tail = if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
@@ -731,7 +727,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         val pausable = c.timerPausable && countUp // v1.2.1：仅正计时支持暂停保存，倒计时按旧UI
         timerForceOn = c.timerForce  // v1.3.6：强制模式（暂停保存已在创建页互斥隐藏）
         val totalSec = (c.timerMinutes * 60).coerceAtLeast(60)
-        val today = DateUtils.today()
+        // v1.4.2：时间分割下归属日可能是昨天，暂停续时也按归属日读取
+        val today = com.zerolab.checkin.engine.CheckinEngine.effectiveToday(it)
         // v1.2.0：读取当天最新 PAUSED 进度续时（倒计时续剩余 / 正计时续已走）
         val lastPaused = repo.recordsOfDay(it.id, today).lastOrNull { r -> r.status == "PAUSED" }
         var remainSec = totalSec
@@ -750,6 +747,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             } catch (_: Exception) {}
         }
         val endAt = System.currentTimeMillis() + remainSec * 1000L
+        // v1.4.2：倒计时归零自动完成标记（防止手动/自动重复写记录）
+        var autoDone = false
         val tv = TextView(ctx).apply { textSize = 30f; gravity = android.view.Gravity.CENTER; setPadding(0, 40, 0, 40) }
         val builder = AlertDialog.Builder(ctx)
             .setTitle(if (countUp) "正计时 · 目标 ${c.timerMinutes} 分钟" else "倒计时 ${c.timerMinutes} 分钟")
@@ -782,7 +781,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 if (countUp && elapsedSec < totalSec) {
                     val need = totalSec - elapsedSec
                     toast("还差 %02d:%02d 到目标时长，计时继续".format(need / 60, need % 60))
-                } else {
+                } else if (!autoDone) {
                     finishTimer(countUp, totalSec, elapsedSec)
                     dlg.dismiss()
                 }
@@ -806,9 +805,14 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 } else {
                     val remain = ((endAt - now) / 1000L).toInt()
                     if (remain <= 0) {
-                        tv.text = "时间到 ✓ 点击「完成打卡」"
-                        posBtn.isEnabled = true
-                        main.postDelayed(this, 500)
+                        if (!autoDone) {
+                            autoDone = true
+                            tv.text = "时间到 ✓ 已自动打卡"
+                            try { dlg.dismiss() } catch (_: Exception) {}
+                            timerDialogRef = null
+                            toast("⏰ 倒计时结束，已自动完成打卡")
+                            finishTimer(false, totalSec, 0)
+                        }
                         return
                     }
                     tv.text = "%02d:%02d".format(remain / 60, remain % 60)
@@ -985,13 +989,15 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 when (r) {
                     is CheckinResult.Ok -> {
                         val c2 = cfg
-                        val msg = when {
+                        var msg = when {
                             c2?.customNeg == true -> if (r.status == "SUCCESS") "时段内打卡成功 ✓"
                                 else if (r.date == DateUtils.today()) "已记录：今天未打卡" else "已记录：昨天未打卡"
                             r.status == "OFFSET" -> "🛡️ 已补卡（破戒被盾牌抵消）"   // v1.3.8：负打卡破戒豁免
                             r.status == "FAIL" -> "已记录：破戒"
                             else -> "打卡成功 ✓"
                         }
+                        // v1.4.2：时间分割下明确告知本次计入的归属日（如凌晨 1 点打卡 → 计入昨天）
+                        if (r.status != "FAIL" && r.date != DateUtils.today()) msg += "（计入 ${r.date}）"
                         toast(msg)
                         onDone()
                     }

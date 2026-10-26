@@ -29,6 +29,16 @@ object CheckinEngine {
     // ---------- 配置快捷取值 ----------
     fun cfg(item: CheckinItem) = ItemConfig.parse(item.configJson)
 
+    /**
+     * v1.4.2：打卡归属日。开启「时间分割」（dayCutoff）后，凌晨分割点之前的当前时刻归属前一天，
+     * 状态卡、连续天数、抵消结算、自动打卡都应以归属日为准，避免「凌晨打卡显示成本日」。
+     */
+    fun effectiveToday(item: CheckinItem): String =
+        DateUtils.belongDate(System.currentTimeMillis(), cfg(item).dayCutoff)
+
+    fun effectiveToday(c: ItemConfig): String =
+        DateUtils.belongDate(System.currentTimeMillis(), c.dayCutoff)
+
     /** 该方式集合是否为负打卡语义（普通负打卡 或 双时间自定义负打卡） */
     fun isNegative(c: ItemConfig) = c.negative // v1.1.8：移除双时间自定义负打卡
 
@@ -61,7 +71,7 @@ object CheckinEngine {
     // ---------- 单日状态 ----------
     fun dayInfo(item: CheckinItem, date: String, records: List<CheckinRecord>): DayInfo {
         val c = cfg(item)
-        val today = DateUtils.today()
+        val today = effectiveToday(c)
         val neg = isNegative(c)
         val auto = records.any { it.isAuto == 1 }
         val offset = records.any { it.status == "OFFSET" }
@@ -140,13 +150,14 @@ object CheckinEngine {
         val recs = repo.recordsOfDay(item.id, date)
         val info = dayInfo(item, date, recs)
         if (info.state == DayState.SKIP) return true // 无需打卡日视为成功，不中断连续
-        if (date == DateUtils.today() && recs.isEmpty()) return false // 今天未定论不计入
+        if (date == effectiveToday(item) && recs.isEmpty()) return false // 今天未定论不计入
         // 补签（OFFSET）算进连续天数：补签把断的那天补上，连续不中断（v1.1.3）
         return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
     }
 
     /** 连续成功天数 */
-    fun streak(item: CheckinItem, repo: CheckinRepository): Int {        var d = DateUtils.today()
+    fun streak(item: CheckinItem, repo: CheckinRepository): Int {
+        var d = effectiveToday(item)
         // v1.3.1：负打卡破戒当天立即归零（破戒是主动失败、当天已成事实，不再从昨日回溯）
         if (isNegative(cfg(item)) && repo.recordsOfDay(item.id, d).any { it.status == "FAIL" }) return 0
         // 今天未定论则从昨天起算
@@ -171,7 +182,7 @@ object CheckinEngine {
     private fun milestoneStreak(item: CheckinItem, repo: CheckinRepository): Int {
         val c = cfg(item)
         val start = c.offset.anchorDate.ifBlank { DateUtils.dateOf(item.createdAt) }
-        var d = DateUtils.today()
+        var d = effectiveToday(item)
         if (!dayIsSuccess(item, d, repo)) d = DateUtils.addDays(d, -1)
         var n = 0
         repeat(3660) {
@@ -195,6 +206,9 @@ object CheckinEngine {
     ): CheckinResult {
         val c = cfg(item)
         val now = System.currentTimeMillis()
+
+        // v1.4.2：已暂停的打卡项不允许继续打卡（列表/快捷页已置灰，这里再做引擎级兜底）
+        if (item.isActive == 0) return CheckinResult.Blocked("该打卡项已暂停，恢复后才能打卡")
 
         // v1.3.13 打卡组：不可手动打卡，完成组内全部子项后自动记组成功
         if (c.groupMode) return CheckinResult.Blocked("打卡组无需手动打卡，完成组内子项自动成功")
@@ -253,7 +267,7 @@ object CheckinEngine {
     /** v1.3.16 方案D：子项当日完成进度 [done, total]，与 subDayDone 同口径（total 恒 >= 1） */
     fun subDayProgress(item: CheckinItem, date: String, repo: CheckinRepository): IntArray {
         val c = cfg(item)
-        if (date < DateUtils.dateOf(item.createdAt) || date > DateUtils.today()) return intArrayOf(0, 1)
+        if (date < DateUtils.dateOf(item.createdAt) || date > effectiveToday(c)) return intArrayOf(0, 1)
         val recs = repo.recordsOfDay(item.id, date)
         if (c.journalMode || c.moodMode) return intArrayOf(if (recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }) 1 else 0, 1)
         if (isNegative(c)) return intArrayOf(if (recs.any { it.status == "FAIL" }) 0 else 1, 1)
@@ -275,8 +289,9 @@ object CheckinEngine {
     }
 
     // ---------- v1.3.13 打卡组自动完成 ----------
-    /** 子项打卡后检查所属组：组内全部成员在归属日已完成 → 组自动记录 SUCCESS（幂等） */
-    private fun maybeAutoGroup(item: CheckinItem, repo: CheckinRepository, date: String) {
+    /** 子项打卡后检查所属组：组内全部成员在归属日已完成 → 组自动记录 SUCCESS（幂等）。
+     *  v1.4.2：开放给管理员补录后调用，保证补录也能让组完成。 */
+    fun maybeAutoGroup(item: CheckinItem, repo: CheckinRepository, date: String) {
         val gid = item.groupTag?.toLongOrNull() ?: return
         val group = repo.getItem(gid) ?: return
         val gc = cfg(group)
@@ -300,7 +315,7 @@ object CheckinEngine {
      *  非排期日无记录返回 UNCHECKED（不染色，避免出现第 5 种"无需打卡"色）。 */
     fun groupDayInfo(group: CheckinItem, date: String, repo: CheckinRepository): DayInfo {
         val c = cfg(group)
-        val today = DateUtils.today()
+        val today = effectiveToday(c)
         // v1.3.19：创建日之前若有补录记录则按记录状态渲染，不再一律 FUTURE 不染色
         if (date < DateUtils.dateOf(group.createdAt)) {
             val recs0 = repo.recordsOfDay(group.id, date)
@@ -327,7 +342,7 @@ object CheckinEngine {
         if (c.journalMode || c.moodMode) return // v1.2.0 随心记 / v1.3.0 心情日记不参与抵消机制
         // 参数保护：nDays/k 必须为正，否则不发放（防导入/异常配置除零崩溃）
         if (off.nDays <= 0 || off.k <= 0) return
-        val today = DateUtils.today()
+        val today = effectiveToday(c)
         val ms = milestoneStreak(item, repo)
         when (off.mode) {
             "A" -> {
@@ -378,12 +393,12 @@ object CheckinEngine {
      *  2) 今天存在破戒（FAIL）且还有可用盾牌时，用盾牌抵消今天第一条破戒（变补卡）。
      *  返回修复动作描述；无痕迹可修时返回空说明。 */
     fun repairNegativeData(repo: CheckinRepository): String {
-        val today = DateUtils.today()
         val done = mutableListOf<String>()
         repo.getItems().filter { it.isActive == 1 }.forEach { item ->
             val c = cfg(item)
             if (!isNegative(c)) return@forEach
             if (!c.offset.enabled) return@forEach
+            val today = effectiveToday(c)
             var changed = false
             // 1) 撤销自动补签：v1.3.7 的 autoBackfillMissing 只会在 FAIL 日补签，因此与 FAIL 同日的 OFFSET 即为其痕迹
             repo.allRecords(item.id).filter { it.status == "OFFSET" }.forEach { off ->
@@ -428,7 +443,7 @@ object CheckinEngine {
 
         // v1.1.3：补签当天（今天）若无记录且为需打卡日，自动完成当天打卡（补签=处理昨日遗漏+完成今日）
         // v1.3.7：负打卡跳过此步——负打卡今天无操作才是成功，插 SUCCESS 记录会把今天变成破戒（FAIL）
-        val today = DateUtils.today()
+        val today = effectiveToday(c)
         if (consumed && today != date && isScheduledDay(item, today)
             && !isNegative(c)
             && repo.recordsOfDay(item.id, today).isEmpty()) {
@@ -460,7 +475,7 @@ object CheckinEngine {
             val c = cfg(item)
             if (Method.AUTO.key !in c.methods) return@forEach
             if (c.journalMode || c.moodMode) return@forEach // v1.2.0 随心记 / v1.3.0 心情日记不自动打卡
-            val today = DateUtils.today()
+            val today = effectiveToday(c)
             if (!isScheduledDay(item, today)) return@forEach // 无需打卡日不自动打卡
             val st = repo.autoState(item.id)
             if (st != null && st.lastAutoDate == today) return@forEach

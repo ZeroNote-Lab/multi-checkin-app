@@ -17,7 +17,8 @@ interface ItemDao {
     @Query("DELETE FROM checkin_item WHERE id = :id")
     fun deleteById(id: Long)
 
-    @Query("SELECT * FROM checkin_item ORDER BY isPinned DESC, pinnedAt DESC, sortOrder ASC, createdAt ASC")
+    // v1.4.2：暂停（isActive=0）的打卡项固定沉到列表最底部，与是否置顶无关
+    @Query("SELECT * FROM checkin_item ORDER BY isActive DESC, isPinned DESC, pinnedAt DESC, sortOrder ASC, createdAt ASC")
     fun getAllSorted(): List<CheckinItem>
 
     @Query("SELECT * FROM checkin_item WHERE isActive = 1 AND id != :excludeId ORDER BY isPinned DESC, pinnedAt DESC, sortOrder ASC, createdAt ASC LIMIT 1")
