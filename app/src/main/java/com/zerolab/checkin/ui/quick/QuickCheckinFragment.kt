@@ -57,6 +57,14 @@ class QuickCheckinFragment : Fragment() {
     private var progressHandler: android.os.Handler? = null
     private var progressRunnable: Runnable? = null
 
+    // v1.4.2 优化：页面数据快照。数据库计算（结算 / 自动补签 / 连续天数 / 月历状态）
+    // 全部放在单线程后台队列里串行执行，主线程只做渲染，避免长连续或打卡组时进页面卡顿。
+    private val snapshotExec: java.util.concurrent.ExecutorService =
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "checkin-snapshot").apply { isDaemon = true }
+        }
+    private var snapshotGen = 0
+
     // v1.4.0：管理员「添加图片」必须在 STARTED 前注册 launcher，用目标记录挂起
     private var addPhotoTarget: CheckinRecord? = null
     private val addPhotosLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -90,6 +98,12 @@ class QuickCheckinFragment : Fragment() {
         try { mediaPlayer?.release() } catch (_: Exception) {}
         mediaPlayer = null
         NfcHub.unregister(this)
+    }
+
+    override fun onDestroy() {
+        // v1.4.2 优化：停止后台快照线程，避免持有已销毁页面
+        snapshotExec.shutdownNow()
+        super.onDestroy()
     }
 
     /** MainActivity 读到 NFC 标签后转发给打卡流程 */
@@ -155,7 +169,7 @@ class QuickCheckinFragment : Fragment() {
                 ac.time = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(calendar.weekAnchor)
                 showYear = ac.get(java.util.Calendar.YEAR); showMonth = ac.get(java.util.Calendar.MONTH)
             }
-            renderMonth()
+            requestSnapshot(resetSelection = false)
         }
         // v1.3.14：全局主题换肤（根背景 / 主按钮）
         ThemeUi.apply(requireActivity(), view, listOf(R.id.btn_checkin, R.id.btn_go_create))
@@ -254,9 +268,7 @@ class QuickCheckinFragment : Fragment() {
             val pad = resources.displayMetrics.density.toInt()
             view?.findViewById<LinearLayout>(R.id.scroll_content)?.setPadding(14 * pad, 14 * pad, 14 * pad, 14 * pad)
         }
-        // v1.3.8：负打卡机会结算（页面同步跑，保证点击记录时盾牌已到位，避免与 onResume 异步线程竞态）
-        try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
-        autoBackfillMissing()
+        // v1.4.2 优化：负打卡结算与自动补签改到后台快照里执行（原来在主线程逐日查库）
         val theme = ThemeManager.of(q.theme)
         // v1.3.26：日历选中描边=打卡项主题色；打卡按钮同样用打卡项主题色（与描边一致）
         calendar.themeColor = if (cfg.journalMode && !cfg.moodMode) journalTheme.accent else theme.primary
@@ -270,20 +282,130 @@ class QuickCheckinFragment : Fragment() {
             btnCheckin.elevation = 6f * resources.displayMetrics.density
             btnCheckin.text = "记录"
         }
-        renderMonth()
-        renderToday()
-        // v1.4.0：最后再覆盖一次日记模式按钮样式（renderToday里会setTint主题色）
+        // v1.4.2 优化：月历 / 今日状态 / 记录栏的数据统一由后台快照计算完成后一次性渲染，
+        // 选中日期默认落在「归属日」（时间分割时凌晨为前一天）
+        requestSnapshot(resetSelection = true)
+    }
+
+    // ---------- v1.4.2 优化：页面数据快照 ----------
+
+    /** 组子项在快照里算好的进度，渲染时不再查库 */
+    private data class GroupMemberSnap(
+        val item: CheckinItem,
+        val done: Int,
+        val total: Int,
+        val streak: Int,
+        val doneToday: Boolean
+    )
+
+    /** 一屏所需的所有数据：全部在后台线程计算，UI 线程只负责画 */
+    private data class PageSnapshot(
+        val item: CheckinItem,
+        val effToday: String,
+        val year: Int,
+        val month: Int,
+        val streak: Int,
+        val credits: Int,
+        val todayRecs: List<CheckinRecord>,
+        val monthMap: Map<String, DayInfo>,
+        val groupScheduled: Boolean,
+        val groupMembers: List<GroupMemberSnap>
+    )
+
+    /**
+     * 触发一次后台快照。多次调用以最后一次为准（generation 校验丢弃过期结果），
+     * 队列为单线程，避免并发写抵消 / 补签记录。
+     * @param resetSelection 是否把日期选中与记录栏重置到归属日（整页刷新时 true，翻月时 false）
+     */
+    private fun requestSnapshot(resetSelection: Boolean) {
+        val q = item ?: return
+        val c = cfg
+        val year = showYear
+        val month = showMonth
+        val gen = ++snapshotGen
+        snapshotExec.execute {
+            if (gen != snapshotGen) return@execute
+            val snap = try {
+                gatherSnapshot(q, c, year, month)
+            } catch (_: Exception) {
+                null
+            } ?: return@execute
+            if (gen != snapshotGen) return@execute
+            activity?.runOnUiThread {
+                if (!isAdded || gen != snapshotGen) return@runOnUiThread
+                if (item?.id != snap.item.id) return@runOnUiThread
+                applySnapshot(snap, resetSelection)
+            }
+        }
+    }
+
+    /** 后台线程：执行写库结算，并算出整屏需要的只读数据 */
+    private fun gatherSnapshot(q: CheckinItem, c: ItemConfig, year: Int, month: Int): PageSnapshot {
+        // 负打卡机会结算（幂等补发）与自动补签（可能写记录），原来都在主线程，这里统一后台
+        try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
+        autoBackfillMissing(q, c)
+
+        val effToday = CheckinEngine.effectiveToday(c)
+        val streak = CheckinEngine.streak(q, repo)
+        val credits = repo.availableCredits(q.id)
+        val todayRecs = repo.recordsOfDay(q.id, effToday)
+
+        // 月历状态：普通项逐日走 dayInfo（纯内存计算，月份记录只查一次），打卡组逐日走 groupDayInfo
+        val startCal = Calendar.getInstance()
+        startCal.clear(); startCal.set(year, month, 1)
+        val start = DateUtils.dateOf(startCal.timeInMillis)
+        startCal.set(Calendar.DAY_OF_MONTH, startCal.getActualMaximum(Calendar.DAY_OF_MONTH))
+        val end = DateUtils.dateOf(startCal.timeInMillis)
+        val monthMap = HashMap<String, DayInfo>()
+        if (c.groupMode) {
+            var d = start
+            while (d <= end) {
+                monthMap[d] = CheckinEngine.groupDayInfo(q, d, repo)
+                d = DateUtils.addDays(d, 1)
+            }
+        } else {
+            val byDay = repo.recordsOfMonth(q.id, start, end).groupBy { r -> r.checkinDate }
+            var d = start
+            while (d <= end) {
+                monthMap[d] = CheckinEngine.dayInfo(q, d, (byDay[d] ?: emptyList()).sortedBy { r -> r.checkinTime })
+                d = DateUtils.addDays(d, 1)
+            }
+        }
+
+        val isGroup = c.groupMode && q.isActive == 1
+        val scheduled = if (!c.groupMode) true else CheckinEngine.isScheduledDay(q, effToday)
+        val members = if (!isGroup) emptyList() else c.groupMembers.mapNotNull { mid ->
+            val m = repo.getItem(mid) ?: return@mapNotNull null
+            val pr = CheckinEngine.subDayProgress(m, effToday, repo)
+            GroupMemberSnap(
+                item = m,
+                done = pr[0],
+                total = pr[1],
+                streak = try { CheckinEngine.streak(m, repo) } catch (_: Exception) { 0 },
+                doneToday = pr[0] >= pr[1]
+            )
+        }
+        return PageSnapshot(q, effToday, year, month, streak, credits, todayRecs, monthMap, scheduled, members)
+    }
+
+    /** 主线程：把快照画到界面上 */
+    private fun applySnapshot(snap: PageSnapshot, resetSelection: Boolean) {
+        renderMonthData(snap)
+        renderToday(snap)
+        // 随心记按钮样式要在 renderToday（会 setTint 主题色）之后覆盖
         if (cfg.journalMode && !cfg.moodMode) {
-            btnCheckin.background?.setTint(journalTheme.card)
-            btnCheckin.setTextColor(journalTheme.accent)
+            btnCheckin.background?.setTint(0xFFFFFFFF.toInt())
+            btnCheckin.setTextColor(0xFFC97B4A.toInt())
             btnCheckin.elevation = 6f * resources.displayMetrics.density
             btnCheckin.text = "记录"
         }
-        // v1.4.2：记录栏默认选中「归属日」（时间分割时凌晨为前一天），并同步日历选中圈
-        val effToday = CheckinEngine.effectiveToday(q)
-        calendar.selectedDate = effToday
-        showDayDetail(effToday)
+        // 翻月时保留当前选中日期；整页刷新时回到归属日并同步记录栏
+        if (resetSelection) {
+            calendar.selectedDate = snap.effToday
+            showDayDetail(snap.effToday)
+        }
     }
+
 
     private fun shiftMonth(delta: Int) {
         if (calendar.weekMode) {
@@ -293,7 +415,7 @@ class QuickCheckinFragment : Fragment() {
             val newAnchor = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(c.time)
             calendar.weekAnchor = newAnchor
             showYear = c.get(Calendar.YEAR); showMonth = c.get(Calendar.MONTH)
-            renderMonth()
+            requestSnapshot(resetSelection = false)
         } else {
             val c = Calendar.getInstance(); c.clear(); c.set(showYear, showMonth, 1)
             c.add(Calendar.MONTH, delta)
@@ -306,7 +428,7 @@ class QuickCheckinFragment : Fragment() {
             val maxDay = ac.getActualMaximum(Calendar.DAY_OF_MONTH)
             ac.set(Calendar.DAY_OF_MONTH, oldDay.coerceAtMost(maxDay))
             calendar.weekAnchor = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(ac.time)
-            renderMonth()
+            requestSnapshot(resetSelection = false)
         }
     }
 
@@ -321,8 +443,8 @@ class QuickCheckinFragment : Fragment() {
         calendar.layoutParams = calendar.layoutParams.apply { height = (h * d).toInt() }
     }
 
-    private fun renderMonth() {
-        val it = item ?: return
+    /** 主线程：月历标题 / 图例 / 圆圈状态（状态数据来自后台快照） */
+    private fun renderMonthData(snap: PageSnapshot) {
         // v1.4.0：周视图标题显示本周日期范围（10月19日 – 25日）
         if (calendar.weekMode) {
             val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
@@ -346,31 +468,15 @@ class QuickCheckinFragment : Fragment() {
             }
             root.findViewById<TextView>(R.id.tv_month).text = title
         } else {
-            root.findViewById<TextView>(R.id.tv_month).text = DateUtils.monthTitle(showYear, showMonth)
+            root.findViewById<TextView>(R.id.tv_month).text = DateUtils.monthTitle(snap.year, snap.month)
         }
-        val c = Calendar.getInstance(); c.clear(); c.set(showYear, showMonth, 1)
-        val start = DateUtils.dateOf(c.timeInMillis)
-        c.set(Calendar.DAY_OF_MONTH, c.getActualMaximum(Calendar.DAY_OF_MONTH))
-        val end = DateUtils.dateOf(c.timeInMillis)
-        val records = repo.recordsOfMonth(it.id, start, end)
-        val byDay = records.groupBy { r -> r.checkinDate }
-        val map = HashMap<String, DayInfo>()
         val groupMode = cfg.groupMode
         // v1.3.15：打卡组用小日历（紧凑高度），普通打卡保持大日历
         val lp = calendar.layoutParams
         lp.height = ((if (groupMode) 188 else 300) * resources.displayMetrics.density).toInt()
         calendar.layoutParams = lp
-        // 预填本月每一天：SKIP/FAIL/SUCCESS 等状态对无记录日期同样要渲染（橙色/红色），不能只遍历有记录的天
-        var d = start
-        while (d <= end) {
-            val list = byDay[d] ?: emptyList()
-            // v1.3.15：打卡组走组专用状态（4 态，无 SKIP/FAIL 染色），普通/日记走 dayInfo
-            map[d] = if (groupMode) CheckinEngine.groupDayInfo(it, d, repo)
-                else CheckinEngine.dayInfo(it, d, list.sortedBy { x -> x.checkinTime })
-            d = DateUtils.addDays(d, 1)
-        }
         // v1.3.15：组日历不显示 ⚡/×n 圆外小标记
-        calendar.setData(showYear, showMonth, map, CheckinEngine.isNegative(cfg), { date ->
+        calendar.setData(snap.year, snap.month, snap.monthMap, CheckinEngine.isNegative(cfg), { date ->
             calendar.weekAnchor = date
             showDayDetail(date)
         }, showBadges = !groupMode)
@@ -423,16 +529,18 @@ class QuickCheckinFragment : Fragment() {
         legendTv.text = sb
     }
 
-    private fun renderToday() {
-        val it = item ?: return
+    /** 主线程：今日状态卡 / 连续天数 / 打卡按钮文案（数据来自后台快照） */
+    private fun renderToday(snap: PageSnapshot) {
+        val it = snap.item
         // v1.4.2：时间分割下「今天」取归属日（凌晨 0–2 点打卡归前一天），状态卡与记录都以归属日为准
-        val today = CheckinEngine.effectiveToday(it)
+        val today = snap.effToday
         val naturalToday = DateUtils.today()
-        val todayRecs = repo.recordsOfDay(it.id, today)
+        val todayRecs = snap.todayRecs
         val paused = it.isActive == 0
         // v1.3.15：打卡组——隐藏日期备注栏，显示组子项区（小日历 + 子项列表，无 box）
         val isGroup = cfg.groupMode && !paused
-        root.findViewById<View>(R.id.day_detail_bar).visibility = if (isGroup) View.GONE else View.VISIBLE
+        // v1.4.2 优化：备注栏按「是否打卡组」隐藏（暂停的打卡组此前会残留一个空备注卡）
+        root.findViewById<View>(R.id.day_detail_bar).visibility = if (cfg.groupMode) View.GONE else View.VISIBLE
         root.findViewById<View>(R.id.status_bar).visibility = if (isGroup) View.GONE else View.VISIBLE
         val groupTitle = root.findViewById<TextView>(R.id.group_members_title)
         val groupBox = root.findViewById<LinearLayout>(R.id.group_members_box)
@@ -449,12 +557,12 @@ class QuickCheckinFragment : Fragment() {
         val streakView = root.findViewById<TextView>(R.id.tv_streak)
         // v1.2.0：随心记显示"记录天数"（有记录+1、断签不归零）；v1.3.0：心情日记同；普通模式保持连续天数
         // v1.3.33：随心记/心情日记是最简单的日记本，不显示任何天数统计（隐藏统计行）
-        val days = CheckinEngine.streak(it, repo)   // 组子项标题用（连续天数）
+        val days = snap.streak   // 组子项标题与状态卡共用（后台快照算好）
         if (journal || mood) {
             streakView.visibility = View.GONE
         } else {
             streakView.visibility = View.VISIBLE
-            val credits = repo.availableCredits(it.id)
+            val credits = snap.credits
             val sb = StringBuilder("🔥 连续 $days 天")
             if (credits > 0) sb.append("    🛡️×$credits")
             if (cfg.dailyLimit > 1 && !neg) sb.append("    目标：每日${cfg.dailyLimit}次")
@@ -474,15 +582,10 @@ class QuickCheckinFragment : Fragment() {
             }
             // v1.3.13 打卡组：展示子项进度（点击子项进入打卡页），完成全部子项后自动记组成功
             cfg.groupMode -> {
-                val members = cfg.groupMembers
-                // v1.3.15：组非排期日——今日无需打卡，子项列表仍展示；doneSet 提升到分支外供子项渲染复用
-                val scheduled = CheckinEngine.isScheduledDay(it, today)
-                val doneSet = if (members.isEmpty() || !scheduled) emptySet()
-                    else members.filter { mid ->
-                        // v1.3.16：统一 subDayDone——子项须当日全部完成（组合全部方式/单方式次数打满）才算完成
-                        val m = repo.getItem(mid) ?: return@filter false
-                        CheckinEngine.subDayDone(m, today, repo)
-                    }.toSet()
+                // v1.4.2 优化：子项进度 / 连续天数都在后台快照里算好，这里只负责画
+                val members = snap.groupMembers
+                val scheduled = snap.groupScheduled
+                val doneCount = if (scheduled) members.count { it.doneToday } else members.size
                 when {
                     members.isEmpty() -> {
                         statusView.text = "状态：组内暂无子项"
@@ -493,8 +596,8 @@ class QuickCheckinFragment : Fragment() {
                         btnCheckin.text = "今日无需打卡"; btnCheckin.isEnabled = false; grayBtn()
                     }
                     else -> {
-                        val allDone = doneSet.size == members.size
-                        statusView.text = if (allDone) "状态：打卡组今日已完成 ✓" else "状态：子项 ${doneSet.size}/${members.size} 已完成"
+                        val allDone = doneCount == members.size
+                        statusView.text = if (allDone) "状态：打卡组今日已完成 ✓" else "状态：子项 ${doneCount}/${members.size} 已完成"
                         btnCheckin.text = if (allDone) "今日已完成 ✓" else "完成全部子项后自动成功"
                         btnCheckin.isEnabled = false; grayBtn()
                     }
@@ -504,15 +607,12 @@ class QuickCheckinFragment : Fragment() {
                 groupTitle.text = "打卡组子项 · 🔥 连续 $days 天"
                 groupBox.removeAllViews()
                 // v1.3.17：子项三档排序——部分完成(进行中)最上、未打卡居中、已完成沉底；同档保持原序（新一天全部未打卡即恢复默认）
-                val sorted = members.map { mid ->
-                    mid to (repo.getItem(mid)?.let { CheckinEngine.subDayProgress(it, today, repo) } ?: intArrayOf(0, 1))
-                }.sortedWith(compareByDescending<Pair<Long, IntArray>> { p ->
-                    val d = p.second[0]; val t = if (p.second[1] <= 0) 1 else p.second[1]
-                    when { d > 0 && d < t -> 2; d <= 0 -> 1; else -> 0 }
-                }).map { it.first }
-                sorted.forEachIndexed { idx, mid ->
-                    val m = repo.getItem(mid) ?: return@forEachIndexed
-                    val ok = if (!scheduled) true else mid in doneSet
+                val sorted = members.sortedWith(compareByDescending<GroupMemberSnap> { m ->
+                    val t = if (m.total <= 0) 1 else m.total
+                    when { m.done > 0 && m.done < t -> 2; m.done <= 0 -> 1; else -> 0 }
+                })
+                sorted.forEachIndexed { idx, m ->
+                    val ok = if (!scheduled) true else m.doneToday
                     groupBox.addView(groupSubCard(m, ok, idx == 0))
                 }
             }
@@ -528,7 +628,7 @@ class QuickCheckinFragment : Fragment() {
                     btnCheckin.text = if (passed) "已过打卡时间" else "未到打卡时间"
                     btnCheckin.isEnabled = false; grayBtn()
                 } else {
-                    val streak = CheckinEngine.streak(it, repo)
+                    val streak = snap.streak
                     val target = cfg.ndaysTarget
                     streakView.text = "🎯 ${target} 天挑战 · 已连续 $streak 天（中断清零）"
                     if (streak >= target) {
@@ -653,11 +753,12 @@ class QuickCheckinFragment : Fragment() {
     /** v1.3.14 打卡组子项卡片：主题图标 + 名称 + 打卡方式 + 连续天数 + 状态徽章 */
     /** v1.3.15 去掉 box 背景框，排版参考打卡管理列表页（左右/上下间距） */
     /** v1.3.16 分布对齐第0级卡片：48dp 圆形图标底 + 16sp 名称 + 灰底方式小标签 + 连续天数 + 右侧状态徽章 */
-    private fun groupSubCard(m: CheckinItem, ok: Boolean, first: Boolean): View {
+    private fun groupSubCard(snap: GroupMemberSnap, ok: Boolean, first: Boolean): View {
         fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+        val m = snap.item
         val subTheme = ThemeManager.of(m.theme)
         val subCfg = ItemConfig.parse(m.configJson)
-        val streak = try { CheckinEngine.streak(m, repo) } catch (_: Exception) { 0 }
+        val streak = snap.streak
         // v1.3.16 方案D：白底圆角卡片（18dp 圆角 + 柔和阴影），卡片间 10dp 间距
         val row = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -727,9 +828,8 @@ class QuickCheckinFragment : Fragment() {
         col.addView(metaRow)
         row.addView(col)
         // 右侧：40dp 进度环（方案D）——已打卡=绿色满环 ✓，未完成=橙色进度 done/total
-        val pr = CheckinEngine.subDayProgress(m, CheckinEngine.effectiveToday(m), repo)
-        val done = pr[0]
-        val total = if (pr[1] <= 0) 1 else pr[1]
+        val done = snap.done
+        val total = if (snap.total <= 0) 1 else snap.total
         val ring = RingView(requireContext()).apply {
             progress = if (ok) 1f else done.toFloat() / total
             centerText = if (ok) "✓" else "$done/$total"
@@ -1241,20 +1341,19 @@ class QuickCheckinFragment : Fragment() {
             }.show()
     }
 
-    /** 自动消耗模式：刷新时把创建日至昨天的缺卡按可用机会依次补签 */
-    private fun autoBackfillMissing() {
-        val it = item ?: return
-        if (!cfg.offset.enabled || !cfg.offset.autoConsume) return
+    /** 自动消耗模式：把创建日至昨天的缺卡按可用机会依次补签（v1.4.2：由后台快照线程调用，不再占用主线程） */
+    private fun autoBackfillMissing(q: CheckinItem, c: ItemConfig) {
+        if (!c.offset.enabled || !c.offset.autoConsume) return
         // v1.3.8：负打卡不自动补历史破戒日——破戒当天由盾牌直接抵消（蓝卡），历史破戒只支持手动补签
-        if (CheckinEngine.isNegative(cfg)) return
-        val created = DateUtils.dateOf(it.createdAt)
-        var d = DateUtils.addDays(CheckinEngine.effectiveToday(it), -1)
+        if (CheckinEngine.isNegative(c)) return
+        val created = DateUtils.dateOf(q.createdAt)
+        var d = DateUtils.addDays(CheckinEngine.effectiveToday(c), -1)
         var guard = 0
         while (d >= created && guard++ < 400) {
-            if (repo.availableCredits(it.id) <= 0) break
-            val recs = repo.recordsOfDay(it.id, d)
-            val st = CheckinEngine.dayInfo(it, d, recs).state
-            if (st == DayState.FAIL) CheckinEngine.offsetBackfill(it, repo, d)
+            if (repo.availableCredits(q.id) <= 0) break
+            val recs = repo.recordsOfDay(q.id, d)
+            val st = CheckinEngine.dayInfo(q, d, recs).state
+            if (st == DayState.FAIL) CheckinEngine.offsetBackfill(q, repo, d)
             d = DateUtils.addDays(d, -1)
         }
     }
