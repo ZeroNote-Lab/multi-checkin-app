@@ -319,17 +319,39 @@ class JournalEditActivity : AppCompatActivity() {
             main.post {
                 try { loading.dismiss() } catch (_: Exception) {}
                 if (fix == null) { toast("无法获取实时定位，请到室外/窗边重试"); return@post }
-                // 解析地名
-                val locLoading = AlertDialog.Builder(this).setMessage("正在解析位置名称…").setCancelable(false).show()
+                // 解析地名 + 周边地点（定位有偏移时可手动改选）
+                val locLoading = AlertDialog.Builder(this).setMessage("正在获取位置名称…").setCancelable(false).show()
                 thread {
-                    val name = try { if (NetGeo.enabled(this)) NetGeo.regeo(this, fix.lat, fix.lng) else null } catch (_: Exception) { null }
+                    val detail = try {
+                        if (NetGeo.enabled(this)) NetGeo.regeoDetail(this, fix.lat, fix.lng) else null
+                    } catch (_: Exception) { null }
                     main.post {
-                        locLoading.dismiss()
-                        // 移除旧 LocationBlock（点第二次覆盖）
-                        blocks.removeAll { it is Block.LocationBlock }
-                        blocks.add(Block.LocationBlock(name ?: "当前位置", fix.lat, fix.lng))
-                        renderAll()
-                        toast("已添加位置")
+                        try { locLoading.dismiss() } catch (_: Exception) {}
+                        if (detail == null) {
+                            replaceLocationBlock("当前位置", fix.lat, fix.lng)
+                            toast("未获取到位置名称，已记录当前坐标")
+                            return@post
+                        }
+                        val items = mutableListOf<String>()
+                        items += "使用当前定位" + if (detail.address.isNotBlank()) "（${detail.address}）" else ""
+                        detail.pois.take(12).forEach { p ->
+                            items += "📍 ${p.name}" + if (p.distanceMeters > 0) " · ${p.distanceMeters}米" else ""
+                        }
+                        AlertDialog.Builder(this)
+                            .setTitle("选择位置")
+                            .setMessage("当前地址：${detail.address.ifBlank { "未知" }}\n如定位有偏移，可选择附近地点：")
+                            .setItems(items.toTypedArray()) { _, which ->
+                                if (which == 0) {
+                                    replaceLocationBlock(detail.address.ifBlank { "当前位置" }, fix.lat, fix.lng)
+                                } else {
+                                    val p = detail.pois.getOrNull(which - 1) ?: return@setItems
+                                    // 高德 POI 是 GCJ-02，转回 WGS-84 再存
+                                    val w = com.zerolab.checkin.util.ChinaCoord.gcj02ToWgs84(p.lat, p.lng)
+                                    replaceLocationBlock(p.name, w[0], w[1])
+                                }
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
                     }
                 }
             }
@@ -339,6 +361,14 @@ class JournalEditActivity : AppCompatActivity() {
     // ---- 文字块自动接力：非文字块后自动跟一个空白文字块 ----
     private fun appendAutoTextBlock() {
         blocks.add(Block.TextBlock())
+    }
+
+    /** v1.4.2：位置块唯一，重选时覆盖旧块 */
+    private fun replaceLocationBlock(name: String, la: Double, ln: Double) {
+        blocks.removeAll { it is Block.LocationBlock }
+        blocks.add(Block.LocationBlock(name, la, ln))
+        renderAll()
+        toast("已添加位置")
     }
 
     // ---- 渲染所有 blocks ----
@@ -529,15 +559,36 @@ class JournalEditActivity : AppCompatActivity() {
     }
 
     private fun renderLocationBlock(b: Block.LocationBlock): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) }
+        }
         val tv = TextView(this).apply {
             text = "📍 ${b.name}"
             setTextColor(textSub)
             setTextSize(12f)
             setPadding(dp(10), dp(6), dp(10), dp(6))
             background = rounded(bgLight, dp(8))
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        return tv
+        // v1.4.2 修复：位置块补删除入口（之前只能退出重进）
+        val del = TextView(this).apply {
+            text = "✕"
+            setTextColor(textSub)
+            setTextSize(14f)
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(6), dp(2), dp(6))
+            setOnClickListener {
+                blocks.remove(b)
+                renderAll()
+            }
+        }
+        row.addView(tv)
+        row.addView(del)
+        return row
     }
 
     // ---- 工具 ----

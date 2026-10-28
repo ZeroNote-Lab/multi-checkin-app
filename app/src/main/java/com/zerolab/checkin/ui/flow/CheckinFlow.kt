@@ -32,7 +32,10 @@ import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.engine.Method
 import com.zerolab.checkin.ui.scan.ScanActivity
 import com.zerolab.checkin.util.AudioRecorder
+import com.zerolab.checkin.util.ChinaCoord
 import com.zerolab.checkin.util.DateUtils
+import com.zerolab.checkin.util.FreshLocation
+import com.zerolab.checkin.util.NetGeo
 import com.zerolab.checkin.util.formatLatLng
 import com.zerolab.checkin.util.ImageUtil
 import java.io.File
@@ -558,77 +561,190 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             }
         }
     }
-    private fun judgeLocation(c: ItemConfig, fix: com.zerolab.checkin.util.FreshLocation.Fix) {
-        val la = fix.lat; val ln = fix.lng
-        val src = fix.sourceText()
-        // v1.3.4：随心记模式下位置打卡不做范围判定，只记录当前地名
+    private data class Nearest(val name: String, val dist: Double, val within: Boolean)
+
+    private fun judgeLocation(c: ItemConfig, fix: FreshLocation.Fix) {
+        // 随心记：只记录位置名称 / 坐标，不做范围判定
         if (c.journalMode) {
-            lat = la; lng = ln
-            if (!com.zerolab.checkin.util.NetGeo.enabled(ctx)) {
-                toast("定位增强未开启，无法记录位置名称"); return
-            }
-            val loading = AlertDialog.Builder(ctx).setMessage("正在获取位置名称…").setCancelable(false).show()
-            thread {
-                val name = try { com.zerolab.checkin.util.NetGeo.regeo(ctx, la, ln) } catch (_: Exception) { null }
-                main.post {
-                    try { loading.dismiss() } catch (_: Exception) {}
-                    if (name == null) {
-                        locName = null; lat = null; lng = null
-                        AlertDialog.Builder(ctx).setTitle("位置记录失败")
-                            .setMessage("位置名称解析失败，请检查定位增强开关和 API Key 是否正确。")
-                            .setPositiveButton("知道了", null).show()
-                    } else {
-                        locName = name
-                        AlertDialog.Builder(ctx).setTitle("记录位置")
-                            .setMessage("📍 $name\n定位来源：$src")
-                            .setNegativeButton("取消", null)
-                            .setPositiveButton("使用该位置") { _, _ -> stepSuccess() }
-                            .show()
-                    }
-                }
-            }
+            lat = fix.lat; lng = fix.lng
+            pickJournalLocation(fix)
             return
         }
         if (c.locPoints.isEmpty()) { toast("位置打卡需先配置一个标准位置"); return }
-        // 找到最近的点与距离
-        var nearestName = c.locPoints[0].name; var nearestDist = Double.MAX_VALUE; var within = false
-        c.locPoints.forEach { p ->
-            val d = distanceMeters(la, ln, p.lat, p.lng)
-            if (d < nearestDist) { nearestDist = d; nearestName = p.name }
-            if (d <= p.radius) within = true
-        }
-        val msg = "当前位置：${formatLatLng(la, ln)}\n最近地点：$nearestName（${"%.0f".format(nearestDist)} 米）\n定位来源：$src"
-        val pass = if (c.locNegative) !within else within
-        if (!pass) {
-            AlertDialog.Builder(ctx).setTitle("位置不符合要求").setMessage(
-                msg + if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
-                else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
-            ).setNegativeButton("重新定位") { _, _ -> doLocation() }
-                .setPositiveButton("知道了", null).show()
+
+        val n = nearestOf(c, fix.lat, fix.lng)
+        if (!NetGeo.enabled(ctx)) {
+            showRawDecision(c, fix, n)
             return
         }
-        val tail = if (c.locNegative) "\n模式：离开设定范围才有效（当前${if (within) "在范围内" else "已离开"}）"
-                   else "\n需要在设定范围内（当前${if (within) "在范围内" else "不在范围"}）"
-        val baseMsg = msg + tail
-        // v1.3.4：联网增强开启时，弹窗一出来就异步解析真实地名，地名回来后追加到弹窗
-        val dialog = AlertDialog.Builder(ctx).setTitle("位置符合要求").setMessage(baseMsg)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("使用该位置") { _, _ ->
-                if (!com.zerolab.checkin.util.NetGeo.enabled(ctx)) locName = null
-                stepSuccess()
-            }
-            .show()
-        if (com.zerolab.checkin.util.NetGeo.enabled(ctx)) {
-            thread {
-                val name = try { com.zerolab.checkin.util.NetGeo.regeo(ctx, la, ln) } catch (_: Exception) { null }
-                main.post {
-                    locName = name
-                    if (name != null) {
-                        try { dialog.setMessage(baseMsg + "\n📍 " + name) } catch (_: Exception) {}
-                    }
+        // 联网增强：地址 + 周边地点一起取，定位有偏移时可手动改选附近建筑
+        val loading = AlertDialog.Builder(ctx)
+            .setMessage("正在获取地址与附近地点…").setCancelable(false).show()
+        thread {
+            val detail = try { NetGeo.regeoDetail(ctx, fix.lat, fix.lng) } catch (_: Exception) { null }
+            main.post {
+                try { loading.dismiss() } catch (_: Exception) {}
+                if (detail == null) {
+                    // 地名解析失败不影响打卡：按经纬度继续
+                    toast("地址解析失败，已按经纬度继续")
+                    showRawDecision(c, fix, n)
+                } else {
+                    showLocationPicker(c, fix, n, detail)
                 }
             }
         }
+    }
+
+    /** 随心记位置：有联网增强时列出附近地点供选择 */
+    private fun pickJournalLocation(fix: FreshLocation.Fix) {
+        if (!NetGeo.enabled(ctx)) { toast("定位增强未开启，无法记录位置名称"); return }
+        val loading = AlertDialog.Builder(ctx).setMessage("正在获取位置名称…").setCancelable(false).show()
+        thread {
+            val detail = try { NetGeo.regeoDetail(ctx, fix.lat, fix.lng) } catch (_: Exception) { null }
+            main.post {
+                try { loading.dismiss() } catch (_: Exception) {}
+                if (detail == null) {
+                    locName = null; lat = null; lng = null
+                    AlertDialog.Builder(ctx).setTitle("位置记录失败")
+                        .setMessage("位置名称解析失败，请检查定位增强开关和 API Key 是否正确。")
+                        .setPositiveButton("知道了", null).show()
+                    return@post
+                }
+                val items = buildLocationItems(detail)
+                AlertDialog.Builder(ctx)
+                    .setTitle("选择位置")
+                    .setMessage("当前地址：${detail.address.ifBlank { "未知" }}\n如定位有偏移，可选择附近地点：")
+                    .setItems(items.toTypedArray()) { _, which ->
+                        if (which == 0) {
+                            locName = detail.address.takeIf { it.isNotBlank() }
+                            lat = fix.lat; lng = fix.lng
+                        } else {
+                            val p = detail.pois.getOrNull(which - 1) ?: return@setItems
+                            val w = ChinaCoord.gcj02ToWgs84(p.lat, p.lng)
+                            locName = p.name
+                            lat = w[0]; lng = w[1]
+                        }
+                        stepSuccess()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+    }
+
+    /** 选择列表：第 0 项为当前定位，其余为周边地点 */
+    private fun buildLocationItems(detail: NetGeo.GeoDetail): List<String> {
+        val items = mutableListOf<String>()
+        items += "使用当前定位" + if (detail.address.isNotBlank()) "（${detail.address}）" else ""
+        detail.pois.take(12).forEach { p ->
+            items += "📍 ${p.name}" + if (p.distanceMeters > 0) " · ${p.distanceMeters}米" else ""
+        }
+        return items
+    }
+
+    /** 无联网增强（或解析失败）时的原始坐标确认框 */
+    private fun showRawDecision(c: ItemConfig, fix: FreshLocation.Fix, n: Nearest) {
+        val msg = locationMessage(c, fix, n)
+        if (!passes(c, n)) {
+            AlertDialog.Builder(ctx).setTitle("位置不符合要求").setMessage(msg)
+                .setNegativeButton("重新定位") { _, _ -> doLocation() }
+                .setPositiveButton("知道了", null).show()
+            return
+        }
+        AlertDialog.Builder(ctx).setTitle("位置符合要求").setMessage(msg)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("使用该位置") { _, _ ->
+                locName = null
+                lat = fix.lat; lng = fix.lng
+                stepSuccess()
+            }.show()
+    }
+
+    /** 联网增强下的位置确认：当前定位 + 周边 500 米 POI，可手动校准 */
+    private fun showLocationPicker(
+        c: ItemConfig,
+        fix: FreshLocation.Fix,
+        n: Nearest,
+        detail: NetGeo.GeoDetail
+    ) {
+        val items = buildLocationItems(detail)
+        val head = locationMessage(c, fix, n) +
+                "\n\n如定位有偏移，可选择附近地点（高德周边 500 米内）："
+        AlertDialog.Builder(ctx)
+            .setTitle("确认打卡位置")
+            .setMessage(head)
+            .setItems(items.toTypedArray()) { _, which ->
+                if (which == 0) {
+                    if (!passes(c, n)) {
+                        showOutOfRange(c, fix, n, detail, null)
+                        return@setItems
+                    }
+                    lat = fix.lat; lng = fix.lng
+                    locName = detail.address.takeIf { it.isNotBlank() }
+                    stepSuccess()
+                    return@setItems
+                }
+                val p = detail.pois.getOrNull(which - 1) ?: return@setItems
+                // 高德 POI 坐标为 GCJ-02，转回 WGS-84 后再入库 / 参与范围判定
+                val w = ChinaCoord.gcj02ToWgs84(p.lat, p.lng)
+                val n2 = nearestOf(c, w[0], w[1])
+                if (!passes(c, n2)) {
+                    showOutOfRange(c, fix, n2, detail, p.name)
+                    return@setItems
+                }
+                lat = w[0]; lng = w[1]
+                locName = p.name
+                toast("已选择：${p.name}")
+                stepSuccess()
+            }
+            .setNegativeButton("重新定位") { _, _ -> doLocation() }
+            .setNeutralButton("取消", null)
+            .show()
+    }
+
+    /** 选择的地点不满足范围要求：可直接重新选择或重新定位 */
+    private fun showOutOfRange(
+        c: ItemConfig,
+        fix: FreshLocation.Fix,
+        n: Nearest,
+        detail: NetGeo.GeoDetail,
+        pickedName: String?
+    ) {
+        val head = if (pickedName != null)
+            "「$pickedName」距最近设定点 ${"%.0f".format(n.dist)} 米，不符合范围要求。"
+        else
+            "当前定位不在允许范围内。"
+        AlertDialog.Builder(ctx)
+            .setTitle("位置不符合要求")
+            .setMessage(head + "\n\n" + locationMessage(c, fix, n))
+            .setNegativeButton("重新选择") { _, _ -> showLocationPicker(c, fix, n, detail) }
+            .setPositiveButton("重新定位") { _, _ -> doLocation() }
+            .show()
+    }
+
+    private fun nearestOf(c: ItemConfig, la: Double, ln: Double): Nearest {
+        var name = c.locPoints.firstOrNull()?.name ?: ""
+        var dist = Double.MAX_VALUE
+        var within = false
+        c.locPoints.forEach { p ->
+            val d = distanceMeters(la, ln, p.lat, p.lng)
+            if (d < dist) { dist = d; name = p.name }
+            if (d <= p.radius) within = true
+        }
+        return Nearest(name, dist, within)
+    }
+
+    private fun passes(c: ItemConfig, n: Nearest): Boolean =
+        if (c.locNegative) !n.within else n.within
+
+    private fun locationMessage(c: ItemConfig, fix: FreshLocation.Fix, n: Nearest): String {
+        val tail = if (c.locNegative)
+            "模式：离开设定范围才有效（当前${if (n.within) "在范围内" else "已离开"}）"
+        else
+            "需要在设定范围内（当前${if (n.within) "在范围内" else "不在范围"}）"
+        return "当前位置：${formatLatLng(fix.lat, fix.lng)}\n" +
+                "最近地点：${n.name}（${"%.0f".format(n.dist)} 米）\n" +
+                "定位来源：${fix.sourceText()}\n$tail"
     }
 
     private fun distanceMeters(la1: Double, ln1: Double, la2: Double, ln2: Double): Double {

@@ -122,9 +122,11 @@ class MonthCalendarView @JvmOverloads constructor(
             val day = DateUtils.dayOfMonth(date)
             val radius = Math.min(colW, rowH) * 0.36f
             val today = date == DateUtils.today()
+            // v1.4.2 修复：周视图里跨月那一周，相邻月份的日期也属于当前显示周，应按正常日期渲染 / 可点击
+            val active = inMonth || weekMode
 
             val bg = when {
-                !inMonth -> 0
+                !active -> 0
                 info == null -> if (date > DateUtils.today()) 0 else 0
                 info.state == DayState.SUCCESS -> info.records.lastOrNull { moodOf(it) != null }
                     ?.let { MOOD_COLORS[moodOf(it)!!] } ?: successC
@@ -139,7 +141,7 @@ class MonthCalendarView @JvmOverloads constructor(
                 paint.style = Paint.Style.FILL
                 canvas.drawRoundRect(RectF(cx - radius, cy - radius, cx + radius, cy + radius), radius*0.3f, radius*0.3f, paint)
             }
-            if (inMonth && date == selectedDate) {
+            if (active && date == selectedDate) {
                 val d = resources.displayMetrics.density
                 if (bg != 0) {
                     val fr = radius - 2.5f * d
@@ -161,7 +163,7 @@ class MonthCalendarView @JvmOverloads constructor(
             textPaint.isFakeBoldText = bg != 0
             val textOnBg = if (bg == MOOD_COLORS[2] || bg == MOOD_COLORS[3]) 0xFF1F2430.toInt() else 0xFFFFFFFF.toInt()
             textPaint.color = when {
-                !inMonth -> futureText
+                !active -> futureText
                 bg != 0 -> textOnBg
                 else -> normalText
             }
@@ -199,7 +201,8 @@ class MonthCalendarView @JvmOverloads constructor(
             val idx = row * 7 + col
             if (idx in grid.indices) {
                 val (date, inMonth) = grid[idx]
-                if (inMonth && date <= DateUtils.today()) {
+                // v1.4.2 修复：周视图下跨月的日期也能点（之前 inMonth=false 直接吞掉点击）
+                if ((inMonth || weekMode) && date <= DateUtils.today()) {
                     selectedDate = date
                     listener?.invoke(date)
                 }

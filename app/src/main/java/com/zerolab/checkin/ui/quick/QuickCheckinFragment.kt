@@ -322,11 +322,13 @@ class QuickCheckinFragment : Fragment() {
         val c = cfg
         val year = showYear
         val month = showMonth
+        // v1.4.2 修复：周视图可能跨月，把显示周也带进快照
+        val weekAnchor = if (calendar.weekMode) calendar.weekAnchor else null
         val gen = ++snapshotGen
         snapshotExec.execute {
             if (gen != snapshotGen) return@execute
             val snap = try {
-                gatherSnapshot(q, c, year, month)
+                gatherSnapshot(q, c, year, month, weekAnchor)
             } catch (_: Exception) {
                 null
             } ?: return@execute
@@ -340,7 +342,7 @@ class QuickCheckinFragment : Fragment() {
     }
 
     /** 后台线程：执行写库结算，并算出整屏需要的只读数据 */
-    private fun gatherSnapshot(q: CheckinItem, c: ItemConfig, year: Int, month: Int): PageSnapshot {
+    private fun gatherSnapshot(q: CheckinItem, c: ItemConfig, year: Int, month: Int, weekAnchor: String?): PageSnapshot {
         // 负打卡机会结算（幂等补发）与自动补签（可能写记录），原来都在主线程，这里统一后台
         try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
         autoBackfillMissing(q, c)
@@ -370,6 +372,43 @@ class QuickCheckinFragment : Fragment() {
                 monthMap[d] = CheckinEngine.dayInfo(q, d, (byDay[d] ?: emptyList()).sortedBy { r -> r.checkinTime })
                 d = DateUtils.addDays(d, 1)
             }
+        }
+
+        // v1.4.2 修复：周视图可能跨月，把当前显示周（周一~周日）里不属于本月的日期也补进状态表，
+        // 否则跨月那几天没有 DayInfo，日历不显示颜色、点击后也像「没反应」。
+        if (weekAnchor != null) {
+            try {
+                val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                val anchorTs = fmt.parse(weekAnchor)?.time
+                if (anchorTs != null) {
+                    val wc = Calendar.getInstance()
+                    wc.timeInMillis = anchorTs
+                    val dow = wc.get(Calendar.DAY_OF_WEEK)
+                    val back = if (dow == Calendar.SUNDAY) 6 else dow - Calendar.MONDAY
+                    wc.add(Calendar.DAY_OF_MONTH, -back)
+                    val ws = DateUtils.dateOf(wc.timeInMillis)
+                    wc.add(Calendar.DAY_OF_MONTH, 6)
+                    val we = DateUtils.dateOf(wc.timeInMillis)
+                    if (c.groupMode) {
+                        var d = ws
+                        while (d <= we) {
+                            if (monthMap[d] == null) monthMap[d] = CheckinEngine.groupDayInfo(q, d, repo)
+                            d = DateUtils.addDays(d, 1)
+                        }
+                    } else {
+                        val weekByDay = repo.recordsOfMonth(q.id, ws, we).groupBy { r -> r.checkinDate }
+                        var d = ws
+                        while (d <= we) {
+                            if (monthMap[d] == null) {
+                                monthMap[d] = CheckinEngine.dayInfo(
+                                    q, d, (weekByDay[d] ?: emptyList()).sortedBy { r -> r.checkinTime }
+                                )
+                            }
+                            d = DateUtils.addDays(d, 1)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
         }
 
         val isGroup = c.groupMode && q.isActive == 1
@@ -478,6 +517,19 @@ class QuickCheckinFragment : Fragment() {
         // v1.3.15：组日历不显示 ⚡/×n 圆外小标记
         calendar.setData(snap.year, snap.month, snap.monthMap, CheckinEngine.isNegative(cfg), { date ->
             calendar.weekAnchor = date
+            // v1.4.2 修复：周视图点到相邻月份的日期时，把显示月份切到该日期所在月，
+            // 否则 weekAnchor 不在当前月网格里，下一帧会定位到错误的一周。
+            if (calendar.weekMode) {
+                try {
+                    val dc = Calendar.getInstance()
+                    dc.time = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(date)
+                    val cy = dc.get(Calendar.YEAR); val cm = dc.get(Calendar.MONTH)
+                    if (cy != snap.year || cm != snap.month) {
+                        showYear = cy; showMonth = cm
+                        requestSnapshot(resetSelection = false)
+                    }
+                } catch (_: Exception) {}
+            }
             showDayDetail(date)
         }, showBadges = !groupMode)
         // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽；v1.3.0：随心记/心情日记按实际改图例）
