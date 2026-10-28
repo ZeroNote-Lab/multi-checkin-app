@@ -88,23 +88,10 @@ object NetGeo {
             val regeo = o.optJSONObject("regeocode") ?: return null
             val address = regeo.optString("formatted_address", "").trim()
 
-            val pois = ArrayList<Poi>()
-            val arr = regeo.optJSONArray("pois")
-            if (arr != null) {
-                val seen = HashSet<String>()
-                for (i in 0 until arr.length()) {
-                    if (pois.size >= 15) break
-                    val p = arr.optJSONObject(i) ?: continue
-                    val name = p.optString("name", "").trim()
-                    if (name.isBlank() || !seen.add(name)) continue
-                    // location 为 "lng,lat"（GCJ-02）
-                    val parts = p.optString("location", "").split(',')
-                    if (parts.size != 2) continue
-                    val plng = parts[0].trim().toDoubleOrNull() ?: continue
-                    val plat = parts[1].trim().toDoubleOrNull() ?: continue
-                    val dist = p.optString("distance", "").trim().toIntOrNull() ?: 0
-                    pois.add(Poi(name, p.optString("address", "").trim(), dist, plat, plng))
-                }
+            var pois = parsePois(regeo.optJSONArray("pois"))
+            // 部分 Key / 坐标下 regeo 的 pois 为空，补一次周边搜索，保证「附近地点」有可选内容
+            if (pois.isEmpty()) {
+                pois = placeAround(ctx, gcj[0], gcj[1], 500)
             }
             if (address.isBlank() && pois.isEmpty()) return null
             return GeoDetail(address, pois)
@@ -113,5 +100,55 @@ object NetGeo {
         } finally {
             try { conn?.disconnect() } catch (_: Exception) {}
         }
+    }
+
+    /** 周边搜索（高德 place/around），返回 GCJ-02 坐标的 POI */
+    private fun placeAround(ctx: Context, gcjLat: Double, gcjLng: Double, radius: Int): List<Poi> {
+        val key = apiKey(ctx)
+        if (key.isBlank()) return emptyList()
+        var conn: java.net.HttpURLConnection? = null
+        return try {
+            val url = java.net.URL(
+                "https://restapi.amap.com/v3/place/around?location=${gcjLng},${gcjLat}" +
+                        "&radius=$radius&offset=15&page=1&sortrule=distance&key=$key"
+            )
+            conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 4000
+            conn.readTimeout = 4000
+            conn.requestMethod = "GET"
+            conn.useCaches = false
+            if (conn.responseCode != 200) return emptyList()
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val o = JSONObject(body)
+            if (o.optString("status") != "1") return emptyList()
+            parsePois(o.optJSONArray("pois"))
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) {}
+        }
+    }
+
+    /** 解析高德 POI 数组（regeo.pois / place.pois 字段结构一致） */
+    private fun parsePois(arr: org.json.JSONArray?): List<Poi> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<Poi>()
+        val seen = HashSet<String>()
+        for (i in 0 until arr.length()) {
+            if (out.size >= 15) break
+            val p = arr.optJSONObject(i) ?: continue
+            val name = p.optString("name", "").trim()
+            if (name.isBlank() || !seen.add(name)) continue
+            // location 为 "lng,lat"（GCJ-02）
+            val parts = p.optString("location", "").split(',')
+            if (parts.size != 2) continue
+            val plng = parts[0].trim().toDoubleOrNull() ?: continue
+            val plat = parts[1].trim().toDoubleOrNull() ?: continue
+            val dist = p.optString("distance", "").trim().toIntOrNull() ?: 0
+            val addr = p.optString("address", "").trim()
+                .ifBlank { p.optString("adname", "").trim() }
+            out.add(Poi(name, addr, dist, plat, plng))
+        }
+        return out
     }
 }

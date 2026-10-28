@@ -610,36 +610,16 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                         .setPositiveButton("知道了", null).show()
                     return@post
                 }
-                val items = buildLocationItems(detail)
-                AlertDialog.Builder(ctx)
-                    .setTitle("选择位置")
-                    .setMessage("当前地址：${detail.address.ifBlank { "未知" }}\n如定位有偏移，可选择附近地点：")
-                    .setItems(items.toTypedArray()) { _, which ->
-                        if (which == 0) {
-                            locName = detail.address.takeIf { it.isNotBlank() }
-                            lat = fix.lat; lng = fix.lng
-                        } else {
-                            val p = detail.pois.getOrNull(which - 1) ?: return@setItems
-                            val w = ChinaCoord.gcj02ToWgs84(p.lat, p.lng)
-                            locName = p.name
-                            lat = w[0]; lng = w[1]
-                        }
-                        stepSuccess()
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
+                val info = "当前地址：${detail.address.ifBlank { "未知" }}\n如定位有偏移，可选择附近地点："
+                LocationPickerDialog.show(
+                    ctx, "选择位置", info, detail, fix.lat, fix.lng, onRetry = null
+                ) { name, wLat, wLng ->
+                    locName = name
+                    lat = wLat; lng = wLng
+                    stepSuccess()
+                }
             }
         }
-    }
-
-    /** 选择列表：第 0 项为当前定位，其余为周边地点 */
-    private fun buildLocationItems(detail: NetGeo.GeoDetail): List<String> {
-        val items = mutableListOf<String>()
-        items += "使用当前定位" + if (detail.address.isNotBlank()) "（${detail.address}）" else ""
-        detail.pois.take(12).forEach { p ->
-            items += "📍 ${p.name}" + if (p.distanceMeters > 0) " · ${p.distanceMeters}米" else ""
-        }
-        return items
     }
 
     /** 无联网增强（或解析失败）时的原始坐标确认框 */
@@ -660,46 +640,29 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             }.show()
     }
 
-    /** 联网增强下的位置确认：当前定位 + 周边 500 米 POI，可手动校准 */
+    /** 联网增强下的位置确认：当前定位 + 周边地点，可手动校准 */
     private fun showLocationPicker(
         c: ItemConfig,
         fix: FreshLocation.Fix,
         n: Nearest,
         detail: NetGeo.GeoDetail
     ) {
-        val items = buildLocationItems(detail)
-        val head = locationMessage(c, fix, n) +
-                "\n\n如定位有偏移，可选择附近地点（高德周边 500 米内）："
-        AlertDialog.Builder(ctx)
-            .setTitle("确认打卡位置")
-            .setMessage(head)
-            .setItems(items.toTypedArray()) { _, which ->
-                if (which == 0) {
-                    if (!passes(c, n)) {
-                        showOutOfRange(c, fix, n, detail, null)
-                        return@setItems
-                    }
-                    lat = fix.lat; lng = fix.lng
-                    locName = detail.address.takeIf { it.isNotBlank() }
-                    stepSuccess()
-                    return@setItems
-                }
-                val p = detail.pois.getOrNull(which - 1) ?: return@setItems
-                // 高德 POI 坐标为 GCJ-02，转回 WGS-84 后再入库 / 参与范围判定
-                val w = ChinaCoord.gcj02ToWgs84(p.lat, p.lng)
-                val n2 = nearestOf(c, w[0], w[1])
-                if (!passes(c, n2)) {
-                    showOutOfRange(c, fix, n2, detail, p.name)
-                    return@setItems
-                }
-                lat = w[0]; lng = w[1]
-                locName = p.name
-                toast("已选择：${p.name}")
-                stepSuccess()
+        val info = locationMessage(c, fix, n) +
+                "\n\n如果定位有偏移，可选择附近地点："
+        LocationPickerDialog.show(
+            ctx, "确认打卡位置", info, detail, fix.lat, fix.lng,
+            onRetry = { doLocation() }
+        ) { name, wLat, wLng ->
+            val isCurrent = wLat == fix.lat && wLng == fix.lng
+            val n2 = nearestOf(c, wLat, wLng)
+            if (!passes(c, n2)) {
+                showOutOfRange(c, fix, n2, detail, if (isCurrent) null else name)
+                return@show
             }
-            .setNegativeButton("重新定位") { _, _ -> doLocation() }
-            .setNeutralButton("取消", null)
-            .show()
+            lat = wLat; lng = wLng
+            locName = name
+            stepSuccess()
+        }
     }
 
     /** 选择的地点不满足范围要求：可直接重新选择或重新定位 */

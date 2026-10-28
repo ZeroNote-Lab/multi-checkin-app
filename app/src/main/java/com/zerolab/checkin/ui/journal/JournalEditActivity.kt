@@ -330,28 +330,14 @@ class JournalEditActivity : AppCompatActivity() {
                         if (detail == null) {
                             replaceLocationBlock("当前位置", fix.lat, fix.lng)
                             toast("未获取到位置名称，已记录当前坐标")
-                            return@post
-                        }
-                        val items = mutableListOf<String>()
-                        items += "使用当前定位" + if (detail.address.isNotBlank()) "（${detail.address}）" else ""
-                        detail.pois.take(12).forEach { p ->
-                            items += "📍 ${p.name}" + if (p.distanceMeters > 0) " · ${p.distanceMeters}米" else ""
-                        }
-                        AlertDialog.Builder(this)
-                            .setTitle("选择位置")
-                            .setMessage("当前地址：${detail.address.ifBlank { "未知" }}\n如定位有偏移，可选择附近地点：")
-                            .setItems(items.toTypedArray()) { _, which ->
-                                if (which == 0) {
-                                    replaceLocationBlock(detail.address.ifBlank { "当前位置" }, fix.lat, fix.lng)
-                                } else {
-                                    val p = detail.pois.getOrNull(which - 1) ?: return@setItems
-                                    // 高德 POI 是 GCJ-02，转回 WGS-84 再存
-                                    val w = com.zerolab.checkin.util.ChinaCoord.gcj02ToWgs84(p.lat, p.lng)
-                                    replaceLocationBlock(p.name, w[0], w[1])
-                                }
+                        } else {
+                            val info = "当前地址：${detail.address.ifBlank { "未知" }}\n如定位有偏移，可选择附近地点："
+                            com.zerolab.checkin.ui.flow.LocationPickerDialog.show(
+                                this, "选择位置", info, detail, fix.lat, fix.lng, onRetry = null
+                            ) { name, wLat, wLng ->
+                                replaceLocationBlock(name ?: "当前位置", wLat, wLng)
                             }
-                            .setNegativeButton("取消", null)
-                            .show()
+                        }
                     }
                 }
             }
