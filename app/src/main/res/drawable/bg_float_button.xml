@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.4.2：打卡页悬浮按钮底（圆角胶囊，颜色由代码按打卡项主题色 tint） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFFFFF" />
+    <corners android:radius="27dp" />
+</shape>

@@ -224,7 +224,9 @@ class QuickCheckinFragment : Fragment() {
         val q = overrideItemId?.let { repo.getItem(it) } ?: repo.getQuickItem()
         item = q
         if (q == null) {
-            contentView.visibility = View.GONE; emptyView.visibility = View.VISIBLE; return
+            contentView.visibility = View.GONE; emptyView.visibility = View.VISIBLE
+            btnCheckin.visibility = View.GONE
+            return
         }
         contentView.visibility = View.VISIBLE; emptyView.visibility = View.GONE
         cfg = ItemConfig.parse(q.configJson)
@@ -265,8 +267,13 @@ class QuickCheckinFragment : Fragment() {
             view?.findViewById<TextView>(R.id.btn_toggle_week)?.visibility = View.GONE
             view?.findViewById<android.view.View>(R.id.btn_journal_write)?.visibility = View.GONE
             btnCheckin.visibility = View.VISIBLE
+            // v1.4.2：从随心记切回普通项时恢复悬浮按钮的圆角背景 / 白字 / 阴影
+            btnCheckin.setBackgroundResource(R.drawable.bg_float_button)
+            btnCheckin.setTextColor(0xFFFFFFFF.toInt())
+            btnCheckin.elevation = 8f * resources.displayMetrics.density
+            // v1.4.2：打卡按钮改为底部悬浮，滚动区留出底部空间，避免最后一条记录被挡住
             val pad = resources.displayMetrics.density.toInt()
-            view?.findViewById<LinearLayout>(R.id.scroll_content)?.setPadding(14 * pad, 14 * pad, 14 * pad, 14 * pad)
+            view?.findViewById<LinearLayout>(R.id.scroll_content)?.setPadding(14 * pad, 14 * pad, 14 * pad, 96 * pad)
         }
         // v1.4.2 优化：负打卡结算与自动补签改到后台快照里执行（原来在主线程逐日查库）
         val theme = ThemeManager.of(q.theme)

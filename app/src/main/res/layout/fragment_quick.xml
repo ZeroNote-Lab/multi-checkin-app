@@ -206,16 +206,25 @@
                     android:layout_marginTop="8dp"
                     android:orientation="vertical"
                     android:visibility="gone" />
-
-                <Button
-                    android:id="@+id/btn_checkin"
-                    style="@style/PrimaryButton"
-                    android:layout_width="match_parent"
-                    android:layout_marginTop="14dp"
-                    android:text="打卡" />
             </LinearLayout>
         </ScrollView>
     </LinearLayout>
+
+    <!-- v1.4.2：打卡悬浮按钮（所有打卡项共用，始终贴在屏幕底部；随心记改用「写一条」） -->
+    <Button
+        android:id="@+id/btn_checkin"
+        style="@style/PrimaryButton"
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/bg_float_button"
+        android:elevation="8dp"
+        android:paddingHorizontal="20dp"
+        android:text="打卡"
+        android:visibility="gone" />
 
     <!-- v1.4.0：随心记悬浮"写一条"按钮（日记模式才显示）；铅笔✏旋转180°笔尖朝左下 -->
     <LinearLayout
