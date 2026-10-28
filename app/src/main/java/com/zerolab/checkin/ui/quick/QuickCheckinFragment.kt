@@ -894,6 +894,18 @@ class QuickCheckinFragment : Fragment() {
         // 先清空记录区，防止切换日期时残留上一日期内容
         recordsBox.removeAllViews()
         body.visibility = View.VISIBLE
+        // v1.4.2：停用期间的日期不显示缺卡，直接提示已停用
+        if (recs.isEmpty() && CheckinEngine.isPausedOn(it, date)) {
+            title.text = "⏸ $date   ·   已停用"
+            body.text = "该日打卡项处于停用状态，不记缺卡；重新启用后从启用日开始记录"
+            if (AdminMode.isOn) {
+                val citem = it
+                title.setOnLongClickListener { adminDayMenu(citem, date); true }
+                body.setOnLongClickListener { adminDayMenu(citem, date); true }
+                recordsBox.addView(adminAddButton(it, date))
+            }
+            return
+        }
         // 无需打卡日：单独展示
         if (!CheckinEngine.isScheduledDay(it, date)) {
             title.text = "📅 $date   ·   无需打卡"

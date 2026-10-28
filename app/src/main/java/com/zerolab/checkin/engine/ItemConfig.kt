@@ -18,6 +18,15 @@ data class OffsetCfg(
 )
 
 /**
+ * 停用区间（v1.4.2）：停用期间不记缺卡、不计连续。
+ * [from] / [to] 均为 yyyy-MM-dd；[to] 为空表示当前仍处于停用中。
+ */
+data class PauseRange(
+    var from: String = "",
+    var to: String = ""
+)
+
+/**
  * 打卡项规则配置（v6：方式为多开关集合）。
  */
 class ItemConfig {
@@ -78,6 +87,9 @@ class ItemConfig {
     var ndaysMode: Boolean = false
     var ndaysTarget: Int = 21
 
+    // v1.4.2：停用区间（可多次暂停/恢复累积），停用期间不记缺卡
+    val pausedRanges: MutableList<PauseRange> = mutableListOf()
+
     var offset: OffsetCfg = OffsetCfg()
 
     fun toJson(): String {
@@ -123,6 +135,11 @@ class ItemConfig {
         o.put("groupMemberNames", JSONArray(groupMemberNames.toList()))
         o.put("ndaysMode", ndaysMode)
         o.put("ndaysTarget", ndaysTarget)
+        val paused = JSONArray()
+        pausedRanges.forEach { r ->
+            paused.put(JSONObject().put("from", r.from).put("to", r.to))
+        }
+        o.put("pausedRanges", paused)
         o.put("offset", JSONObject()
             .put("enabled", offset.enabled)
             .put("mode", offset.mode)
@@ -198,6 +215,14 @@ class ItemConfig {
                 }
                 c.ndaysMode = o.optBoolean("ndaysMode", false)
                 c.ndaysTarget = o.optInt("ndaysTarget", 21)
+                o.optJSONArray("pausedRanges")?.let { a ->
+                    c.pausedRanges.clear()
+                    for (i in 0 until a.length()) {
+                        val r = a.optJSONObject(i) ?: continue
+                        val from = r.optString("from", "")
+                        if (from.isNotBlank()) c.pausedRanges.add(PauseRange(from, r.optString("to", "")))
+                    }
+                }
                 o.optJSONObject("offset")?.let { off ->
                     c.offset = OffsetCfg(
                         off.optBoolean("enabled", false),

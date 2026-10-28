@@ -2,6 +2,9 @@ package com.zerolab.checkin.data.repo
 
 import com.zerolab.checkin.data.AppDatabase
 import com.zerolab.checkin.data.entity.*
+import com.zerolab.checkin.engine.ItemConfig
+import com.zerolab.checkin.engine.PauseRange
+import com.zerolab.checkin.util.DateUtils
 
 class CheckinRepository(private val db: AppDatabase) : CheckinStore {
 
@@ -66,7 +69,31 @@ class CheckinRepository(private val db: AppDatabase) : CheckinStore {
 
     fun setActive(id: Long, active: Boolean) {
         val it = itemDao.getById(id) ?: return
-        itemDao.update(it.copy(isActive = if (active) 1 else 0))
+        val c = ItemConfig.parse(it.configJson)
+        val eff = DateUtils.belongDate(System.currentTimeMillis(), c.dayCutoff)
+        if (!active && it.isActive == 1) {
+            // v1.4.2：记下停用区间（停用期间不记缺卡）
+            if (c.pausedRanges.none { r -> r.to.isBlank() }) {
+                c.pausedRanges.add(PauseRange(eff, ""))
+            }
+        } else if (active && it.isActive == 0) {
+            // v1.4.2：恢复时闭合停用区间（停用到昨天为止）
+            val open = c.pausedRanges.lastOrNull { r -> r.to.isBlank() }
+            if (open != null) {
+                open.to = DateUtils.addDays(eff, -1)
+                if (open.to < open.from) c.pausedRanges.remove(open)
+            } else if (c.pausedRanges.isEmpty()) {
+                // 兼容旧数据：旧版停用项没有区间记录，按「最后一条记录之后」补一段已结束区间
+                val lastRec = recordDao.lastDate(id)
+                val from = if (lastRec != null) DateUtils.addDays(lastRec, 1) else DateUtils.dateOf(it.createdAt)
+                val to = DateUtils.addDays(eff, -1)
+                if (from <= to) c.pausedRanges.add(PauseRange(from, to))
+            }
+        }
+        itemDao.update(it.copy(
+            isActive = if (active) 1 else 0,
+            configJson = c.toJson()
+        ))
         if (!active) {
             // v1.4.2：暂停的快捷项自动把快捷让给下一个启用项（排除组内子项），没有则清空
             if (quickDao.get()?.itemId == id) {
@@ -75,6 +102,22 @@ class CheckinRepository(private val db: AppDatabase) : CheckinStore {
         } else if (quickDao.get()?.itemId == null) {
             // 恢复时若当前没有快捷项（全部暂停过），把恢复项设为快捷
             quickDao.upsert(QuickConfig(1, id))
+        }
+    }
+
+    /**
+     * v1.4.2：启动时补齐旧停用项的停用区间。
+     * 旧版本暂停只改 isActive，没有记录暂停日期；这里按「最后一条记录之后」补一段至今的区间，
+     * 避免升级后历史日期继续显示成一整片缺卡。已有区间的项不处理。
+     */
+    fun migrateLegacyPauseRanges() {
+        itemDao.getAllSorted().filter { it.isActive == 0 }.forEach { item ->
+            val c = ItemConfig.parse(item.configJson)
+            if (c.pausedRanges.isNotEmpty()) return@forEach
+            val lastRec = recordDao.lastDate(item.id)
+            val from = if (lastRec != null) DateUtils.addDays(lastRec, 1) else DateUtils.dateOf(item.createdAt)
+            c.pausedRanges.add(PauseRange(from, ""))
+            itemDao.update(item.copy(configJson = c.toJson()))
         }
     }
 

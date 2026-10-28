@@ -31,7 +31,7 @@ android {
         applicationId "com.zerolab.checkin"
         minSdk 24
         targetSdk 34
-        versionCode 134
+        versionCode 135
         versionName "1.4.2"
         vectorDrawables.useSupportLibrary = true
         // v1.4.2：Room 迁移测试（androidTest）使用 AndroidJUnitRunner

@@ -365,4 +365,66 @@ class CheckinEngineTest {
         val r = CheckinEngine.perform(it, store, now = ts("2026-10-27", 9, 0))
         assertTrue(r is CheckinResult.Blocked)
     }
+
+    // ---------- v1.4.2 停用区间（停用期间不记缺卡） ----------
+
+    @Test
+    fun pausedRange_pastDayWithoutRecords_isInactive() {
+        val cfg = ItemConfig().apply { pausedRanges.add(PauseRange("2026-10-20", "2026-10-24")) }
+        val it = addItem(cfg)
+        // 停用区间内：置空
+        assertEquals(DayState.INACTIVE, CheckinEngine.dayInfo(it, "2026-10-22", emptyList(), today).state)
+        // 停用前一天：正常缺卡
+        assertEquals(DayState.FAIL, CheckinEngine.dayInfo(it, "2026-10-19", emptyList(), today).state)
+        // 区间结束后：恢复记缺卡
+        assertEquals(DayState.FAIL, CheckinEngine.dayInfo(it, "2026-10-25", emptyList(), today).state)
+    }
+
+    @Test
+    fun pausedRange_dayWithRecord_stillShowsRecord() {
+        val cfg = ItemConfig().apply { pausedRanges.add(PauseRange("2026-10-20", "2026-10-26")) }
+        val it = addItem(cfg)
+        val r = rec(itemId = it.id, date = "2026-10-22", status = "SUCCESS")
+        store.insertRecord(r)
+        assertEquals(DayState.SUCCESS, CheckinEngine.dayInfo(it, "2026-10-22", listOf(r), today).state)
+    }
+
+    @Test
+    fun streak_skipsPausedDays() {
+        val cfg = ItemConfig().apply { pausedRanges.add(PauseRange("2026-10-24", "2026-10-25")) }
+        val item = addItem(cfg, created = "2026-10-01")
+        listOf("2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23").forEach { d ->
+            store.insertRecord(rec(itemId = item.id, date = d))
+        }
+        // 今天 10-26 未打卡：25/24 停用跳过，20~23 连续 4 天
+        assertEquals(4, CheckinEngine.streak(item, store, today))
+    }
+
+    @Test
+    fun streak_pausedToday_keepsFrozenValue() {
+        val cfg = ItemConfig().apply { pausedRanges.add(PauseRange("2026-10-24", "")) }
+        val item = addItem(cfg, created = "2026-10-01", active = 0)
+        listOf("2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23").forEach { d ->
+            store.insertRecord(rec(itemId = item.id, date = d))
+        }
+        // 停用当天及之后不计数、不打断：连续天数保持 4
+        assertEquals(4, CheckinEngine.streak(item, store, today))
+        assertEquals(DayState.INACTIVE, CheckinEngine.dayInfo(item, "2026-10-25", emptyList(), today).state)
+    }
+
+    @Test
+    fun legacyPausedItem_withoutRange_usesUpdateDateFallback() {
+        val it = addItem(active = 0).copy(updatedAt = ts("2026-10-21", 8, 0))
+        store.updateItem(it)
+        assertEquals(DayState.INACTIVE, CheckinEngine.dayInfo(it, "2026-10-22", emptyList(), today).state)
+        assertEquals(DayState.FAIL, CheckinEngine.dayInfo(it, "2026-10-20", emptyList(), today).state)
+    }
+
+    @Test
+    fun perform_inPausedRange_isBlocked() {
+        val cfg = ItemConfig().apply { pausedRanges.add(PauseRange(today, "")) }
+        val it = addItem(cfg)
+        val r = CheckinEngine.perform(it, store, now = ts(today, 9, 0))
+        assertTrue(r is CheckinResult.Blocked)
+    }
 }

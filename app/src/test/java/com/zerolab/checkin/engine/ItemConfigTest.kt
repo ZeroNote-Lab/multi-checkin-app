@@ -31,6 +31,21 @@ class ItemConfigTest {
     }
 
     @Test
+    fun paused_ranges_round_trip_and_legacy_missing_field() {
+        val c = ItemConfig().apply {
+            pausedRanges.add(PauseRange("2026-10-20", ""))
+            pausedRanges.add(PauseRange("2026-10-10", "2026-10-12"))
+        }
+        val back = ItemConfig.parse(c.toJson())
+        assertEquals(2, back.pausedRanges.size)
+        assertEquals("2026-10-20", back.pausedRanges[0].from)
+        assertEquals("", back.pausedRanges[0].to)
+        assertEquals("2026-10-12", back.pausedRanges[1].to)
+        // 旧配置没有该字段 → 空列表
+        assertTrue(ItemConfig.parse("""{"methods":["NORMAL"]}""").pausedRanges.isEmpty())
+    }
+
+    @Test
     fun round_trip_keeps_methods_and_core_rules() {
         val c = ItemConfig().apply {
             methods.clear(); methods.add(Method.PHOTO.key); methods.add(Method.TEXT.key)

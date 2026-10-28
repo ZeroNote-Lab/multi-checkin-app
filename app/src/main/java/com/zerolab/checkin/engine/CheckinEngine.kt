@@ -8,7 +8,7 @@ import com.zerolab.checkin.data.repo.CheckinStore
 import com.zerolab.checkin.util.DateUtils
 
 /** 日历某天的展示状态 */
-enum class DayState { SUCCESS, FAIL, UNCHECKED, FUTURE, OFFSET, SKIP, PARTIAL }
+enum class DayState { SUCCESS, FAIL, UNCHECKED, FUTURE, OFFSET, SKIP, PARTIAL, INACTIVE }
 
 data class DayInfo(
     val date: String,
@@ -38,6 +38,25 @@ object CheckinEngine {
 
     fun effectiveToday(c: ItemConfig): String =
         DateUtils.belongDate(System.currentTimeMillis(), c.dayCutoff)
+
+    /**
+     * v1.4.2：某天是否处于「停用」区间。停用期间不记缺卡、不计连续，直到重新启用。
+     * 兼容旧数据：停用中但没有区间记录时，从最后更新时间起视为停用。
+     */
+    fun isPausedOn(item: CheckinItem, date: String): Boolean {
+        val c = cfg(item)
+        if (isPausedOn(c, date)) return true
+        if (item.isActive == 0 && c.pausedRanges.isEmpty()) {
+            return date >= DateUtils.dateOf(item.updatedAt)
+        }
+        return false
+    }
+
+    /** 按配置判断某天是否在停用区间内（[PauseRange.to] 为空 = 仍在停用） */
+    fun isPausedOn(c: ItemConfig, date: String): Boolean =
+        c.pausedRanges.any { r ->
+            r.from.isNotBlank() && date >= r.from && (r.to.isBlank() || date <= r.to)
+        }
 
     /** 该方式集合是否为负打卡语义（普通负打卡 或 双时间自定义负打卡） */
     fun isNegative(c: ItemConfig) = c.negative // v1.1.8：移除双时间自定义负打卡
@@ -81,6 +100,9 @@ object CheckinEngine {
             // v1.3.19：有记录（如超级管理员补录历史日期）则继续按记录状态渲染，日历正常着色
             date < created && records.isEmpty() -> DayInfo(date, DayState.FUTURE, 0, false, records)
             date > today -> DayInfo(date, DayState.FUTURE, records.size, auto, records)
+            // v1.4.2：停用期间且当天没有记录 → 置空（不记缺卡）；停用当天已有记录仍按记录展示
+            isPausedOn(item, date) && records.isEmpty() ->
+                DayInfo(date, DayState.INACTIVE, 0, false, records)
             offset -> DayInfo(date, DayState.OFFSET, records.size, auto, records)
             // v1.3.15：打卡组——当日有成功记录=已打卡；否则未打卡（组无负打卡/无 SKIP 染色）
             c.groupMode -> DayInfo(date,
@@ -147,23 +169,26 @@ object CheckinEngine {
         // v1.3.15：打卡组非排期日视为成功，不中断连续
         if (c.groupMode && !isScheduledDay(item, date)) return true
         val recs = repo.recordsOfDay(item.id, date)
-        val info = dayInfo(item, date, recs)
+        val info = dayInfo(item, date, recs, today)
         if (info.state == DayState.SKIP) return true // 无需打卡日视为成功，不中断连续
         if (date == today && recs.isEmpty()) return false // 今天未定论不计入
         // 补签（OFFSET）算进连续天数：补签把断的那天补上，连续不中断（v1.1.3）
         return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
     }
 
-    /** 连续成功天数 */
+    /** 连续成功天数（停用区间不计入、也不打断，恢复后接着算） */
     fun streak(item: CheckinItem, repo: CheckinStore, today: String = effectiveToday(item)): Int {
         var d = today
         // v1.3.1：负打卡破戒当天立即归零（破戒是主动失败、当天已成事实，不再从昨日回溯）
-        if (isNegative(cfg(item)) && repo.recordsOfDay(item.id, d).any { it.status == "FAIL" }) return 0
+        if (isNegative(cfg(item)) && !isPausedOn(item, d) &&
+            repo.recordsOfDay(item.id, d).any { it.status == "FAIL" }) return 0
         // 今天未定论则从昨天起算
         if (!dayIsSuccess(item, d, repo, today)) d = DateUtils.addDays(d, -1)
         var n = 0
-        // 上限保护，最多回溯 3660 天
-        repeat(3660) {
+        var guard = 0
+        // 上限保护，最多回溯 3660 天；停用日跳过（不计数、不中断）
+        while (guard++ < 3660) {
+            if (isPausedOn(item, d)) { d = DateUtils.addDays(d, -1); continue }
             if (dayIsSuccess(item, d, repo, today)) { n++; d = DateUtils.addDays(d, -1) } else return n
         }
         return n
@@ -184,8 +209,10 @@ object CheckinEngine {
         var d = today
         if (!dayIsSuccess(item, d, repo, today)) d = DateUtils.addDays(d, -1)
         var n = 0
-        repeat(3660) {
+        var guard = 0
+        while (guard++ < 3660) {
             if (d < start) return n
+            if (isPausedOn(item, d)) { d = DateUtils.addDays(d, -1); continue }
             if (dayIsSuccess(item, d, repo, today)) { n++; d = DateUtils.addDays(d, -1) } else return n
         }
         return n
@@ -222,6 +249,8 @@ object CheckinEngine {
 
         // 归属日期与状态（v1.3.12：时间分割——凌晨分割点之前打卡归属前一天）
         val date = DateUtils.belongDate(now, c.dayCutoff)
+        // v1.4.2：停用期间（含历史停用区间）不记录打卡
+        if (isPausedOn(c, date)) return CheckinResult.Blocked("该日处于停用状态，不记录打卡")
         // v1.3.8：负打卡破戒豁免——点击记录时若有可用盾牌，先消耗 1 次盾牌把本次破戒抵消为补卡（蓝色、不算破戒次数）；
         // 盾牌用完后再点，才真正记为破戒（FAIL）。
         var status = if (isNegative(c) && !isAuto) "FAIL" else "SUCCESS"
@@ -267,6 +296,8 @@ object CheckinEngine {
     fun subDayProgress(item: CheckinItem, date: String, repo: CheckinStore, today: String = effectiveToday(item)): IntArray {
         val c = cfg(item)
         if (date < DateUtils.dateOf(item.createdAt) || date > today) return intArrayOf(0, 1)
+        // v1.4.2：停用日视为「不要求该子项」，不阻塞打卡组完成
+        if (isPausedOn(item, date)) return intArrayOf(1, 1)
         val recs = repo.recordsOfDay(item.id, date)
         if (c.journalMode || c.moodMode) return intArrayOf(if (recs.any { it.status == "SUCCESS" || it.status == "OFFSET" }) 1 else 0, 1)
         if (isNegative(c)) return intArrayOf(if (recs.any { it.status == "FAIL" }) 0 else 1, 1)
@@ -301,7 +332,8 @@ object CheckinEngine {
         val allDone = gc.groupMembers.all { mid ->
             // v1.3.16：统一用 subDayDone——子项必须「当日全部完成」（组合全部方式/单方式次数打满）才算组完成
             val m = if (mid == item.id) item else repo.getItem(mid) ?: return
-            subDayDone(m, date, repo)
+            // v1.4.2：停用的子项不参与当日组完成判定
+            if (isPausedOn(m, date)) true else subDayDone(m, date, repo)
         }
         if (allDone) {
             repo.insertRecord(CheckinRecord(
@@ -324,11 +356,15 @@ object CheckinEngine {
         val auto = recs.any { it.isAuto == 1 }
         if (recs.any { it.status == "SUCCESS" || it.status == "OFFSET" })
             return DayInfo(date, DayState.SUCCESS, recs.size, auto, recs)
+        // v1.4.2：组停用期间没有记录 → 置空，不记缺卡
+        if (isPausedOn(group, date) && recs.isEmpty())
+            return DayInfo(date, DayState.INACTIVE, 0, false, recs)
         if (!isScheduledDay(group, date)) return DayInfo(date, DayState.UNCHECKED, recs.size, auto, recs)
         // 部分打卡：至少一个子项当日完成但组未完成（v1.3.16 统一用 subDayDone）
         val anyMemberDone = c.groupMembers.any { mid ->
             val m = repo.getItem(mid) ?: return@any false
-            subDayDone(m, date, repo)
+            // v1.4.2：停用的子项不算「已完成」，也不让组显示部分完成
+            if (isPausedOn(m, date)) false else subDayDone(m, date, repo)
         }
         return DayInfo(date, if (anyMemberDone) DayState.PARTIAL else DayState.UNCHECKED, recs.size, auto, recs)
     }

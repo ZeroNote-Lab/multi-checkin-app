@@ -17,6 +17,10 @@ interface RecordDao {
     @Query("SELECT DISTINCT checkinDate FROM checkin_record WHERE itemId = :itemId")
     fun recordDates(itemId: Long): List<String>
 
+    // v1.4.2：最后一条记录的归属日期（旧停用项迁移停用区间用）
+    @Query("SELECT MAX(checkinDate) FROM checkin_record WHERE itemId = :itemId")
+    fun lastDate(itemId: Long): String?
+
     @Query("DELETE FROM checkin_record WHERE itemId = :itemId")
     fun deleteByItem(itemId: Long)
 

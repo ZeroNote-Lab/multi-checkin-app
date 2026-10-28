@@ -72,6 +72,8 @@ internal fun CreateItemActivity.loadForm() {
         cfg.qrContent = loaded.qrContent.ifBlank { "uuid:" + java.util.UUID.randomUUID() }
         cfg.nfcTagId = loaded.nfcTagId; cfg.voiceMaxSeconds = loaded.voiceMaxSeconds
         cfg.offset = loaded.offset
+        // v1.4.2：停用区间随编辑保留（否则保存一次就丢了历史停用记录）
+        cfg.pausedRanges.clear(); cfg.pausedRanges.addAll(loaded.pausedRanges)
         // v6.1.0 日期配置回显
         schedule.mode = loaded.scheduleMode
         schedule.weekDays.clear(); schedule.weekDays.addAll(loaded.weekDays)
