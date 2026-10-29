@@ -1,14 +1,12 @@
 package com.zerolab.checkin.ui.quick
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.media.MediaPlayer
 import android.os.Bundle
-import android.util.LruCache
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -39,7 +37,6 @@ import com.zerolab.checkin.util.ImageUtil
 import com.zerolab.checkin.util.formatLatLng
 import java.io.File
 import java.util.Calendar
-import java.util.concurrent.Executors
 import kotlin.math.min
 
 class QuickCheckinFragment : Fragment() {
@@ -126,27 +123,6 @@ class QuickCheckinFragment : Fragment() {
     companion object {
         fun newInstance(itemId: Long): QuickCheckinFragment =
             QuickCheckinFragment().apply { arguments = Bundle().apply { putLong("override_id", itemId) } }
-
-        /** 记录图片缩略图缓存：重复打开打卡页不再重复解码 */
-        private val thumbCache = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
-            override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
-        }
-        private val thumbExec = Executors.newFixedThreadPool(2)
-        private val thumbHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    }
-
-    /** 异步加载宫格缩略图：主线程只设置占位，解码在后台线程完成 */
-    private fun loadThumb(iv: ImageView, path: String) {
-        iv.tag = path
-        thumbCache.get(path)?.let { iv.setImageBitmap(it); return }
-        iv.setImageDrawable(null)
-        thumbExec.execute {
-            val bmp = try { BitmapFactory.decodeFile(path) } catch (_: Exception) { null }
-            if (bmp != null) thumbCache.put(path, bmp)
-            thumbHandler.post {
-                if (iv.tag == path && bmp != null) iv.setImageBitmap(bmp)
-            }
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -324,19 +300,8 @@ class QuickCheckinFragment : Fragment() {
             ::onCalendarDate, showBadges = !cfg.groupMode
         )
         renderMonthTitle()
-        showDayDetailPlaceholder(effTodayNow)
+        showDayDetail(effTodayNow)
         requestSnapshot(resetSelection = true)
-    }
-
-    /** 进入页面时先占位，避免同步查询 / 构建记录视图造成卡顿；真实记录由快照回来后再渲染一次 */
-    private fun showDayDetailPlaceholder(date: String) {
-        val title = root.findViewById<TextView>(R.id.tv_detail_title)
-        val body = root.findViewById<TextView>(R.id.tv_detail_body)
-        val recordsBox = root.findViewById<LinearLayout>(R.id.detail_records_box)
-        recordsBox.removeAllViews()
-        title.text = "📅 $date"
-        body.visibility = View.VISIBLE
-        body.text = "正在加载记录…"
     }
 
     /** 日历日期点击：周视图点到相邻月份时切换显示月份，再刷新记录栏 */
@@ -1178,9 +1143,10 @@ class QuickCheckinFragment : Fragment() {
                 }
                 grid.addView(row)
             }
+            val bmp = try { BitmapFactory.decodeFile(path) } catch (_: Exception) { null }
             val iv = ImageView(ctx).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                setBackgroundColor(0xFFEFEFF3.toInt())
+                setImageBitmap(bmp)
                 layoutParams = LinearLayout.LayoutParams(cellW, cellW).apply {
                     marginEnd = if (j % 3 < 2) gap else 0
                 }
@@ -1189,19 +1155,15 @@ class QuickCheckinFragment : Fragment() {
                         // v1.4.0：管理删除模式下点图片即弹出删除确认（与"点图片删除"提示一致）
                         onLongClick.invoke(path)
                     } else {
-                        val full = try { BitmapFactory.decodeFile(path) } catch (_: Exception) { null }
-                        if (full != null) {
-                            val big = ImageView(ctx).apply {
-                                setImageBitmap(full); adjustViewBounds = true
-                                maxHeight = dp(600); maxWidth = dp(320)
-                            }
-                            AlertDialog.Builder(ctx).setView(big).setPositiveButton("关闭", null).show()
+                        val big = ImageView(ctx).apply {
+                            setImageBitmap(bmp); adjustViewBounds = true
+                            maxHeight = dp(600); maxWidth = dp(320)
                         }
+                        AlertDialog.Builder(ctx).setView(big).setPositiveButton("关闭", null).show()
                     }
                 }
                 if (onLongClick != null) setOnLongClickListener { onLongClick.invoke(path); true }
             }
-            loadThumb(iv, path)
             row?.addView(iv)
         }
         return grid
@@ -1388,21 +1350,17 @@ class QuickCheckinFragment : Fragment() {
                                 marginEnd = if (j % 3 < 2) gap else 0
                             }
                             scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                            setBackgroundColor(0xFFEFEFF3.toInt())
+                            setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
                             setOnClickListener {
-                                val full = try { android.graphics.BitmapFactory.decodeFile(path) } catch (_: Exception) { null }
-                                if (full != null) {
-                                    val big = android.widget.ImageView(ctx).apply {
-                                        setImageBitmap(full)
-                                        adjustViewBounds = true
-                                        maxHeight = dp(600); maxWidth = dp(320)
-                                    }
-                                    android.app.AlertDialog.Builder(ctx).setView(big)
-                                        .setPositiveButton("关闭", null).show()
+                                val big = android.widget.ImageView(ctx).apply {
+                                    setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
+                                    adjustViewBounds = true
+                                    maxHeight = dp(600); maxWidth = dp(320)
                                 }
+                                android.app.AlertDialog.Builder(ctx).setView(big)
+                                    .setPositiveButton("关闭", null).show()
                             }
                         }
-                        loadThumb(iv, path)
                         row?.addView(iv)
                     }
                     wrap.addView(grid)
