@@ -115,6 +115,9 @@ class ItemListFragment : Fragment() {
         val c = ItemConfig.parse(item.configJson)
         // v1.3.14：打卡组在列表显示"打卡组"标签（组本身无独立打卡方式）
         if (c.groupMode) return "打卡组"
+        // 日记记录的四种块是内置的，不把内部方式名当成标签展示
+        if (c.journalMode) return if (c.moodMode) "心情日记" else "随心记"
+        if (c.ndaysMode) return "习惯打卡 · ${c.ndaysTarget} 天"
         val labels = c.methods.mapNotNull { Method.of(it)?.label?.removeSuffix("打卡") }
         return labels.joinToString("+").ifBlank { "普通" }
     }
