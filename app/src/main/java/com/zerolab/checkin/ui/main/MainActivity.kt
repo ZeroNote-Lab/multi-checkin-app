@@ -29,6 +29,24 @@ class MainActivity : AppCompatActivity() {
 
     private var nfcPending: PendingIntent? = null
 
+    private val autoHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    /** 冷启动先让打卡页出首帧，再把自动打卡/负打卡结算放到后台，避免与页面快照抢数据库 */
+    private val autoTask = Runnable {
+        thread {
+            val repo = (application as CheckinApp).repository
+            val done = CheckinEngine.tryAutoAll(repo)
+            // v1.3.7：负打卡机会结算（幂等补发破戒机会；负打卡无成功打卡动作，发放只能在页面结算）
+            try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
+            if (done.isNotEmpty()) {
+                runOnUiThread {
+                    Toast.makeText(this, "⚡ ${done.joinToString("、")} 已自动完成", Toast.LENGTH_SHORT).show()
+                    // 通知当前快捷页刷新
+                    (frags[R.id.nav_quick] as? QuickCheckinFragment)?.refresh()
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -38,36 +56,52 @@ class MainActivity : AppCompatActivity() {
         try { rootFind() } catch (_: Exception) {}
         ThemeUi.tintBottomNav(nav, ThemeUi.current(this))
 
-        if (savedInstanceState == null) {
-            frags[R.id.nav_quick] = QuickCheckinFragment()
-            frags[R.id.nav_item_list] = ItemListFragment()
-            frags[R.id.nav_settings] = SettingsFragment()
-            val tx = supportFragmentManager.beginTransaction()
-            frags.forEach { (id, f) -> tx.add(R.id.fragment_container, f, id.toString()).hide(f) }
-            tx.commitNow()
-            switchTo(R.id.nav_quick)
-        } else {
-            // 进程重建：从 FragmentManager 恢复已存在的实例，避免 frags 为空导致刷新失效（状态栏残留旧数据）
-            frags[R.id.nav_quick] = supportFragmentManager.findFragmentByTag(R.id.nav_quick.toString()) ?: QuickCheckinFragment()
-            frags[R.id.nav_item_list] = supportFragmentManager.findFragmentByTag(R.id.nav_item_list.toString()) ?: ItemListFragment()
-            frags[R.id.nav_settings] = supportFragmentManager.findFragmentByTag(R.id.nav_settings.toString()) ?: SettingsFragment()
-            // hide/show 状态不会随重建恢复，重新隐藏非当前页
-            val cur = nav.selectedItemId.let { if (it != 0) it else R.id.nav_quick }
-            val tx = supportFragmentManager.beginTransaction()
-            frags.forEach { (id, f) -> if (id == cur) tx.show(f) else tx.hide(f) }
-            tx.commitNowAllowingStateLoss()
-            currentId = cur
+        if (savedInstanceState != null) {
+            // 进程重建：恢复 FragmentManager 里已有的页面
+            listOf(R.id.nav_quick, R.id.nav_item_list, R.id.nav_settings).forEach { id ->
+                (supportFragmentManager.findFragmentByTag(id.toString()) as? Fragment)?.let { frags[id] = it }
+            }
         }
+        // v1.4.3：只创建当前 tab 的 Fragment，列表页/设置页按需创建。
+        // 冷启动不再同时跑「快捷页快照 + 列表页所有打卡项连续天数 + 设置页」三份数据加载。
+        val cur = if (savedInstanceState != null) {
+            nav.selectedItemId.let { if (it == 0) R.id.nav_quick else it }
+        } else R.id.nav_quick
+        val target = ensureFragment(cur)
+        val tx = supportFragmentManager.beginTransaction()
+        tx.show(target)
+        frags.forEach { (id, f) -> if (id != cur) tx.hide(f) }
+        tx.commitNowAllowingStateLoss()
+        currentId = cur
+        if (nav.selectedItemId != cur) nav.menu.findItem(cur).isChecked = true
 
         nav.setOnItemSelectedListener { item ->
             switchTo(item.itemId); true
         }
     }
 
+    /** 按需创建 tab 页：冷启动只创建快捷页，其它页首次切换过去时再创建 */
+    private fun ensureFragment(id: Int): Fragment {
+        frags[id]?.let { return it }
+        val f: Fragment = when (id) {
+            R.id.nav_item_list -> ItemListFragment()
+            R.id.nav_settings -> SettingsFragment()
+            else -> QuickCheckinFragment()
+        }
+        frags[id] = f
+        supportFragmentManager.beginTransaction()
+            .add(R.id.fragment_container, f, id.toString())
+            .hide(f)
+            .commitNowAllowingStateLoss()
+        return f
+    }
+
     private fun switchTo(id: Int) {
         if (id == currentId) return
+        val target = ensureFragment(id)
         val tx = supportFragmentManager.beginTransaction()
-        frags.forEach { entry -> if (entry.key == id) tx.show(entry.value) else tx.hide(entry.value) }
+        tx.show(target)
+        frags.forEach { entry -> if (entry.key != id) tx.hide(entry.value) }
         tx.commitNowAllowingStateLoss()
         currentId = id
         if (nav.selectedItemId != id) nav.menu.findItem(id).isChecked = true
@@ -103,24 +137,14 @@ class MainActivity : AppCompatActivity() {
         }
         lastThemeId = curTheme
         enableNfcForeground()
-        // 前台触发自动打卡（冷启动 / 回前台）
-        thread {
-            val repo = (application as CheckinApp).repository
-            val done = CheckinEngine.tryAutoAll(repo)
-            // v1.3.7：负打卡机会结算（幂等补发破戒机会；负打卡无成功打卡动作，发放只能在页面结算）
-            try { CheckinEngine.settleNegativeOffsets(repo) } catch (_: Exception) {}
-            if (done.isNotEmpty()) {
-                runOnUiThread {
-                    Toast.makeText(this, "⚡ ${done.joinToString("、")} 已自动完成", Toast.LENGTH_SHORT).show()
-                    // 通知当前快捷页刷新
-                    (frags[R.id.nav_quick] as? QuickCheckinFragment)?.refresh()
-                }
-            }
-        }
+        // 前台触发自动打卡（冷启动 / 回前台）：延后 600ms，先让快捷页首帧/缓存快照出来
+        autoHandler.removeCallbacks(autoTask)
+        autoHandler.postDelayed(autoTask, 600L)
     }
 
     override fun onPause() {
         super.onPause()
+        autoHandler.removeCallbacks(autoTask)
         try { NfcAdapter.getDefaultAdapter(this)?.disableForegroundDispatch(this) } catch (_: Exception) {}
     }
 

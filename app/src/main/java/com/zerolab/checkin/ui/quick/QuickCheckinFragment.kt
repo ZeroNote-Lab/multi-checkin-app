@@ -126,6 +126,34 @@ class QuickCheckinFragment : Fragment() {
 
         /** 最近打开过的打卡页快照：同一项/同一月再次进入时先秒开，再后台刷新 */
         private val snapshotCache = android.util.LruCache<String, PageSnapshot>(8)
+
+        /** 进程被杀后的磁盘快照：冷启动也能先按上次界面秒开 */
+        private fun snapshotFile(ctx: android.content.Context, key: String): File =
+            File(File(ctx.cacheDir, "checkin_snapshots"), key.replace('|', '_') + ".snap")
+
+        private fun loadSnapshotDisk(ctx: android.content.Context, key: String): PageSnapshot? {
+            val f = snapshotFile(ctx, key)
+            if (!f.exists()) return null
+            return try {
+                java.io.ObjectInputStream(f.inputStream().buffered()).use {
+                    @Suppress("UNCHECKED_CAST")
+                    it.readObject() as PageSnapshot
+                }
+            } catch (_: Exception) {
+                try { f.delete() } catch (_: Exception) {}
+                null
+            }
+        }
+
+        private fun saveSnapshotDisk(ctx: android.content.Context, key: String, snap: PageSnapshot) {
+            try {
+                val f = snapshotFile(ctx, key)
+                f.parentFile?.mkdirs()
+                java.io.ObjectOutputStream(f.outputStream().buffered()).use { it.writeObject(snap) }
+            } catch (e: Exception) {
+                android.util.Log.w("SnapshotCache", "save failed: $key", e)
+            }
+        }
     }
 
     /** 当前 UI 已经画出来的快照（用于后台刷新结果未变化时跳过第二次绘制） */
@@ -324,6 +352,7 @@ class QuickCheckinFragment : Fragment() {
         renderMonthTitle()
         val key = snapshotKey(q.id, showYear, showMonth, if (calendar.weekMode) calendar.weekAnchor else null)
         val cached = snapshotCache.get(key)
+            ?: loadSnapshotDisk(requireContext().applicationContext, key)?.also { snapshotCache.put(key, it) }
         if (cached != null && cached.effToday == effTodayNow) {
             // 命中缓存：立即按上次内容绘制，后台快照刷新时若数据没变就不重复绘制
             appliedKey = key
@@ -391,7 +420,7 @@ class QuickCheckinFragment : Fragment() {
         val total: Int,
         val streak: Int,
         val doneToday: Boolean
-    )
+    ) : java.io.Serializable
 
     /** 一屏所需的所有数据：全部在后台线程计算，UI 线程只负责画 */
     private data class PageSnapshot(
@@ -405,7 +434,7 @@ class QuickCheckinFragment : Fragment() {
         val monthMap: Map<String, DayInfo>,
         val groupScheduled: Boolean,
         val groupMembers: List<GroupMemberSnap>
-    )
+    ) : java.io.Serializable
 
     /**
      * 触发一次后台快照。多次调用以最后一次为准（generation 校验丢弃过期结果），
@@ -425,7 +454,8 @@ class QuickCheckinFragment : Fragment() {
             if (gen != snapshotGen) return@execute
             val snap = try {
                 gatherSnapshot(q, c, year, month, weekAnchor)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.w("SnapshotCache", "gather failed", e)
                 null
             }
             if (snap == null) {
@@ -437,6 +467,8 @@ class QuickCheckinFragment : Fragment() {
                 }
                 return@execute
             }
+            // 写入磁盘快照：杀进程后再打开同一项/同一月可先秒开
+            context?.applicationContext?.let { try { saveSnapshotDisk(it, cacheKey, snap) } catch (_: Exception) {} }
             if (gen != snapshotGen) return@execute
             activity?.runOnUiThread {
                 if (!isAdded || gen != snapshotGen) return@runOnUiThread

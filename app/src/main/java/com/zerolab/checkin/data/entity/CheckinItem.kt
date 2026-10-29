@@ -21,4 +21,4 @@ data class CheckinItem(
     val lastEditDate: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
-)
+) : java.io.Serializable

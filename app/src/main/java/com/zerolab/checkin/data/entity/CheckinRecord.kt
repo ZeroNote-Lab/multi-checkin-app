@@ -21,4 +21,4 @@ data class CheckinRecord(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val extraJson: String? = null
-)
+) : java.io.Serializable

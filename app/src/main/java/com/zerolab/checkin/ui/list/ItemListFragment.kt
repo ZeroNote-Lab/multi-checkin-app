@@ -76,6 +76,8 @@ class ItemListFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
+        // 隐藏页不刷新：冷启动/切到其它 tab 时避免和快捷页快照抢数据库
+        if (!isVisible) return
         reload()
     }
 

@@ -17,7 +17,7 @@ data class DayInfo(
     val isAuto: Boolean,
     val records: List<CheckinRecord>,
     val finalToday: Boolean = false   // v1.1.7：当天已定论（固定时间段超时未打卡当天即红）
-)
+) : java.io.Serializable
 
 sealed class CheckinResult {
     data class Ok(val date: String, val status: String, val recordId: Long) : CheckinResult()
