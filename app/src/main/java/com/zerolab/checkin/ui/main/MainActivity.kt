@@ -95,6 +95,12 @@ class MainActivity : AppCompatActivity() {
     private var lastThemeId: String? = null
     override fun onResume() {
         super.onResume()
+        // 后台计步：若用户开启过，回到前台时尝试恢复服务
+        try {
+            if (com.zerolab.checkin.util.StepStore.isEnabled(this)) {
+                com.zerolab.checkin.step.StepCounterService.start(this)
+            }
+        } catch (_: Exception) {}
         val curTheme = GlobalThemeManager.get(this)
         if (lastThemeId != null && lastThemeId != curTheme) {
             lastThemeId = curTheme

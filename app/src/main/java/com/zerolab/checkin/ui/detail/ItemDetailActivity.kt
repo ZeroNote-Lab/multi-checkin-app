@@ -62,7 +62,7 @@ class ItemDetailActivity : AppCompatActivity() {
         if (!cfg.journalMode) sb.appendLine("负打卡（状态反转）：${if (cfg.negative) "是" else "否"}")
         if (cfg.textMinWords > 0 && Method.TEXT.key in cfg.methods) sb.appendLine("文字最低字数：${cfg.textMinWords}")
         if (Method.LOCATION.key in cfg.methods) {
-            sb.appendLine("位置负打卡：${if (cfg.locNegative) "是（离开范围有效）" else "否（范围内有效）"}")
+            sb.appendLine("位置判定：${if (cfg.locNegative) "离开打卡点范围才算成功" else "在打卡点范围内才算成功"}")
             cfg.locPoints.forEach { sb.appendLine("  · ${it.name} ${formatLatLng(it.lat, it.lng)} 半径${it.radius}m") }
         }
         if (Method.STEPS.key in cfg.methods) sb.appendLine("目标步数：${cfg.stepTarget}")

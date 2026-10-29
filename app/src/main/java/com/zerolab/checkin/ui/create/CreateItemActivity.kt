@@ -862,6 +862,9 @@ class CreateItemActivity : AppCompatActivity() {
         refreshAll()
     }
 
+    /** 定位请求序号：取消后旧结果直接丢弃，避免卡在「获取中」 */
+    private var locationSeq = 0
+
     /**
      * v1.4.3：设定标准点。
      * 先实时定位；开启联网增强时列出「当前定位 + 附近地点」供校准（防止定位偏移把标准点设错），
@@ -872,9 +875,23 @@ class CreateItemActivity : AppCompatActivity() {
             toast("需要定位权限")
             return
         }
-        val loading = android.app.AlertDialog.Builder(this).setMessage("正在获取实时位置…").setCancelable(false).show()
+        val seq = ++locationSeq
+        val loading = android.app.AlertDialog.Builder(this)
+            .setMessage("正在获取实时定位…\n不使用历史缓存，最多等待 20 秒；可点「取消」返回")
+            .setCancelable(true)
+            .setNegativeButton("取消") { d, _ ->
+                locationSeq++
+                try { d.dismiss() } catch (_: Exception) {}
+            }
+            .create()
+        loading.setOnCancelListener { locationSeq++ }
+        loading.show()
         thread {
             val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
+            if (seq != locationSeq) {
+                runOnUiThread { try { loading.dismiss() } catch (_: Exception) {} }
+                return@thread
+            }
             if (fix == null) {
                 runOnUiThread {
                     try { loading.dismiss() } catch (_: Exception) {}
@@ -888,6 +905,10 @@ class CreateItemActivity : AppCompatActivity() {
                 } else null
             } catch (_: Exception) { null }
             runOnUiThread {
+                if (seq != locationSeq) {
+                    try { loading.dismiss() } catch (_: Exception) {}
+                    return@runOnUiThread
+                }
                 try { loading.dismiss() } catch (_: Exception) {}
                 if (detail == null) {
                     // 未开启联网增强 / 地名解析失败：用实时定位做标准点

@@ -312,20 +312,51 @@ class JournalEditActivity : AppCompatActivity() {
     }
 
     // ---- 定位（v1.4.2：实时定位，不再读历史缓存） ----
+    /** 定位请求序号：取消后旧结果丢弃，避免界面卡在「获取中」 */
+    private var locationSeq = 0
+
     private fun doLocate() {
-        val loading = AlertDialog.Builder(this).setMessage("正在获取实时位置…").setCancelable(false).show()
+        val seq = ++locationSeq
+        val loading = AlertDialog.Builder(this)
+            .setMessage("正在获取实时定位…\n不使用历史缓存，最多等待 20 秒；可点「取消」返回")
+            .setCancelable(true)
+            .setNegativeButton("取消") { d, _ ->
+                locationSeq++
+                try { d.dismiss() } catch (_: Exception) {}
+            }
+            .create()
+        loading.setOnCancelListener { locationSeq++ }
+        loading.show()
         thread {
             val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
             main.post {
+                if (seq != locationSeq) {
+                    try { loading.dismiss() } catch (_: Exception) {}
+                    return@post
+                }
                 try { loading.dismiss() } catch (_: Exception) {}
                 if (fix == null) { toast("无法获取实时定位，请到室外/窗边重试"); return@post }
                 // 解析地名 + 周边地点（定位有偏移时可手动改选）
-                val locLoading = AlertDialog.Builder(this).setMessage("正在获取位置名称…").setCancelable(false).show()
+                val locSeq = locationSeq
+                val locLoading = AlertDialog.Builder(this)
+                    .setMessage("正在获取位置名称…\n可点「取消」返回")
+                    .setCancelable(true)
+                    .setNegativeButton("取消") { d, _ ->
+                        locationSeq++
+                        try { d.dismiss() } catch (_: Exception) {}
+                    }
+                    .create()
+                locLoading.setOnCancelListener { locationSeq++ }
+                locLoading.show()
                 thread {
                     val detail = try {
                         if (NetGeo.enabled(this)) NetGeo.regeoDetail(this, fix.lat, fix.lng) else null
                     } catch (_: Exception) { null }
                     main.post {
+                        if (locSeq != locationSeq) {
+                            try { locLoading.dismiss() } catch (_: Exception) {}
+                            return@post
+                        }
                         try { locLoading.dismiss() } catch (_: Exception) {}
                         if (detail == null) {
                             replaceLocationBlock("当前位置", fix.lat, fix.lng)

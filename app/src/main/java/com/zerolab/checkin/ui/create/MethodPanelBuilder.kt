@@ -82,7 +82,7 @@ class MethodPanelBuilder(
             }
             Method.LOCATION -> {
                 box.addView(CheckBox(ctx).apply {
-                    text = "负打卡：离开标准点即破戒"; isChecked = target.locNegative; setTextColor(0xFF1F2430.toInt())
+                    text = "离开打卡点范围才算成功（在范围内不算完成）"; isChecked = target.locNegative; setTextColor(0xFF1F2430.toInt())
                     setOnCheckedChangeListener { _, on -> target.locNegative = on }
                 })
                 val tv = TextView(ctx).apply {
