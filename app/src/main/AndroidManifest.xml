@@ -1,22 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-
-    <!-- Health Connect 客户端库 minSdk 26；低版本运行时通过 SDK 判断跳过，不影响 24/25 -->
-    <uses-sdk tools:overrideLibrary="androidx.health.connect.client" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- 步数打卡：Android 10 起读取计步传感器（STEP_COUNTER / STEP_DETECTOR）需要「身体活动」权限 -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <!-- Health Connect：读取「今日 0 点起」的步数（系统健康数据） -->
-    <uses-permission android:name="android.permission.health.READ_STEPS" />
-    <!-- 可选「后台计步」前台服务 -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -60,29 +49,9 @@
         <activity android:name=".ui.detail.ItemCheckinActivity" android:exported="false" />
         <activity android:name=".ui.settings.ExportActivity" android:exported="false" />
         <activity android:name=".ui.settings.ImportActivity" android:exported="false" />
-        <!-- 增强服务页：同时作为 Health Connect 的权限说明页 -->
-        <activity android:name=".ui.settings.NetGeoActivity" android:exported="true">
-            <intent-filter>
-                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
-            </intent-filter>
-        </activity>
+        <activity android:name=".ui.settings.NetGeoActivity" android:exported="false" />
         <activity android:name=".ui.settings.ThemeActivity" android:exported="false" />
         <activity android:name=".ui.scan.ScanActivity" android:exported="false" android:screenOrientation="portrait" />
-
-        <!-- 可选：后台计步（前台服务，常驻低优先级通知） -->
-        <service
-            android:name=".step.StepCounterService"
-            android:exported="false"
-            android:foregroundServiceType="health" />
-        <receiver
-            android:name=".step.StepBootReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

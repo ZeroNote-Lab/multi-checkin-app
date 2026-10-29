@@ -43,8 +43,10 @@ object CheckinEngine {
      * v1.4.2：某天是否处于「停用」区间。停用期间不记缺卡、不计连续，直到重新启用。
      * 兼容旧数据：停用中但没有区间记录时，从最后更新时间起视为停用。
      */
-    fun isPausedOn(item: CheckinItem, date: String): Boolean {
-        val c = cfg(item)
+    fun isPausedOn(item: CheckinItem, date: String): Boolean = isPausedOn(item, date, cfg(item))
+
+    /** 性能优化：批量计算连续天数时复用同一份配置 */
+    fun isPausedOn(item: CheckinItem, date: String, c: ItemConfig): Boolean {
         if (isPausedOn(c, date)) return true
         if (item.isActive == 0 && c.pausedRanges.isEmpty()) {
             return date >= DateUtils.dateOf(item.updatedAt)
@@ -63,8 +65,10 @@ object CheckinEngine {
 
     // ---------- 打卡日期判定（v6.1.0） ----------
     /** 某天是否属于该打卡项的需打卡日；false = 无需打卡（SKIP）。v1.2.0：随心记排期失效，恒为需打卡日；v1.3.0：心情日记同 */
-    fun isScheduledDay(item: CheckinItem, date: String): Boolean {
-        val c = cfg(item)
+    fun isScheduledDay(item: CheckinItem, date: String): Boolean = isScheduledDay(item, date, cfg(item))
+
+    /** 性能优化：连续天数批量计算时复用同一份配置，避免逐日反序列化 configJson */
+    fun isScheduledDay(item: CheckinItem, date: String, c: ItemConfig): Boolean {
         if (c.journalMode || c.moodMode) return true
         return when (c.scheduleMode) {
             "WEEKDAYS" -> DateUtils.weekdayOf(date) in c.weekDays
@@ -72,7 +76,7 @@ object CheckinEngine {
             "BIGSMALL" -> {
                 val dow = DateUtils.weekdayOf(date)
                 if (dow >= 6) {                                       // 周六：大周需打卡；周日：总是休息
-                    dow == 6 && isBigWeek(item, date)
+                    dow == 6 && isBigWeek(item, date, c)
                 } else true                                           // 周一~五总是需打卡
             }
             else -> true                                              // DAILY 每天
@@ -80,16 +84,14 @@ object CheckinEngine {
     }
 
     /** 大小周：该日期所在周是否为「大周」（大周=单休，周六需打卡） */
-    private fun isBigWeek(item: CheckinItem, date: String): Boolean {
-        val c = cfg(item)
+    private fun isBigWeek(item: CheckinItem, date: String, c: ItemConfig): Boolean {
         val createWeek = DateUtils.weekIndex(DateUtils.dateOf(item.createdAt))
         val diff = DateUtils.weekIndex(date) - createWeek
         return if (c.bigSmallStart == "BIG") diff % 2L == 0L else diff % 2L != 0L
     }
 
     // ---------- 单日状态 ----------
-    fun dayInfo(item: CheckinItem, date: String, records: List<CheckinRecord>, today: String = effectiveToday(cfg(item))): DayInfo {
-        val c = cfg(item)
+    fun dayInfo(item: CheckinItem, date: String, records: List<CheckinRecord>, today: String = effectiveToday(item), c: ItemConfig = cfg(item)): DayInfo {
         val neg = isNegative(c)
         val auto = records.any { it.isAuto == 1 }
         val offset = records.any { it.status == "OFFSET" }
@@ -101,7 +103,7 @@ object CheckinEngine {
             date < created && records.isEmpty() -> DayInfo(date, DayState.FUTURE, 0, false, records)
             date > today -> DayInfo(date, DayState.FUTURE, records.size, auto, records)
             // v1.4.2：停用期间且当天没有记录 → 置空（不记缺卡）；停用当天已有记录仍按记录展示
-            isPausedOn(item, date) && records.isEmpty() ->
+            isPausedOn(item, date, c) && records.isEmpty() ->
                 DayInfo(date, DayState.INACTIVE, 0, false, records)
             offset -> DayInfo(date, DayState.OFFSET, records.size, auto, records)
             // v1.3.15：打卡组——当日有成功记录=已打卡；否则未打卡（组无负打卡/无 SKIP 染色）
@@ -113,7 +115,7 @@ object CheckinEngine {
                 val success = records.any { it.status == "SUCCESS" }
                 DayInfo(date, if (success) DayState.SUCCESS else DayState.UNCHECKED, records.size, auto, records)
             }
-            !isScheduledDay(item, date) -> DayInfo(date, DayState.SKIP, records.size, auto, records) // 无需打卡日
+            !isScheduledDay(item, date, c) -> DayInfo(date, DayState.SKIP, records.size, auto, records) // 无需打卡日
             records.isNotEmpty() -> {
                 // v1.2.0 组合方式（多开关）：当天成功 = 完成方式数 >= comboRequired（0=全部），否则视为进行中
                 val req = if (c.comboRequired in 1..methods.size) c.comboRequired else methods.size
@@ -163,35 +165,12 @@ object CheckinEngine {
     }
 
     /** 某天是否算"成功"（用于连续天数） */
-    private fun dayIsSuccess(item: CheckinItem, date: String, repo: CheckinStore, today: String): Boolean {
-        if (date < DateUtils.dateOf(item.createdAt)) return false // 创建日之前不计入连续
-        val c = cfg(item)
-        // v1.3.15：打卡组非排期日视为成功，不中断连续
-        if (c.groupMode && !isScheduledDay(item, date)) return true
-        val recs = repo.recordsOfDay(item.id, date)
-        val info = dayInfo(item, date, recs, today)
-        if (info.state == DayState.SKIP) return true // 无需打卡日视为成功，不中断连续
-        if (date == today && recs.isEmpty()) return false // 今天未定论不计入
-        // 补签（OFFSET）算进连续天数：补签把断的那天补上，连续不中断（v1.1.3）
-        return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
-    }
-
     /** 连续成功天数（停用区间不计入、也不打断，恢复后接着算） */
     fun streak(item: CheckinItem, repo: CheckinStore, today: String = effectiveToday(item)): Int {
-        var d = today
-        // v1.3.1：负打卡破戒当天立即归零（破戒是主动失败、当天已成事实，不再从昨日回溯）
-        if (isNegative(cfg(item)) && !isPausedOn(item, d) &&
-            repo.recordsOfDay(item.id, d).any { it.status == "FAIL" }) return 0
-        // 今天未定论则从昨天起算
-        if (!dayIsSuccess(item, d, repo, today)) d = DateUtils.addDays(d, -1)
-        var n = 0
-        var guard = 0
-        // 上限保护，最多回溯 3660 天；停用日跳过（不计数、不中断）
-        while (guard++ < 3660) {
-            if (isPausedOn(item, d)) { d = DateUtils.addDays(d, -1); continue }
-            if (dayIsSuccess(item, d, repo, today)) { n++; d = DateUtils.addDays(d, -1) } else return n
-        }
-        return n
+        val c = cfg(item)
+        // 性能：一次取出全部记录，在内存里逐日回溯，避免每天一次数据库查询 + 一次 config 解析
+        val byDay = repo.allRecords(item.id).groupBy { it.checkinDate }
+        return countStreak(item, c, today, byDay, DateUtils.dateOf(item.createdAt))
     }
 
     /** v1.2.0 随心记记录天数：有成功记录的去重天数（断签不归零、只增不减；PAUSED 暂停记录不计） */
@@ -206,14 +185,41 @@ object CheckinEngine {
     private fun milestoneStreak(item: CheckinItem, repo: CheckinStore, today: String): Int {
         val c = cfg(item)
         val start = c.offset.anchorDate.ifBlank { DateUtils.dateOf(item.createdAt) }
+        val byDay = repo.allRecords(item.id).groupBy { it.checkinDate }
+        return countStreak(item, c, today, byDay, start)
+    }
+
+    /**
+     * 从 [today] 往回数连续成功天数，[startDate] 之前停止。
+     * 记录已按日期分组传入，整个循环不再访问数据库。
+     */
+    private fun countStreak(
+        item: CheckinItem,
+        c: ItemConfig,
+        today: String,
+        byDay: Map<String, List<CheckinRecord>>,
+        startDate: String
+    ): Int {
+        val created = DateUtils.dateOf(item.createdAt)
+        fun recs(d: String) = byDay[d] ?: emptyList<CheckinRecord>()
+        fun success(d: String): Boolean {
+            if (d < created) return false
+            // v1.3.15：打卡组非排期日视为成功，不中断连续
+            if (c.groupMode && !isScheduledDay(item, d, c)) return true
+            val info = dayInfo(item, d, recs(d), today, c)
+            if (info.state == DayState.SKIP) return true
+            if (d == today && recs(d).isEmpty()) return false
+            return info.state == DayState.SUCCESS || info.state == DayState.OFFSET
+        }
         var d = today
-        if (!dayIsSuccess(item, d, repo, today)) d = DateUtils.addDays(d, -1)
+        // v1.3.1：负打卡破戒当天立即归零
+        if (isNegative(c) && !isPausedOn(item, d, c) && recs(d).any { it.status == "FAIL" }) return 0
+        if (!success(d)) d = DateUtils.addDays(d, -1)
         var n = 0
         var guard = 0
-        while (guard++ < 3660) {
-            if (d < start) return n
-            if (isPausedOn(item, d)) { d = DateUtils.addDays(d, -1); continue }
-            if (dayIsSuccess(item, d, repo, today)) { n++; d = DateUtils.addDays(d, -1) } else return n
+        while (guard++ < 3660 && d >= startDate) {
+            if (isPausedOn(item, d, c)) { d = DateUtils.addDays(d, -1); continue }
+            if (success(d)) { n++; d = DateUtils.addDays(d, -1) } else return n
         }
         return n
     }

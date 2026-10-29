@@ -319,7 +319,19 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
-                        android:orientation="vertical" />
+                        android:orientation="vertical"
+                        android:visibility="gone" />
+
+                    <!-- v1.4.3：随心记四种记录块已内置，不再提供方式勾选，仅提示 -->
+                    <TextView
+                        android:id="@+id/tv_journal_builtin"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="已内置文字 / 图片 / 语音 / 位置四种记录块，无需勾选"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
 
                     <RadioButton
                         android:id="@+id/rb_journal_mood"

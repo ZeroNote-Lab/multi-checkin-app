@@ -425,12 +425,8 @@ class CreateItemActivity : AppCompatActivity() {
         methodContainer.visibility = if (journal) View.GONE else View.VISIBLE
         findViewById<View>(R.id.method_card).visibility = if (journal) View.GONE else View.VISIBLE
         if (journal) {
-            // 移到 journal_methods
-            journalMethods.forEach { k ->
-                val card = rows[k]!!.card
-                (card.parent as? android.view.ViewGroup)?.removeView(card)
-                journalMethodsBox.addView(card)
-            }
+            // v1.4.3：随心记四种记录块已内置，不再展示/搬运方式开关卡片
+            journalMethodsBox.visibility = View.GONE
         } else {
             // 移回 method_container 原位置
             journalMethods.forEach { k ->
@@ -458,6 +454,8 @@ class CreateItemActivity : AppCompatActivity() {
         }
         // v1.4.0：随心记四种方式（拍照/文字/语音/位置）全部内置，方式开关区整行隐藏
         journalMethodsBox.visibility = View.GONE
+        findViewById<View>(R.id.tv_journal_builtin).visibility =
+            if (journal && !moodMode) View.VISIBLE else View.GONE
         findViewById<View>(R.id.cb_mood_chart).visibility = if (journal && moodMode) View.VISIBLE else View.GONE
         refreshComboNRow()
     }

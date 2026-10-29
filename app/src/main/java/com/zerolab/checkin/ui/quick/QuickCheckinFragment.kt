@@ -291,7 +291,62 @@ class QuickCheckinFragment : Fragment() {
         }
         // v1.4.2 优化：月历 / 今日状态 / 记录栏的数据统一由后台快照计算完成后一次性渲染，
         // 选中日期默认落在「归属日」（时间分割时凌晨为前一天）
+        // v1.4.3 优化：先把日历格子 / 标题 / 记录栏画出来，状态颜色与统计等后台快照回来再补，
+        // 避免进入页面时先看到一片空白
+        val effTodayNow = CheckinEngine.effectiveToday(cfg)
+        calendar.selectedDate = effTodayNow
+        calendar.setData(
+            showYear, showMonth, emptyMap(), CheckinEngine.isNegative(cfg),
+            ::onCalendarDate, showBadges = !cfg.groupMode
+        )
+        renderMonthTitle()
+        showDayDetail(effTodayNow)
         requestSnapshot(resetSelection = true)
+    }
+
+    /** 日历日期点击：周视图点到相邻月份时切换显示月份，再刷新记录栏 */
+    private fun onCalendarDate(date: String) {
+        calendar.weekAnchor = date
+        if (calendar.weekMode) {
+            try {
+                val dc = Calendar.getInstance()
+                dc.time = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(date)
+                val cy = dc.get(Calendar.YEAR); val cm = dc.get(Calendar.MONTH)
+                if (cy != showYear || cm != showMonth) {
+                    showYear = cy; showMonth = cm
+                    requestSnapshot(resetSelection = false)
+                }
+            } catch (_: Exception) {}
+        }
+        showDayDetail(date)
+    }
+
+    /** 月历标题：周视图显示本周日期范围，月视图显示月份 */
+    private fun renderMonthTitle() {
+        val tv = root.findViewById<TextView>(R.id.tv_month)
+        if (calendar.weekMode) {
+            try {
+                val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                val cal = Calendar.getInstance(); cal.time = fmt.parse(calendar.weekAnchor)
+                val dow = cal.get(Calendar.DAY_OF_WEEK) // 周日=1
+                val back = if (dow == Calendar.SUNDAY) 6 else dow - Calendar.MONDAY
+                cal.add(Calendar.DAY_OF_MONTH, -back)
+                val monday = cal.timeInMillis
+                cal.add(Calendar.DAY_OF_MONTH, 6)
+                val sunday = cal.timeInMillis
+                val mFmt = java.text.SimpleDateFormat("M月d日", java.util.Locale.US)
+                val mondayStr = mFmt.format(java.util.Date(monday))
+                val sundayCal = Calendar.getInstance(); sundayCal.timeInMillis = sunday
+                val mondayCal = Calendar.getInstance(); mondayCal.timeInMillis = monday
+                tv.text = if (sundayCal.get(Calendar.MONTH) == mondayCal.get(Calendar.MONTH)) {
+                    "$mondayStr – ${sundayCal.get(Calendar.DAY_OF_MONTH)}日"
+                } else {
+                    "$mondayStr – ${mFmt.format(java.util.Date(sunday))}"
+                }
+            } catch (_: Exception) {}
+        } else {
+            tv.text = DateUtils.monthTitle(showYear, showMonth)
+        }
     }
 
     // ---------- v1.4.2 优化：页面数据快照 ----------
@@ -492,53 +547,14 @@ class QuickCheckinFragment : Fragment() {
     /** 主线程：月历标题 / 图例 / 圆圈状态（状态数据来自后台快照） */
     private fun renderMonthData(snap: PageSnapshot) {
         // v1.4.0：周视图标题显示本周日期范围（10月19日 – 25日）
-        if (calendar.weekMode) {
-            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-            val cal = Calendar.getInstance(); cal.time = fmt.parse(calendar.weekAnchor)
-            // 周一=1 ... 周日=7，回退到本周周一
-            val dow = cal.get(Calendar.DAY_OF_WEEK) // 周日=1
-            val back = if (dow == Calendar.SUNDAY) 6 else dow - Calendar.MONDAY
-            cal.add(Calendar.DAY_OF_MONTH, -back)
-            val monday = cal.timeInMillis
-            cal.add(Calendar.DAY_OF_MONTH, 6)
-            val sunday = cal.timeInMillis
-            val mFmt = java.text.SimpleDateFormat("M月d日", java.util.Locale.US)
-            val mondayStr = mFmt.format(java.util.Date(monday))
-            val sundayCal = Calendar.getInstance(); sundayCal.timeInMillis = sunday
-            val sMonth = sundayCal.get(Calendar.MONTH)
-            val mondayCal = Calendar.getInstance(); mondayCal.timeInMillis = monday
-            val title = if (sMonth == mondayCal.get(Calendar.MONTH)) {
-                "$mondayStr – ${sundayCal.get(Calendar.DAY_OF_MONTH)}日"
-            } else {
-                "$mondayStr – ${mFmt.format(java.util.Date(sunday))}"
-            }
-            root.findViewById<TextView>(R.id.tv_month).text = title
-        } else {
-            root.findViewById<TextView>(R.id.tv_month).text = DateUtils.monthTitle(snap.year, snap.month)
-        }
+        renderMonthTitle()
         val groupMode = cfg.groupMode
         // v1.3.15：打卡组用小日历（紧凑高度），普通打卡保持大日历
         val lp = calendar.layoutParams
         lp.height = ((if (groupMode) 188 else 300) * resources.displayMetrics.density).toInt()
         calendar.layoutParams = lp
         // v1.3.15：组日历不显示 ⚡/×n 圆外小标记
-        calendar.setData(snap.year, snap.month, snap.monthMap, CheckinEngine.isNegative(cfg), { date ->
-            calendar.weekAnchor = date
-            // v1.4.2 修复：周视图点到相邻月份的日期时，把显示月份切到该日期所在月，
-            // 否则 weekAnchor 不在当前月网格里，下一帧会定位到错误的一周。
-            if (calendar.weekMode) {
-                try {
-                    val dc = Calendar.getInstance()
-                    dc.time = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(date)
-                    val cy = dc.get(Calendar.YEAR); val cm = dc.get(Calendar.MONTH)
-                    if (cy != snap.year || cm != snap.month) {
-                        showYear = cy; showMonth = cm
-                        requestSnapshot(resetSelection = false)
-                    }
-                } catch (_: Exception) {}
-            }
-            showDayDetail(date)
-        }, showBadges = !groupMode)
+        calendar.setData(snap.year, snap.month, snap.monthMap, CheckinEngine.isNegative(cfg), ::onCalendarDate, showBadges = !groupMode)
         // 图例（v1.1.7：○今日未打卡第一位、彩色圆小号色点、两行间距加宽；v1.3.0：随心记/心情日记按实际改图例）
         val legendTv = root.findViewById<TextView>(R.id.tv_legend)
         if (groupMode) { legendTv.visibility = View.GONE; return }   // v1.3.15：打卡组日历不需要图注
@@ -1408,13 +1424,18 @@ class QuickCheckinFragment : Fragment() {
         // v1.3.8：负打卡不自动补历史破戒日——破戒当天由盾牌直接抵消（蓝卡），历史破戒只支持手动补签
         if (CheckinEngine.isNegative(c)) return
         val created = DateUtils.dateOf(q.createdAt)
-        var d = DateUtils.addDays(CheckinEngine.effectiveToday(c), -1)
+        val today = CheckinEngine.effectiveToday(c)
+        var d = DateUtils.addDays(today, -1)
+        // 性能：一次取出记录后逐日判断；机会数也在内存里递减，避免每天查库
+        val byDay = repo.allRecords(q.id).groupBy { r -> r.checkinDate }
+        var credits = repo.availableCredits(q.id)
         var guard = 0
-        while (d >= created && guard++ < 400) {
-            if (repo.availableCredits(q.id) <= 0) break
-            val recs = repo.recordsOfDay(q.id, d)
-            val st = CheckinEngine.dayInfo(q, d, recs).state
-            if (st == DayState.FAIL) CheckinEngine.offsetBackfill(q, repo, d)
+        while (d >= created && guard++ < 400 && credits > 0) {
+            val recs = byDay[d] ?: emptyList()
+            val st = CheckinEngine.dayInfo(q, d, recs, today, c).state
+            if (st == DayState.FAIL) {
+                if (CheckinEngine.offsetBackfill(q, repo, d)) credits-- else break
+            }
             d = DateUtils.addDays(d, -1)
         }
     }

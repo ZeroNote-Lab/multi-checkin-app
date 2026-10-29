@@ -35,9 +35,7 @@ import com.zerolab.checkin.util.AudioRecorder
 import com.zerolab.checkin.util.ChinaCoord
 import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.FreshLocation
-import com.zerolab.checkin.util.HealthSteps
 import com.zerolab.checkin.util.NetGeo
-import com.zerolab.checkin.util.StepStore
 import com.zerolab.checkin.util.formatLatLng
 import com.zerolab.checkin.util.ImageUtil
 import java.io.File
@@ -702,126 +700,17 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         return 2 * r * atan2(sqrt(a), sqrt(1 - a))
     }
 
-    // ---------- 步数（Health Connect 今日步数 → 后台计步 → 实时传感器兜底） ----------
+    // ---------- 步数（读取本机计步传感器；Android 10+ 需要「身体活动」权限） ----------
     /** 步数所需运行时权限：Android 10 (API 29) 起为 ACTIVITY_RECOGNITION；更早系统无需权限 */
     private fun stepsPermission(): String? =
         if (Build.VERSION.SDK_INT >= 29) Manifest.permission.ACTIVITY_RECOGNITION else null
 
     private fun doSteps() {
         val c = cfg ?: return
-        val target = c.stepTarget.coerceAtLeast(1)
-        // 优先读系统健康数据（Health Connect）：这是唯一能拿到「0 点起」今日步数的来源
-        var cancelled = false
-        val loading = AlertDialog.Builder(ctx)
-            .setMessage("正在读取今日步数…\n可点「取消」返回")
-            .setCancelable(true)
-            .setNegativeButton("取消") { d, _ ->
-                cancelled = true
-                try { d.dismiss() } catch (_: Exception) {}
-            }
-            .create()
-        loading.setOnCancelListener { cancelled = true }
-        loading.show()
-        thread {
-            val healthSteps = try {
-                if (HealthSteps.isAvailable(ctx) && HealthSteps.hasPermission(ctx)) {
-                    HealthSteps.readTodaySteps(ctx)
-                } else null
-            } catch (_: Exception) { null }
-            main.post {
-                try { loading.dismiss() } catch (_: Exception) {}
-                if (cancelled) return@post
-                if (healthSteps != null) showHealthSteps(target, healthSteps)
-                else showBackgroundOrSensorSteps(target)
-            }
-        }
+        showSensorSteps(c.stepTarget.coerceAtLeast(1))
     }
 
-    /** Health Connect 今日步数弹窗（可刷新） */
-    private fun showHealthSteps(target: Int, initial: Long) {
-        var steps = initial
-        val tv = TextView(ctx).apply {
-            textSize = 18f; gravity = Gravity.CENTER; setPadding(0, 36, 0, 36)
-            text = healthStepsText(steps, target)
-        }
-        val dlg = AlertDialog.Builder(ctx)
-            .setTitle("步数打卡（目标 $target 步）").setView(tv)
-            .setCancelable(true)
-            .setNegativeButton("改用其他来源") { _, _ -> showBackgroundOrSensorSteps(target) }
-            .setNeutralButton("刷新", null)
-            .setPositiveButton("确认打卡", null)
-            .create()
-        dlg.show()
-        val pos = dlg.getButton(AlertDialog.BUTTON_POSITIVE)
-        pos.isEnabled = steps >= target
-        pos.setOnClickListener { dlg.dismiss(); stepSuccess() }
-        dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-            val b = it as Button
-            b.isEnabled = false
-            tv.text = "正在读取今日步数…"
-            thread {
-                val n = try { HealthSteps.readTodaySteps(ctx) } catch (_: Exception) { null }
-                main.post {
-                    b.isEnabled = true
-                    if (n == null) { tv.text = "读取失败，请稍后再试"; return@post }
-                    steps = n
-                    tv.text = healthStepsText(steps, target)
-                    pos.isEnabled = steps >= target
-                }
-            }
-        }
-    }
-
-    private fun healthStepsText(steps: Long, target: Int): String {
-        val head = "今日步数（系统健康数据）：$steps / $target 步"
-        return if (steps >= target) "$head\n已达标 ✓，点击「确认打卡」完成"
-        else "$head\n还差 ${target - steps} 步（可走动后点「刷新」）"
-    }
-
-    /** 后台计步数据 / 实时传感器兜底 */
-    private fun showBackgroundOrSensorSteps(target: Int) {
-        val bg = try { StepStore.todayStepsOrNull(ctx) } catch (_: Exception) { null }
-        if (bg == null) { showSensorSteps(target); return }
-        val tv = TextView(ctx).apply {
-            textSize = 18f; gravity = Gravity.CENTER; setPadding(0, 36, 0, 36)
-            text = "今日步数（后台计步）：$bg / $target 步"
-        }
-        val dlg = AlertDialog.Builder(ctx)
-            .setTitle("步数打卡（目标 $target 步）").setView(tv)
-            .setCancelable(true)
-            .setNegativeButton("取消", null)
-            .setNeutralButton("改用实时传感器", null)
-            .setPositiveButton("确认打卡", null)
-            .create()
-        dlg.show()
-        val pos = dlg.getButton(AlertDialog.BUTTON_POSITIVE)
-        pos.isEnabled = bg >= target
-        val handler = android.os.Handler(ctx.mainLooper)
-        val poll = object : Runnable {
-            override fun run() {
-                if (!dlg.isShowing) return
-                val n = try { StepStore.todayStepsOrNull(ctx) } catch (_: Exception) { null }
-                if (n == null) {
-                    tv.text = "后台计步已停止；可取消后改用实时传感器"
-                    pos.isEnabled = false
-                    return
-                }
-                tv.text = if (n >= target)
-                    "今日步数（后台计步）：$n / $target 步\n已达标 ✓，点击「确认打卡」完成"
-                else "今日步数（后台计步）：$n / $target 步\n还差 ${target - n} 步"
-                pos.isEnabled = n >= target
-                handler.postDelayed(this, 1000L)
-            }
-        }
-        handler.postDelayed(poll, 1000L)
-        pos.setOnClickListener { handler.removeCallbacks(poll); dlg.dismiss(); stepSuccess() }
-        dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-            handler.removeCallbacks(poll); dlg.dismiss(); showSensorSteps(target)
-        }
-        dlg.setOnDismissListener { handler.removeCallbacks(poll) }
-    }
-
-    /** 实时传感器兜底（当天首次打开起；设备重启/跨天自动重设基准） */
+    /** 实时传感器（当天首次步数打卡起；设备重启/跨天自动重设基准） */
     private fun showSensorSteps(target: Int) {
         val perm = stepsPermission()
         if (perm != null && ContextCompat.checkSelfPermission(ctx, perm) != PackageManager.PERMISSION_GRANTED) {
@@ -837,7 +726,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 .setPositiveButton("知道了", null).show()
             return
         }
-        // 今日步数基准：TYPE_STEP_COUNTER 返回「开机以来累计步数」，这里以当天首次打开 App 时的值为基准；
+        // 今日步数基准：TYPE_STEP_COUNTER 返回「开机以来累计步数」，这里以当天第一次步数打卡时的值为基准；
         // 设备重启后计数会归零，检测到当前值小于基准时自动重设，避免一直为 0。
         val prefs = ctx.getSharedPreferences("steps_today", Context.MODE_PRIVATE)
         val today = DateUtils.today()
@@ -878,11 +767,11 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 tv.text = "正在读取计步器…"
             } else if (walked >= target) {
                 tv.text = if (useDetector) "本次打开起已走 $walked 步，达标 ✓\n点击「确认打卡」完成"
-                else "自今日首次打开起 $walked 步，达标 ✓\n点击「确认打卡」完成"
+                else "自当天首次步数打卡起 $walked 步，达标 ✓\n点击「确认打卡」完成"
                 posBtn.isEnabled = true
             } else {
                 tv.text = if (useDetector) "本次打开起已走 $walked / $target 步"
-                else "自今日首次打开起 $walked / $target 步"
+                else "自当天首次步数打卡起 $walked / $target 步"
             }
         }
         listener = object : android.hardware.SensorEventListener {

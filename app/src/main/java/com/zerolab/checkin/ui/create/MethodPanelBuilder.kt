@@ -120,7 +120,7 @@ class MethodPanelBuilder(
                 row.addView(TextView(ctx).apply { text = " 步"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
                 box.addView(row)
                 box.addView(TextView(ctx).apply {
-                    text = "读取系统计步传感器；今日步数以当天首次打开 App 时的读数为基准。Android 10+ 需要「身体活动」权限。"
+                    text = "从当天第一次步数打卡开始计步；手机关机或重启后计步器会归零，当天已计步数会重新开始（需重新累计）。"
                     textSize = 11f; setTextColor(0xFF9AA1B2.toInt()); setPadding(0, dp(6), 0, 0)
                 })
             }
