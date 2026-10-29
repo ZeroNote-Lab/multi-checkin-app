@@ -100,7 +100,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         if (granted) doVoice() else toast("需要录音权限才能语音打卡")
     }
     private val permSensor = fragment.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) doSteps() else toast("需要身体传感器权限才能步数打卡")
+        if (granted) doSteps() else toast("需要「身体活动」权限才能读取步数，请在系统设置中开启")
     }
     // 系统相机 TakePicture（v1.3.5 应用内相机已回退：系统自带相机可直接用）
     private val takePhoto = fragment.registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
@@ -307,7 +307,11 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             Method.PHOTO.key -> ensure(Manifest.permission.CAMERA, permCamera) { doPhoto() }
             Method.LOCATION.key -> ensure(Manifest.permission.ACCESS_FINE_LOCATION, permLocation) { doLocation() }
             Method.VOICE.key -> ensure(Manifest.permission.RECORD_AUDIO, permAudio) { doVoice() }
-            Method.STEPS.key -> ensure(Manifest.permission.BODY_SENSORS, permSensor) { doSteps() }
+            Method.STEPS.key -> {
+                // Android 10+ 读取计步传感器需要「身体活动」权限（旧系统无需权限）
+                val p = stepsPermission()
+                if (p == null) doSteps() else ensure(p, permSensor) { doSteps() }
+            }
             Method.TIMER.key -> doTimer()
             Method.QRCODE.key -> doQr()
             Method.NFC.key -> doNfc()
@@ -573,26 +577,9 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         if (c.locPoints.isEmpty()) { toast("位置打卡需先配置一个标准位置"); return }
 
         val n = nearestOf(c, fix.lat, fix.lng)
-        if (!NetGeo.enabled(ctx)) {
-            showRawDecision(c, fix, n)
-            return
-        }
-        // 联网增强：地址 + 周边地点一起取，定位有偏移时可手动改选附近建筑
-        val loading = AlertDialog.Builder(ctx)
-            .setMessage("正在获取地址与附近地点…").setCancelable(false).show()
-        thread {
-            val detail = try { NetGeo.regeoDetail(ctx, fix.lat, fix.lng) } catch (_: Exception) { null }
-            main.post {
-                try { loading.dismiss() } catch (_: Exception) {}
-                if (detail == null) {
-                    // 地名解析失败不影响打卡：按经纬度继续
-                    toast("地址解析失败，已按经纬度继续")
-                    showRawDecision(c, fix, n)
-                } else {
-                    showLocationPicker(c, fix, n, detail)
-                }
-            }
-        }
+        // 位置打卡必须以实时定位为准，不允许手动改点（否则位置打卡失去意义）。
+        // 「附近地点」选择只在随心记记录位置、以及创建标准点时提供。
+        showRawDecision(c, fix, n)
     }
 
     /** 随心记位置：有联网增强时列出附近地点供选择 */
@@ -622,7 +609,7 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         }
     }
 
-    /** 无联网增强（或解析失败）时的原始坐标确认框 */
+    /** 无联网增强（或解析失败）时的原始坐标确认框；联网增强开启时只异步补显示地址，不允许改点 */
     private fun showRawDecision(c: ItemConfig, fix: FreshLocation.Fix, n: Nearest) {
         val msg = locationMessage(c, fix, n)
         if (!passes(c, n)) {
@@ -631,58 +618,25 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 .setPositiveButton("知道了", null).show()
             return
         }
-        AlertDialog.Builder(ctx).setTitle("位置符合要求").setMessage(msg)
+        var address: String? = null
+        val dialog = AlertDialog.Builder(ctx).setTitle("位置符合要求").setMessage(msg)
             .setNegativeButton("取消", null)
             .setPositiveButton("使用该位置") { _, _ ->
-                locName = null
+                locName = address
                 lat = fix.lat; lng = fix.lng
                 stepSuccess()
             }.show()
-    }
-
-    /** 联网增强下的位置确认：当前定位 + 周边地点，可手动校准 */
-    private fun showLocationPicker(
-        c: ItemConfig,
-        fix: FreshLocation.Fix,
-        n: Nearest,
-        detail: NetGeo.GeoDetail
-    ) {
-        val info = locationMessage(c, fix, n) +
-                "\n\n如果定位有偏移，可选择附近地点："
-        LocationPickerDialog.show(
-            ctx, "确认打卡位置", info, detail, fix.lat, fix.lng,
-            onRetry = { doLocation() }
-        ) { name, wLat, wLng ->
-            val isCurrent = wLat == fix.lat && wLng == fix.lng
-            val n2 = nearestOf(c, wLat, wLng)
-            if (!passes(c, n2)) {
-                showOutOfRange(c, fix, n2, detail, if (isCurrent) null else name)
-                return@show
+        if (NetGeo.enabled(ctx)) {
+            // 只补一个地名用于展示 / 记录，坐标始终是当前实时定位
+            thread {
+                val addr = try { NetGeo.regeo(ctx, fix.lat, fix.lng) } catch (_: Exception) { null }
+                if (addr.isNullOrBlank()) return@thread
+                main.post {
+                    address = addr
+                    try { dialog.setMessage(msg + "\n地址：$addr") } catch (_: Exception) {}
+                }
             }
-            lat = wLat; lng = wLng
-            locName = name
-            stepSuccess()
         }
-    }
-
-    /** 选择的地点不满足范围要求：可直接重新选择或重新定位 */
-    private fun showOutOfRange(
-        c: ItemConfig,
-        fix: FreshLocation.Fix,
-        n: Nearest,
-        detail: NetGeo.GeoDetail,
-        pickedName: String?
-    ) {
-        val head = if (pickedName != null)
-            "「$pickedName」距最近设定点 ${"%.0f".format(n.dist)} 米，不符合范围要求。"
-        else
-            "当前定位不在允许范围内。"
-        AlertDialog.Builder(ctx)
-            .setTitle("位置不符合要求")
-            .setMessage(head + "\n\n" + locationMessage(c, fix, n))
-            .setNegativeButton("重新选择") { _, _ -> showLocationPicker(c, fix, n, detail) }
-            .setPositiveButton("重新定位") { _, _ -> doLocation() }
-            .show()
     }
 
     private fun nearestOf(c: ItemConfig, la: Double, ln: Double): Nearest {
@@ -717,33 +671,46 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         return 2 * r * atan2(sqrt(a), sqrt(1 - a))
     }
 
-    // ---------- 步数（读取真实计步传感器，显示今日步数，达标后才可确认） ----------
+    // ---------- 步数（读取真实计步传感器；Android 10+ 需要「身体活动」权限） ----------
+    /** 步数所需运行时权限：Android 10 (API 29) 起为 ACTIVITY_RECOGNITION；更早系统无需权限 */
+    private fun stepsPermission(): String? =
+        if (Build.VERSION.SDK_INT >= 29) Manifest.permission.ACTIVITY_RECOGNITION else null
+
     private fun doSteps() {
         val c = cfg ?: return
+        // 权限兜底：从组合卡片等其他入口进来时再检查一次
+        val perm = stepsPermission()
+        if (perm != null && ContextCompat.checkSelfPermission(ctx, perm) != PackageManager.PERMISSION_GRANTED) {
+            toast("需要「身体活动」权限才能读取步数")
+            return
+        }
         val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
         val stepCounter = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER)
         val stepDetector = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_DETECTOR)
         if (stepCounter == null && stepDetector == null) {
             AlertDialog.Builder(ctx).setTitle("步数打卡")
-                .setMessage("目标步数：${c.stepTarget} 步。\n此设备不支持计步传感器，无法完成步数打卡。")
+                .setMessage("目标步数：${c.stepTarget} 步。\n此设备没有计步传感器，无法使用步数打卡。")
                 .setPositiveButton("知道了", null).show()
             return
         }
-        // 今日步数基准：TYPE_STEP_COUNTER 返回开机累计值，用「当天首次打开」的值作为基准，
-        // 跨天自动重置；若设备 STEP_COUNTER 不上报事件，则回退 STEP_DETECTOR 逐步入账（从本次打开起计）。
+        val target = c.stepTarget.coerceAtLeast(1)
+        // 今日步数基准：TYPE_STEP_COUNTER 返回「开机以来累计步数」，这里以当天首次打开 App 时的值为基准；
+        // 设备重启后计数会归零，检测到当前值小于基准时自动重设，避免一直为 0。
         val prefs = ctx.getSharedPreferences("steps_today", Context.MODE_PRIVATE)
         val today = DateUtils.today()
         var base = prefs.getLong("base", -1L)
-        val baseDate = prefs.getString("baseDate", "")
-        if (baseDate != today) base = -1L
+        if (prefs.getString("baseDate", "") != today) base = -1L
 
         var listener: android.hardware.SensorEventListener? = null
-        val sensorNames = listOfNotNull(stepCounter?.let { "计步器" }, stepDetector?.let { "步数检测器" }).joinToString(" + ")
+        val sensorNames = listOfNotNull(
+            stepCounter?.let { "计步器" },
+            stepDetector?.let { "步数检测器" }
+        ).joinToString(" + ")
         val tv = TextView(ctx).apply {
             textSize = 18f; gravity = Gravity.CENTER; setPadding(0, 36, 0, 36)
             text = "已连接：$sensorNames\n正在等待计步数据…\n（静止时无数据，请走动几步）"
         }
-        val dlg = AlertDialog.Builder(ctx).setTitle("步数打卡（目标 ${c.stepTarget} 步）").setView(tv)
+        val dlg = AlertDialog.Builder(ctx).setTitle("步数打卡（目标 $target 步）").setView(tv)
             .setCancelable(false)
             .setNegativeButton("取消") { _, _ -> listener?.let { sm.unregisterListener(it) } }
             .setPositiveButton("确认打卡", null)
@@ -752,24 +719,27 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
         val posBtn = dlg.getButton(AlertDialog.BUTTON_POSITIVE)
         posBtn.isEnabled = false
         posBtn.setOnClickListener {
-            listener?.let { sm.unregisterListener(it) }; dlg.dismiss(); stepSuccess()
+            listener?.let { sm.unregisterListener(it) }
+            dlg.dismiss()
+            stepSuccess()
         }
         var baseRef = base
         var counterWalked: Long? = null
         var detCount = 0
         var useDetector = false
         var gotEvent = false
+        var registered = 0
         val updateUi = {
             val walked = counterWalked ?: (if (useDetector) detCount.toLong() else null)
             if (walked == null) {
                 tv.text = "正在读取计步器…"
-            } else if (walked >= c.stepTarget) {
+            } else if (walked >= target) {
                 tv.text = if (useDetector) "本次打开起已走 $walked 步，达标 ✓\n点击「确认打卡」完成"
-                else "今日 $walked 步，达标 ✓\n点击「确认打卡」完成"
+                else "自今日首次打开起 $walked 步，达标 ✓\n点击「确认打卡」完成"
                 posBtn.isEnabled = true
             } else {
-                tv.text = if (useDetector) "本次打开起已走 $walked / ${c.stepTarget} 步"
-                else "今日 $walked / ${c.stepTarget} 步"
+                tv.text = if (useDetector) "本次打开起已走 $walked / $target 步"
+                else "自今日首次打开起 $walked / $target 步"
             }
         }
         listener = object : android.hardware.SensorEventListener {
@@ -778,7 +748,8 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
                 when (e.sensor.type) {
                     android.hardware.Sensor.TYPE_STEP_COUNTER -> {
                         val v = e.values.firstOrNull()?.toLong() ?: return
-                        if (baseRef < 0) {
+                        // 首次 / 跨天 / 设备重启（计数值回退）时重设基准
+                        if (baseRef < 0 || v < baseRef) {
                             baseRef = v
                             prefs.edit().putLong("base", v).putString("baseDate", today).apply()
                         }
@@ -794,16 +765,28 @@ class CheckinFlow(private val fragment: Fragment, private val onDone: () -> Unit
             override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
         }
         try {
-            if (stepCounter != null) sm.registerListener(listener!!, stepCounter, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, main)
-            if (stepDetector != null) sm.registerListener(listener!!, stepDetector, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, main)
-        } catch (e: SecurityException) {
-            tv.text = "未授予身体传感器权限，无法读取步数"
+            if (stepCounter != null &&
+                sm.registerListener(listener!!, stepCounter, android.hardware.SensorManager.SENSOR_DELAY_NORMAL, main)) {
+                registered++
+            }
+            if (stepDetector != null &&
+                sm.registerListener(listener!!, stepDetector, android.hardware.SensorManager.SENSOR_DELAY_NORMAL, main)) {
+                registered++
+            }
+        } catch (_: SecurityException) {
+            tv.text = "没有「身体活动」权限，无法读取步数。\n请到 系统设置 → 应用 → 打卡 → 权限 中开启后重试"
         } catch (_: Exception) {
             tv.text = "计步传感器启动失败，请重试"
         }
-        // 5 秒无任何传感器事件：提示用户走动（部分设备需实际走步后才上报首个事件）
+        if (registered == 0) {
+            tv.text = "系统未允许读取计步数据。\n请确认已授予「身体活动 / 运动与健身」权限后重试"
+            return
+        }
+        // 5 秒无任何传感器事件：提示走动（部分设备需实际走步后才上报首个事件）
         android.os.Handler(ctx.mainLooper).postDelayed({
-            if (!gotEvent) tv.text = "尚无计步数据，请走动几步后再看\n（此设备静止时不统计步数，走动即开始计数）"
+            if (!gotEvent) {
+                tv.text = "尚无计步数据，请走动几步后再看\n（若已走动仍无数据，请检查「身体活动」权限）"
+            }
         }, 5000)
     }
     // ---------- 时间打卡（v1.2.0：倒计时 / 正计时 / 暂停保存续时；v1.3.6：强制模式离屏作废） ----------

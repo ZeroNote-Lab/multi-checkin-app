@@ -32,7 +32,7 @@ class MethodPanelBuilder(
 
     /** 该方式是否有可配置参数（决定是否展开面板 / 显示 ⚙） */
     fun hasConfig(m: Method): Boolean = when (m) {
-        Method.PHOTO, Method.TEXT, Method.LOCATION, Method.TIMER,
+        Method.PHOTO, Method.TEXT, Method.LOCATION, Method.STEPS, Method.TIMER,
         Method.QRCODE, Method.NFC, Method.VOICE -> true
         else -> false
     }
@@ -96,9 +96,32 @@ class MethodPanelBuilder(
                 refreshLoc()
                 box.addView(tv)
                 box.addView(Button(ctx).apply {
-                    text = "获取当前位置作为标准点"; textSize = 13f
+                    text = "选择标准位置（可校准偏移）"; textSize = 13f
                     layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) }
                     setOnClickListener { fetchLocation(target, tv) { refreshLoc() } }
+                })
+            }
+            Method.STEPS -> {
+                val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                row.addView(TextView(ctx).apply { text = "目标步数 "; textSize = 14f; setTextColor(0xFF1F2430.toInt()) })
+                val et = EditText(ctx).apply {
+                    setText("${target.stepTarget}"); inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    textSize = 14f; background = ctx.getDrawable(R.drawable.bg_input)
+                    layoutParams = LinearLayout.LayoutParams(dp(110), LinearLayout.LayoutParams.WRAP_CONTENT)
+                }
+                et.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun onTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) {
+                        s?.toString()?.toIntOrNull()?.let { target.stepTarget = it.coerceIn(100, 200000) }
+                    }
+                })
+                row.addView(et)
+                row.addView(TextView(ctx).apply { text = " 步"; textSize = 14f; setTextColor(0xFF6E7F78.toInt()) })
+                box.addView(row)
+                box.addView(TextView(ctx).apply {
+                    text = "读取系统计步传感器；今日步数以当天首次打开 App 时的读数为基准。Android 10+ 需要「身体活动」权限。"
+                    textSize = 11f; setTextColor(0xFF9AA1B2.toInt()); setPadding(0, dp(6), 0, 0)
                 })
             }
             Method.TIMER -> {

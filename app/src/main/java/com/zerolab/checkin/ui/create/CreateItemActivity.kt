@@ -687,15 +687,6 @@ class CreateItemActivity : AppCompatActivity() {
                     refreshConflicts()
                     return@setOnCheckedChangeListener
                 }
-                if (on && m.key == Method.STEPS.key && m.key !in cfg.methods) {
-                    // v6.1.0：步数功能开发中，新建/新开启时固定关闭并提示
-                    sw.isChecked = false
-                    panel.visibility = View.GONE
-                    cfg.methods.remove(m.key)
-                    toast("该功能开发中")
-                    refreshConflicts()
-                    return@setOnCheckedChangeListener
-                }
                 if (on && findViewById<CompoundButton>(R.id.cb_time_window).isChecked && m.key == Method.AUTO.key) {
                     // v1.1.7：固定时间段已开启时点自动打卡 → 互斥提示
                     sw.isChecked = false
@@ -752,7 +743,7 @@ class CreateItemActivity : AppCompatActivity() {
     /**
      * 每个打卡方式一张卡片、一行（左 emoji+名称，右 Switch），竖排；无 ⚙。
      * v1.3.24：勾选可配置方式后配置内联展开在卡片下方（方案B）；普通打卡与其它方式互斥（只按钮置灰但可点，
-     * 点击切换并提示）；空选择兜底普通；步数打卡开发中禁用。
+     * 点击切换并提示）；空选择兜底普通。
      * @param sel 已选方式集合（直接读写）
      * @param target 配置对象（内联配置写入）
      * @param onChanged 方式变化后的回调（如刷新更多区可用性）
@@ -778,9 +769,8 @@ class CreateItemActivity : AppCompatActivity() {
                     val lb = labels[m.key] ?: return@forEach
                     val selected = m.key in sel
                     val blocked = !selected && m.key != Method.NORMAL.key && Method.NORMAL.key in sel
-                    val stepDisabled = m.key == Method.STEPS.key
-                    val disabled = blocked || stepDisabled
-                    sw.isEnabled = !stepDisabled && !locked   // v1.3.24：互斥仅视觉置灰（只按钮灰、文字不变灰），保持可点击；v1.3.32：已锁定保持禁用
+                    val disabled = blocked
+                    sw.isEnabled = !locked   // v1.3.24：互斥仅视觉置灰（只按钮灰、文字不变灰），保持可点击；v1.3.32：已锁定保持禁用
                     sw.alpha = if (disabled || locked) 0.4f else 1f
                     if (sw.isChecked != selected) sw.isChecked = selected
                     lb.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
@@ -837,12 +827,6 @@ class CreateItemActivity : AppCompatActivity() {
                 if (refreshing) return@setOnCheckedChangeListener
                 val mk = m.key
                 if (on) {
-                    if (mk == Method.STEPS.key) {
-                        toast("该功能开发中")
-                        refreshing = true; sw.isChecked = false; refreshing = false
-                        refreshAll()
-                        return@setOnCheckedChangeListener
-                    }
                     if (mk == Method.NORMAL.key) {
                         sel.clear(); sel.add(Method.NORMAL.key)
                     } else {
@@ -878,7 +862,11 @@ class CreateItemActivity : AppCompatActivity() {
         refreshAll()
     }
 
-    /** v1.3.19：弹窗内获取当前位置并加入 target 的标准点列表；v1.4.2：实时定位，不再读历史缓存 */
+    /**
+     * v1.4.3：设定标准点。
+     * 先实时定位；开启联网增强时列出「当前定位 + 附近地点」供校准（防止定位偏移把标准点设错），
+     * 选中后以该地点的名称和坐标作为标准点（不是创建时的原始坐标），再填写半径。
+     */
     private fun fetchLocationInDialog(target: ItemConfig, tv: TextView, onDone: () -> Unit) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             toast("需要定位权限")
@@ -887,30 +875,77 @@ class CreateItemActivity : AppCompatActivity() {
         val loading = android.app.AlertDialog.Builder(this).setMessage("正在获取实时位置…").setCancelable(false).show()
         thread {
             val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
+            if (fix == null) {
+                runOnUiThread {
+                    try { loading.dismiss() } catch (_: Exception) {}
+                    toast("定位失败（未使用历史缓存），请到室外/窗边重试")
+                }
+                return@thread
+            }
+            val detail = try {
+                if (com.zerolab.checkin.util.NetGeo.enabled(this)) {
+                    com.zerolab.checkin.util.NetGeo.regeoDetail(this, fix.lat, fix.lng)
+                } else null
+            } catch (_: Exception) { null }
             runOnUiThread {
                 try { loading.dismiss() } catch (_: Exception) {}
-                if (fix == null) { toast("定位失败（未使用历史缓存），请到室外/窗边重试"); return@runOnUiThread }
-                val etR = EditText(this).apply {
-                    inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                    setText("200"); textSize = 14f; setPadding(24, 18, 24, 18)
-                    background = getDrawable(R.drawable.bg_input); setTextColor(0xFF1F2430.toInt())
+                if (detail == null) {
+                    // 未开启联网增强 / 地名解析失败：用实时定位做标准点
+                    askRadiusAndAdd(target, tv, onDone, null, fix.lat, fix.lng, fix.sourceText())
+                } else {
+                    com.zerolab.checkin.ui.flow.LocationPickerDialog.show(
+                        this, "选择标准位置",
+                        "当前地址：${detail.address.ifBlank { "未知" }}\n如定位有偏移，可选择附近地点作为标准点：",
+                        detail, fix.lat, fix.lng,
+                        onRetry = { fetchLocationInDialog(target, tv, onDone) }
+                    ) { name, la, ln ->
+                        askRadiusAndAdd(target, tv, onDone, name, la, ln, null)
+                    }
                 }
-                val box2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(52, 4, 52, 0) }
-                box2.addView(etR)
-                android.app.AlertDialog.Builder(this)
-                    .setTitle("确认作为标准位置？")
-                    .setMessage("位置：${formatLatLng(fix.lat, fix.lng)}\n定位来源：${fix.sourceText()}\n允许半径（米，50-5000，默认200）")
-                    .setView(box2)
-                    .setNegativeButton("取消", null)
-                    .setPositiveButton("使用该位置") { _, _ ->
-                        val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
-                        target.locPoints.add(LocatePoint("位置${target.locPoints.size + 1}", fix.lat, fix.lng, r))
-                        tv.text = "已设定 ${target.locPoints.size} 个标准点：\n" +
-                            target.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
-                        onDone()
-                    }.show()
             }
         }
+    }
+
+    /** 标准点：确认名称 / 坐标并填写允许半径 */
+    private fun askRadiusAndAdd(
+        target: ItemConfig,
+        tv: TextView,
+        onDone: () -> Unit,
+        name: String?,
+        lat: Double,
+        lng: Double,
+        source: String?
+    ) {
+        val pointName = name?.takeIf { it.isNotBlank() } ?: "位置${target.locPoints.size + 1}"
+        val etR = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText("200"); textSize = 14f; setPadding(24, 18, 24, 18)
+            background = getDrawable(R.drawable.bg_input); setTextColor(0xFF1F2430.toInt())
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(52, 4, 52, 0)
+        }
+        box.addView(etR)
+        val msg = buildString {
+            append("位置：").append(pointName).append("\n")
+            append(formatLatLng(lat, lng)).append("\n")
+            if (!source.isNullOrBlank()) append("定位来源：").append(source).append("\n")
+            append("允许半径（米，50-5000，默认200）")
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("确认标准位置")
+            .setMessage(msg)
+            .setView(box)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
+                target.locPoints.add(LocatePoint(pointName, lat, lng, r))
+                tv.text = "已设定 ${target.locPoints.size} 个标准点：\n" +
+                    target.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
+                onDone()
+                toast("已添加标准点：$pointName")
+            }.show()
     }
 
     /** v1.3.19：弹窗内绑定 NFC 标签（写 target） */
@@ -1169,36 +1204,9 @@ class CreateItemActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun fetchLocation() {
-        val loading = android.app.AlertDialog.Builder(this).setMessage("正在获取实时位置…").setCancelable(false).show()
-        thread {
-            val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
-            runOnUiThread {
-                try { loading.dismiss() } catch (_: Exception) {}
-                if (fix == null) { toast("定位失败（未使用历史缓存），请到室外/窗边重试"); return@runOnUiThread }
-                val etR = EditText(this).apply {
-                    inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                    setText("200"); textSize = 14f; setPadding(24, 18, 24, 18)
-                    background = getDrawable(R.drawable.bg_input); setTextColor(0xFF1F2430.toInt())
-                }
-                // v6.1.0：输入框与上方说明文字对齐，不再占满弹窗
-                val box = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(52, 4, 52, 0)
-                }
-                box.addView(etR)
-                android.app.AlertDialog.Builder(this)
-                    .setTitle("确认作为标准位置？")
-                    .setMessage("位置：${formatLatLng(fix.lat, fix.lng)}\n定位来源：${fix.sourceText()}\n允许半径（米，50-5000，默认200）")
-                    .setView(box)
-                    .setNegativeButton("取消", null)
-                    .setPositiveButton("使用该位置") { _, _ ->
-                        val r = (etR.text.toString().toIntOrNull() ?: 200).coerceIn(50, 5000)
-                        cfg.locPoints.add(LocatePoint("位置${cfg.locPoints.size + 1}", fix.lat, fix.lng, r))
-                        tvLocPoints?.text = "已设定 ${cfg.locPoints.size} 个标准点：\n" +
-                            cfg.locPoints.joinToString("\n") { p -> "· ${p.name} ${formatLatLng(p.lat, p.lng)} 半径${p.radius}m" }
-                    }.show()
-            }
-        }
+        // 兼容旧入口：与标准点选择走同一套逻辑（实时定位 + 可校准地点 + 半径）
+        val tv = tvLocPoints ?: TextView(this)
+        fetchLocationInDialog(cfg, tv) {}
     }
     // ---------- 编辑加载 ----------
 
