@@ -123,6 +123,28 @@ class QuickCheckinFragment : Fragment() {
     companion object {
         fun newInstance(itemId: Long): QuickCheckinFragment =
             QuickCheckinFragment().apply { arguments = Bundle().apply { putLong("override_id", itemId) } }
+
+        /** 最近打开过的打卡页快照：同一项/同一月再次进入时先秒开，再后台刷新 */
+        private val snapshotCache = android.util.LruCache<String, PageSnapshot>(8)
+    }
+
+    /** 当前 UI 已经画出来的快照（用于后台刷新结果未变化时跳过第二次绘制） */
+    private var appliedKey: String? = null
+    private var appliedSnap: PageSnapshot? = null
+
+    /** 快照缓存 key：打卡项 + 年月 + 周视图锚点 */
+    private fun snapshotKey(itemId: Long, year: Int, month: Int, weekAnchor: String?): String =
+        "$itemId|$year|$month|${weekAnchor ?: ""}"
+
+    /** 无缓存时只显示占位，避免同步查询 / 构建记录视图造成卡顿；真实记录由快照回来渲染一次 */
+    private fun showDayDetailPlaceholder(date: String) {
+        val title = root.findViewById<TextView>(R.id.tv_detail_title)
+        val body = root.findViewById<TextView>(R.id.tv_detail_body)
+        val recordsBox = root.findViewById<LinearLayout>(R.id.detail_records_box)
+        recordsBox.removeAllViews()
+        title.text = "📅 $date"
+        body.visibility = View.VISIBLE
+        body.text = "正在加载记录…"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -300,7 +322,18 @@ class QuickCheckinFragment : Fragment() {
             ::onCalendarDate, showBadges = !cfg.groupMode
         )
         renderMonthTitle()
-        showDayDetail(effTodayNow)
+        val key = snapshotKey(q.id, showYear, showMonth, if (calendar.weekMode) calendar.weekAnchor else null)
+        val cached = snapshotCache.get(key)
+        if (cached != null && cached.effToday == effTodayNow) {
+            // 命中缓存：立即按上次内容绘制，后台快照刷新时若数据没变就不重复绘制
+            appliedKey = key
+            appliedSnap = cached
+            applySnapshot(cached, resetSelection = true)
+        } else {
+            appliedKey = null
+            appliedSnap = null
+            showDayDetailPlaceholder(effTodayNow)
+        }
         requestSnapshot(resetSelection = true)
     }
 
@@ -386,6 +419,7 @@ class QuickCheckinFragment : Fragment() {
         val month = showMonth
         // v1.4.2 修复：周视图可能跨月，把显示周也带进快照
         val weekAnchor = if (calendar.weekMode) calendar.weekAnchor else null
+        val cacheKey = snapshotKey(q.id, year, month, weekAnchor)
         val gen = ++snapshotGen
         snapshotExec.execute {
             if (gen != snapshotGen) return@execute
@@ -393,11 +427,25 @@ class QuickCheckinFragment : Fragment() {
                 gatherSnapshot(q, c, year, month, weekAnchor)
             } catch (_: Exception) {
                 null
-            } ?: return@execute
+            }
+            if (snap == null) {
+                // 快照失败也不能让记录栏一直停在「正在加载」：退回直接读取当天记录
+                activity?.runOnUiThread {
+                    if (isAdded && gen == snapshotGen) {
+                        try { showDayDetail(CheckinEngine.effectiveToday(c)) } catch (_: Exception) {}
+                    }
+                }
+                return@execute
+            }
             if (gen != snapshotGen) return@execute
             activity?.runOnUiThread {
                 if (!isAdded || gen != snapshotGen) return@runOnUiThread
                 if (item?.id != snap.item.id) return@runOnUiThread
+                snapshotCache.put(cacheKey, snap)
+                // 命中的缓存与刷新结果完全一致时不再重建视图，避免“缓存画一次 + 刷新再画一次”
+                if (appliedKey == cacheKey && appliedSnap == snap) return@runOnUiThread
+                appliedKey = cacheKey
+                appliedSnap = snap
                 applySnapshot(snap, resetSelection)
             }
         }
