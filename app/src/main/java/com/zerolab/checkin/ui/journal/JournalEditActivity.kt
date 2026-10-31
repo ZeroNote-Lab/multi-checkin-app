@@ -26,7 +26,6 @@ import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
 import com.zerolab.checkin.data.entity.CheckinRecord
 import com.zerolab.checkin.engine.CheckinEngine
-import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.util.AudioRecorder
 import com.zerolab.checkin.util.ChinaCoord
 import com.zerolab.checkin.util.DateUtils
@@ -319,15 +318,14 @@ class JournalEditActivity : AppCompatActivity() {
     /** 定位请求序号：取消后旧结果丢弃，避免界面卡在「获取中」 */
     private var locationSeq = 0
 
-    /** v1.4.3：位置候选（历史位置 / 搜索结果），坐标为 WGS-84 */
+    /** v1.4.3：搜索/位置候选，坐标为 WGS-84 */
     private data class PlaceChoice(val name: String, val detail: String, val lat: Double, val lng: Double)
 
-    /** 位置入口：实时定位 / 复用历史位置 / 搜索地点（补记之前去过的地方） */
+    /** 位置入口：实时定位 / 搜索地点（补记之前去过的地方） */
     private fun showLocationOptions() {
         val canSearch = NetGeo.enabled(this)
         val options = arrayOf(
             "使用当前位置（实时定位）",
-            "从历史位置选择",
             if (canSearch) "搜索地点（补记之前去过的地方）" else "搜索地点（需先开启联网增强）"
         )
         AlertDialog.Builder(this)
@@ -335,63 +333,12 @@ class JournalEditActivity : AppCompatActivity() {
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> ensure(Manifest.permission.ACCESS_FINE_LOCATION, permLocation) { doLocate() }
-                    1 -> loadHistoryPlaces()
                     else -> if (canSearch) showPlaceSearch()
                     else toast("请先在「增强服务 → 联网增强」开启并填写高德 Key")
                 }
             }
             .setNegativeButton("取消", null)
             .show()
-    }
-
-    /** 收集当前随心记保存过的位置，按最近使用去重 */
-    private fun loadHistoryPlaces() {
-        val loading = AlertDialog.Builder(this)
-            .setMessage("正在读取历史位置…")
-            .setCancelable(true)
-            .create()
-        loading.show()
-        thread {
-            val places = LinkedHashMap<String, PlaceChoice>()
-            try {
-                val repo = (application as CheckinApp).repository
-                val journalItems = repo.getItems().filter {
-                    try { ItemConfig.parse(it.configJson).journalMode } catch (_: Exception) { false }
-                }
-                val records = if (journalItems.isEmpty()) repo.allRecords(itemId)
-                else journalItems.flatMap { repo.allRecords(it.id) }
-                records.sortedByDescending { it.checkinTime }.forEach { r ->
-                    val o = try { JSONObject(r.extraJson ?: "{}") } catch (_: Exception) { JSONObject() }
-                    val blocks = o.optJSONArray("blocks")
-                    var found = false
-                    if (blocks != null) {
-                        for (i in 0 until blocks.length()) {
-                            val b = blocks.optJSONObject(i) ?: continue
-                            if (b.optString("type") != "location") continue
-                            val name = b.optString("name").ifBlank { "位置" }
-                            val lat = b.optDouble("lat", 0.0)
-                            val lng = b.optDouble("lng", 0.0)
-                            if (lat == 0.0 && lng == 0.0) continue
-                            found = true
-                            val key = "%.5f|%.5f".format(lat, lng)
-                            places.putIfAbsent(key, PlaceChoice(name, formatLatLng(lat, lng), lat, lng))
-                        }
-                    }
-                    // 兼容只有经纬度、没有块流的老记录
-                    if (!found && r.latitude != null && r.longitude != null) {
-                        val lat = r.latitude!!; val lng = r.longitude!!
-                        val key = "%.5f|%.5f".format(lat, lng)
-                        places.putIfAbsent(key, PlaceChoice("历史位置", formatLatLng(lat, lng), lat, lng))
-                    }
-                }
-            } catch (_: Exception) {}
-            main.post {
-                try { loading.dismiss() } catch (_: Exception) {}
-                val list = places.values.take(40)
-                if (list.isEmpty()) toast("还没有保存过位置，可先用实时定位或搜索地点")
-                else showPlaceChoices("历史位置", list)
-            }
-        }
     }
 
     /** 搜索地点：高德 place/text，返回带完整名称/地址的 POI，避免只输入 xx 显示不对 */
@@ -491,7 +438,7 @@ class JournalEditActivity : AppCompatActivity() {
     private fun doLocate() {
         val seq = ++locationSeq
         val loading = AlertDialog.Builder(this)
-            .setMessage("正在获取实时定位…\n不使用历史缓存，最多等待 20 秒；可点「取消」返回")
+            .setMessage("正在获取实时定位…\n优先本次新定位；GPS 较弱时可能使用 30 秒内的最近定位；最多等待 20 秒，可点「取消」返回")
             .setCancelable(true)
             .setNegativeButton("取消") { d, _ ->
                 locationSeq++
@@ -501,7 +448,7 @@ class JournalEditActivity : AppCompatActivity() {
         loading.setOnCancelListener { locationSeq++ }
         loading.show()
         thread {
-            val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L) } catch (_: Exception) { null }
+            val fix = try { com.zerolab.checkin.util.FreshLocation.request(this, 20_000L, allowRecent = true) } catch (_: Exception) { null }
             main.post {
                 if (seq != locationSeq) {
                     try { loading.dismiss() } catch (_: Exception) {}
@@ -511,8 +458,8 @@ class JournalEditActivity : AppCompatActivity() {
                 if (fix == null) {
                     AlertDialog.Builder(this)
                         .setTitle("无法获取实时定位")
-                        .setMessage("可以改用历史位置，或在联网增强开启后搜索之前去过的地方。")
-                        .setPositiveButton("历史位置") { _, _ -> loadHistoryPlaces() }
+                        .setMessage("可以重新定位，或在联网增强开启后搜索之前去过的地方。")
+                        .setPositiveButton("重新定位") { _, _ -> doLocate() }
                         .setNeutralButton("搜索地点") { _, _ ->
                             if (NetGeo.enabled(this)) showPlaceSearch()
                             else toast("请先在「增强服务 → 联网增强」开启并填写高德 Key")

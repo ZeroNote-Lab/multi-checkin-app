@@ -35,6 +35,10 @@ object FreshLocation {
     private const val CLOCK_TOLERANCE_MS = 5_000L
     /** 结果最大年龄（毫秒） */
     private const val MAX_AGE_MS = 30_000L
+    /** 非严格模式（随心记）可接受的「最近一次定位」最大年龄；用于 GPS 冷启动时避免死等 20 秒 */
+    private const val RECENT_SEED_MS = 30_000L
+    /** 有最近定位垫底时，仍给新定位多少毫秒的优先时间 */
+    private const val SEED_GRACE_MS = 3_000L
 
     class Fix(
         val lat: Double,
@@ -65,15 +69,20 @@ object FreshLocation {
             ctx, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-    /** 阻塞式申请一次实时定位（必须在子线程调用）。返回 null 表示没拿到可用结果。 */
+    /** 阻塞式申请一次实时定位（必须在子线程调用）。返回 null 表示没拿到可用结果。
+     *  @param allowRecent 随心记等非范围判定场景：GPS 冷启动时允许用 30 秒内的最近定位垫底，
+     *                     只等 3 秒新结果；普通位置打卡仍只认本次请求期间的新定位。 */
     @SuppressLint("MissingPermission")
-    fun request(ctx: Context, timeoutMs: Long = 20_000L): Fix? {
+    fun request(ctx: Context, timeoutMs: Long = 20_000L, allowRecent: Boolean = false): Fix? {
         if (!hasPermission(ctx)) return null
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+        val gps = LocationManager.GPS_PROVIDER
+        val network = LocationManager.NETWORK_PROVIDER
+        // "fused" 在部分机型上能更快拿到结果；不存在时 requestLocationUpdates 会抛异常，下面已捕获
+        val fused = "fused"
         val providers = try {
-            lm.getProviders(true).filter {
-                it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER
-            }.ifEmpty { lm.getProviders(true) }
+            lm.getProviders(true).filter { it == gps || it == network || it == fused }
+                .ifEmpty { lm.getProviders(true) }
         } catch (_: Exception) {
             emptyList()
         }
@@ -82,6 +91,18 @@ object FreshLocation {
         val startedAt = System.currentTimeMillis()
         val best = AtomicReference<Location?>(null)
         val latch = CountDownLatch(1)
+
+        // 随心记：GPS 冷启动可能迟迟没有新回调，先拿 30 秒内的最近定位垫底，3 秒内有更好的再替换
+        var seeded: Location? = null
+        if (allowRecent) {
+            seeded = providers.mapNotNull { p ->
+                try { lm.getLastKnownLocation(p) } catch (_: Exception) { null }
+            }.filter { l ->
+                val age = System.currentTimeMillis() - l.time
+                age in 0..RECENT_SEED_MS && (!l.hasAccuracy() || l.accuracy <= MAX_ACCURACY_M)
+            }.maxByOrNull { it.time }
+            seeded?.let { best.set(it) }
+        }
         val listener = object : LocationListener {
             override fun onLocationChanged(l: Location) {
                 // 丢弃旧缓存回调：结果时间必须不早于本次请求（允许 5 秒时钟误差）
@@ -111,7 +132,8 @@ object FreshLocation {
         if (registered == 0) return null
 
         try {
-            latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+            val waitMs = if (seeded != null) minOf(timeoutMs, SEED_GRACE_MS) else timeoutMs
+            latch.await(waitMs, TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
