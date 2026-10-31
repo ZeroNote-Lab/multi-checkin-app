@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -25,10 +26,13 @@ import com.zerolab.checkin.CheckinApp
 import com.zerolab.checkin.R
 import com.zerolab.checkin.data.entity.CheckinRecord
 import com.zerolab.checkin.engine.CheckinEngine
+import com.zerolab.checkin.engine.ItemConfig
 import com.zerolab.checkin.util.AudioRecorder
+import com.zerolab.checkin.util.ChinaCoord
 import com.zerolab.checkin.util.DateUtils
 import com.zerolab.checkin.util.ImageUtil
 import com.zerolab.checkin.util.NetGeo
+import com.zerolab.checkin.util.formatLatLng
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -168,7 +172,7 @@ class JournalEditActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.btn_save).setOnClickListener { save() }
         findViewById<TextView>(R.id.btn_add_photo).setOnClickListener { showPhotoPicker() }
         findViewById<TextView>(R.id.btn_add_voice).setOnClickListener { ensure(Manifest.permission.RECORD_AUDIO, permAudio) { startRecording() } }
-        findViewById<TextView>(R.id.btn_add_location).setOnClickListener { ensure(Manifest.permission.ACCESS_FINE_LOCATION, permLocation) { doLocate() } }
+        findViewById<TextView>(R.id.btn_add_location).setOnClickListener { showLocationOptions() }
 
         // 初始：编辑模式用原内容，新建模式给一个空白文字块
         if (blocks.isEmpty()) blocks.add(Block.TextBlock())
@@ -315,6 +319,175 @@ class JournalEditActivity : AppCompatActivity() {
     /** 定位请求序号：取消后旧结果丢弃，避免界面卡在「获取中」 */
     private var locationSeq = 0
 
+    /** v1.4.3：位置候选（历史位置 / 搜索结果），坐标为 WGS-84 */
+    private data class PlaceChoice(val name: String, val detail: String, val lat: Double, val lng: Double)
+
+    /** 位置入口：实时定位 / 复用历史位置 / 搜索地点（补记之前去过的地方） */
+    private fun showLocationOptions() {
+        val canSearch = NetGeo.enabled(this)
+        val options = arrayOf(
+            "使用当前位置（实时定位）",
+            "从历史位置选择",
+            if (canSearch) "搜索地点（补记之前去过的地方）" else "搜索地点（需先开启联网增强）"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("添加位置")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> ensure(Manifest.permission.ACCESS_FINE_LOCATION, permLocation) { doLocate() }
+                    1 -> loadHistoryPlaces()
+                    else -> if (canSearch) showPlaceSearch()
+                    else toast("请先在「增强服务 → 联网增强」开启并填写高德 Key")
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 收集当前随心记保存过的位置，按最近使用去重 */
+    private fun loadHistoryPlaces() {
+        val loading = AlertDialog.Builder(this)
+            .setMessage("正在读取历史位置…")
+            .setCancelable(true)
+            .create()
+        loading.show()
+        thread {
+            val places = LinkedHashMap<String, PlaceChoice>()
+            try {
+                val repo = (application as CheckinApp).repository
+                val journalItems = repo.getItems().filter {
+                    try { ItemConfig.parse(it.configJson).journalMode } catch (_: Exception) { false }
+                }
+                val records = if (journalItems.isEmpty()) repo.allRecords(itemId)
+                else journalItems.flatMap { repo.allRecords(it.id) }
+                records.sortedByDescending { it.checkinTime }.forEach { r ->
+                    val o = try { JSONObject(r.extraJson ?: "{}") } catch (_: Exception) { JSONObject() }
+                    val blocks = o.optJSONArray("blocks")
+                    var found = false
+                    if (blocks != null) {
+                        for (i in 0 until blocks.length()) {
+                            val b = blocks.optJSONObject(i) ?: continue
+                            if (b.optString("type") != "location") continue
+                            val name = b.optString("name").ifBlank { "位置" }
+                            val lat = b.optDouble("lat", 0.0)
+                            val lng = b.optDouble("lng", 0.0)
+                            if (lat == 0.0 && lng == 0.0) continue
+                            found = true
+                            val key = "%.5f|%.5f".format(lat, lng)
+                            places.putIfAbsent(key, PlaceChoice(name, formatLatLng(lat, lng), lat, lng))
+                        }
+                    }
+                    // 兼容只有经纬度、没有块流的老记录
+                    if (!found && r.latitude != null && r.longitude != null) {
+                        val lat = r.latitude!!; val lng = r.longitude!!
+                        val key = "%.5f|%.5f".format(lat, lng)
+                        places.putIfAbsent(key, PlaceChoice("历史位置", formatLatLng(lat, lng), lat, lng))
+                    }
+                }
+            } catch (_: Exception) {}
+            main.post {
+                try { loading.dismiss() } catch (_: Exception) {}
+                val list = places.values.take(40)
+                if (list.isEmpty()) toast("还没有保存过位置，可先用实时定位或搜索地点")
+                else showPlaceChoices("历史位置", list)
+            }
+        }
+    }
+
+    /** 搜索地点：高德 place/text，返回带完整名称/地址的 POI，避免只输入 xx 显示不对 */
+    private fun showPlaceSearch() {
+        val input = EditText(this).apply {
+            hint = "输入地点名称，例如：西湖、XX 商场"
+            setSingleLine()
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+        }
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("搜索地点")
+            .setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("搜索", null)
+            .create()
+        dlg.show()
+        dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val kw = input.text.toString().trim()
+            if (kw.isBlank()) { toast("请输入地点名称"); return@setOnClickListener }
+            dlg.dismiss()
+            val loading = AlertDialog.Builder(this)
+                .setMessage("正在搜索「$kw」…")
+                .setCancelable(true)
+                .create()
+            loading.show()
+            thread {
+                val pois = try { NetGeo.searchPlaces(this, kw) } catch (_: Exception) { emptyList() }
+                main.post {
+                    try { loading.dismiss() } catch (_: Exception) {}
+                    if (pois.isEmpty()) {
+                        toast("没有搜到地点，请检查联网增强 / Key / 网络")
+                        return@post
+                    }
+                    val list = pois.map {
+                        val w = ChinaCoord.gcj02ToWgs84(it.lat, it.lng)
+                        val sub = listOfNotNull(
+                            it.address.takeIf { a -> a.isNotBlank() },
+                            if (it.distanceMeters > 0) "距离 ${it.distanceMeters} 米" else null
+                        ).joinToString(" · ")
+                        PlaceChoice(it.name, sub.ifBlank { "搜索结果" }, w[0], w[1])
+                    }
+                    showPlaceChoices("搜索结果：$kw", list)
+                }
+            }
+        }
+    }
+
+    /** 历史/搜索结果列表，选中后替换位置块 */
+    private fun showPlaceChoices(title: String, places: List<PlaceChoice>) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), 0)
+        }
+        var dlgRef: AlertDialog? = null
+        places.forEach { p ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                isClickable = true
+                isFocusable = true
+                setBackgroundColor(0x00000000)
+            }
+            row.addView(TextView(this).apply {
+                text = p.name
+                textSize = 15f
+                setTextColor(textMain)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            })
+            row.addView(TextView(this).apply {
+                text = p.detail
+                textSize = 12f
+                setTextColor(textSub)
+                setPadding(0, dp(3), 0, 0)
+            })
+            row.setOnClickListener {
+                dlgRef?.dismiss()
+                replaceLocationBlock(p.name, p.lat, p.lng)
+            }
+            box.addView(row)
+        }
+        val scroll = ScrollView(this).apply {
+            addView(box)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                minOf(dp(420), dp(64) * places.size.coerceAtLeast(1))
+            )
+        }
+        val dlg = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scroll)
+            .setNegativeButton("取消", null)
+            .create()
+        dlgRef = dlg
+        dlg.show()
+    }
+
     private fun doLocate() {
         val seq = ++locationSeq
         val loading = AlertDialog.Builder(this)
@@ -335,7 +508,19 @@ class JournalEditActivity : AppCompatActivity() {
                     return@post
                 }
                 try { loading.dismiss() } catch (_: Exception) {}
-                if (fix == null) { toast("无法获取实时定位，请到室外/窗边重试"); return@post }
+                if (fix == null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("无法获取实时定位")
+                        .setMessage("可以改用历史位置，或在联网增强开启后搜索之前去过的地方。")
+                        .setPositiveButton("历史位置") { _, _ -> loadHistoryPlaces() }
+                        .setNeutralButton("搜索地点") { _, _ ->
+                            if (NetGeo.enabled(this)) showPlaceSearch()
+                            else toast("请先在「增强服务 → 联网增强」开启并填写高德 Key")
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                    return@post
+                }
                 // 解析地名 + 周边地点（定位有偏移时可手动改选）
                 val locSeq = locationSeq
                 val locLoading = AlertDialog.Builder(this)
@@ -498,12 +683,41 @@ class JournalEditActivity : AppCompatActivity() {
         return wrap
     }
 
+    /** v1.4.3：全屏黑底预览，图片按屏幕缩放，不再出现只有下/左/右的白边 */
     private fun showImagePreview(path: String) {
+        val bmp = try { android.graphics.BitmapFactory.decodeFile(path) } catch (_: Exception) { null }
+        if (bmp == null) { toast("图片加载失败"); return }
         val iv = android.widget.ImageView(this).apply {
-            setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
+            setImageBitmap(bmp)
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(Color.BLACK)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            setOnClickListener { }
         }
-        AlertDialog.Builder(this).setView(iv).setPositiveButton("关闭", null).show()
+        val close = TextView(this).apply {
+            text = "✕"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setBackgroundColor(0x66000000)
+            layoutParams = FrameLayout.LayoutParams(dp(40), dp(40), Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(24); marginEnd = dp(16)
+            }
+        }
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        root.addView(iv)
+        root.addView(close)
+        val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog.setContentView(
+            root,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+        iv.setOnClickListener { dialog.dismiss() }
+        close.setOnClickListener { dialog.dismiss() }
+        dialog.show()
     }
 
     private fun renderVoiceBlock(b: Block.VoiceBlock, idx: Int): View {
@@ -584,7 +798,9 @@ class JournalEditActivity : AppCompatActivity() {
             ).apply { topMargin = dp(8) }
         }
         val tv = TextView(this).apply {
-            text = "📍 ${b.name}"
+            val coords = formatLatLng(b.lat, b.lng)
+            val label = if (b.name.isBlank() || b.name == "当前位置") "当前位置 $coords" else b.name
+            text = "📍 $label"
             setTextColor(textSub)
             setTextSize(12f)
             setPadding(dp(10), dp(6), dp(10), dp(6))

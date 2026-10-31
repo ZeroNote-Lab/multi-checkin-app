@@ -129,6 +129,36 @@ object NetGeo {
         }
     }
 
+    /**
+     * 关键字搜索地点（高德 place/text）。用于补记之前去过、但打卡时没网/没保存的位置。
+     * 返回 GCJ-02 坐标的 POI；必须在子线程调用。
+     */
+    fun searchPlaces(ctx: Context, keyword: String): List<Poi> {
+        if (!enabled(ctx) || keyword.isBlank()) return emptyList()
+        val key = apiKey(ctx)
+        var conn: java.net.HttpURLConnection? = null
+        return try {
+            val kw = java.net.URLEncoder.encode(keyword.trim(), "UTF-8")
+            val url = java.net.URL(
+                "https://restapi.amap.com/v3/place/text?keywords=$kw&offset=15&page=1&key=$key"
+            )
+            conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.requestMethod = "GET"
+            conn.useCaches = false
+            if (conn.responseCode != 200) return emptyList()
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val o = JSONObject(body)
+            if (o.optString("status") != "1") return emptyList()
+            parsePois(o.optJSONArray("pois"))
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) {}
+        }
+    }
+
     /** 解析高德 POI 数组（regeo.pois / place.pois 字段结构一致） */
     private fun parsePois(arr: org.json.JSONArray?): List<Poi> {
         if (arr == null) return emptyList()

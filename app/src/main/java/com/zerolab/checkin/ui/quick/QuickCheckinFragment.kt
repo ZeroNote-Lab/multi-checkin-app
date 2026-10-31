@@ -1467,7 +1467,12 @@ class QuickCheckinFragment : Fragment() {
                     val lat = b.optDouble("lat", 0.0)
                     val lng = b.optDouble("lng", 0.0)
                     val tv = android.widget.TextView(ctx).apply {
-                        text = "📍 ${if (name.isNotBlank()) name else "%.5f, %.5f".format(lat, lng)}"
+                        val coords = "%.5f, %.5f".format(lat, lng)
+                        text = "📍 " + when {
+                            name.isBlank() -> coords
+                            name == "当前位置" -> "当前位置 $coords"
+                            else -> name
+                        }
                         textSize = 12f
                         setTextColor(0xFF8A7B6B.toInt())
                         setPadding(0, dp(6), 0, dp(2))
